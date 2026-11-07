@@ -248,12 +248,20 @@ async function startServer() {
     });
   });
 
-  app.listen(PORT, '127.0.0.1', () => {
-    console.log(`SAS backend running at http://127.0.0.1:${PORT}`);
-  });
+return app;
 }
 
-startServer().catch((error) => {
-  console.error('Backend startup failed:', error.message);
-  process.exitCode = 1;
-});
+export const appPromise = startServer();
+
+if (process.env.VERCEL !== '1') {
+  appPromise
+    .then((app) => {
+      app.listen(PORT, '127.0.0.1', () => {
+        console.log(`SAS backend running at http://127.0.0.1:${PORT}`);
+      });
+    })
+    .catch((error) => {
+      console.error('Backend startup failed:', error.message);
+      process.exitCode = 1;
+    });
+}
