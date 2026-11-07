@@ -1,0 +1,2 @@
+<!-- Sample Master SCD exported by SAS Engineering Hub -->
+<SCL xmlns='http://www.iec.ch/61850/2003/SCL' version='2007' revision='B' release='4'><Header id='SAS_132_33_11KV_SCD'/></SCL>

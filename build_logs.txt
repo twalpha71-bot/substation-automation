@@ -1,0 +1,114 @@
+==================================================================
+1. CLEAN DEPENDENCY INSTALLATION (rm -rf node_modules dist && npm ci)
+==================================================================
+
+added 16 packages in 116ms
+
+==================================================================
+2. TYPESCRIPT TYPECHECK (npm run typecheck)
+==================================================================
+
+> sas-engineering-hub@1.0.0 typecheck
+> tsc --noEmit
+
+Exit code: 0
+
+==================================================================
+3. PRODUCTION BUILD (npm run build)
+==================================================================
+
+> sas-engineering-hub@1.0.0 build
+> vite build
+
+[36mvite v5.4.10 [32mbuilding for production...[0m
+transforming (48) modules...
+[32m✓[0m 48 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                  0.78 kB │ gzip:   0.50 kB
+dist/assets/index.css          198.64 kB │ gzip:  33.80 kB
+dist/assets/index.js         3969.33 kB │ gzip: 885.87 kB
+[32m✓ built in 7.25s[0m
+Exit code: 0
+
+==================================================================
+4. AUTOMATED FUNCTIONAL & REGRESSION TEST SUITE (npm test)
+==================================================================
+
+> sas-engineering-hub@1.0.0 test
+> node scripts/test-ccna.mjs && node scripts/test-iec.mjs && node scripts/test-regression.mjs
+
+PASS: 20 topology graphs, 11 preserved protocol scenarios, ARP/ICMP ordering, direction, broadcast fan-out, and four cable pin mappings.
+PASS: 24 distinct equipment scenes, 30 chapter mappings, local assets, PRP isolation, HSR ring, logical links, and service/media distinctions.
+PASS [SLD] Initializes 28 bays across 132 kV (5), 33 kV (11), and 11 kV (12)
+PASS [SLD] Initializes 6 busbar sections (132/33/11 kV Bus A & Bus B) and 4 transformers (T1, T2, DT1, DT2)
+PASS [SLD] Enforces CILO1 disconnector interlocking: blocks opening Q1/Q9 under load when 52 CB is CLOSED
+PASS [SLD] Permits Q1/Q9 disconnector operation & Q8 earth switch interlocking when 52 CB is OPEN
+PASS [SLD] Transformer OLTC tap changer RAISE/LOWER updates tap position (1..17) and secondary voltage
+PASS [SLD] Dynamic Bay Engineering Editor adds and removes configurable feeder bays with IED and signals
+PASS [SCADA] Enforces 43LR Local/Remote hierarchy: LOCAL blocks SCADA_SBO commands and permits LOCAL_PANEL
+PASS [SCADA] Protection trip raises ACTIVE_UNACK alarm, records 1 ms SOE events, and blocks close until 86 Lockout reset
+PASS [SCADA] Alarm state machine supports single acknowledge, acknowledgeAllAlarms, and clearClearedAlarms
+PASS [IEC 61850] Instantiates 1,206 SAS signals across 28 bays (from 50 SAS templates) with valid Logical Nodes and Functional Constraints
+PASS [IEC 61850] SCL_FILE_SAMPLES and Academy/SCL modules provide valid XML for IEC 61850-6 SCL types (ICD, IID, SCD, CID, SSD)
+PASS [GOOSE] Configures GOOSE Control Blocks with Layer-2 Multicast MAC 01-0C-CD-01-00-xx, APPID 0x00xx, and 802.1Q VLAN Priority
+PASS [GOOSE] triggerGooseStateChangeBurst increments stNum (+1) and resets sqNum (0)
+PASS [GOOSE] Supports all 5 GOOSE fault injection modes (VLAN_MISMATCH, APPID_MISMATCH, CONFREV_MISMATCH, SIM_BIT, TIMEOUT) and recovery
+PASS [MMS] All 28 Multi-Vendor IEDs expose MMS connection state, Logical Devices, Datasets, and BRCB/URCB report control blocks
+PASS [MMS] toggleRcbEnabled toggles RptEna (enabled) and triggerMmsGeneralInterrogation executes GI across active RCBs
+PASS [PRP] Maintains isolated Dual-LAN (LAN_A & LAN_B) links across DANP IEDs and supports fault injection & FAT/SAT verification
+PASS [HSR] Supports HSR ring redundancy mode switching and cut-through ring fault tolerance
+PASS [Bus Transfer] Blocks live-live Bus Coupler closing in MANUAL mode (CILO1 anti-paralleling interlock)
+PASS [Bus Transfer] Executes dead-bus transfer via requestBusTransfer when one bus is dead and restores normal split-bus feeding
+PASS [3D Camera Controls] Implements ORBIT, PAN, WALK, FLY camera modes, presets, focus/zoom, fullscreen, and 3D Raycaster equipment picking
+PASS [Apartment Electrical Distribution] Couples 11 kV outgoing feeders (BAY-11-F01..F08) and DT1/DT2 to 11/0.415 kV DT-250kVA and apartment/residential load energization
+PASS [Navigation & Responsive Layouts] Supports all 20 workspace tabs, hash deep-linking (#/workspace/<TAB>), mobile drawer, and overflow-x protection
+PASS [Offline Translation] Supports strictly 8 languages (EN, TE, TA, HI, PT, KO, FR, JA) and completely removes KN and ML
+PASS [Offline Translation] Preserves 100% of technical terminology, commands, formulas, and device IDs across all 7 non-English languages
+PASS [Offline Translation] Translates 100% of sidebar, main page headings, buttons, tables, dialogs, and engineering explanations offline
+
+============================================================
+REGRESSION SUITE SUMMARY: Passed=26, Failed=0, Blocked=0, Skipped=0
+============================================================
+Exit code: 0
+
+==================================================================
+5. PRODUCTION PREVIEW & HEADLESS CHROMIUM E2E VERIFICATION
+==================================================================
+Starting `npm run preview` on port 4173...
+PASS [Preview Server] Listening on http://substation.local:4173
+PASS [Browser E2E] Opening page renders with Full HD video & offline Three.js {"title": "Substation Automation \u2014 132/33/11 kV & IEC 61850 Digital Twin", "bodyLen": 119, "hasVideo": true, "src": "assets/video/substation-opening.mp4", "threeLoaded": true}
+PASS [Browser E2E] Language selector exposes strictly 8 languages (EN, TE, TA, HI, PT, KO, FR, JA) and excludes KN & ML codes=['EN', 'TE', 'TA', 'HI', 'PT', 'KO', 'FR', 'JA']
+PASS [Browser E2E] Workspace page #HERO renders cleanly textLen=10509, buttons=101, tables=0, svgsOrCanvases=58
+PASS [Browser E2E] Workspace page #SLD renders cleanly textLen=7044, buttons=80, tables=1, svgsOrCanvases=49
+PASS [Browser E2E] Workspace page #SCADA renders cleanly textLen=8560, buttons=107, tables=2, svgsOrCanvases=43
+PASS [Browser E2E] Workspace page #IED renders cleanly textLen=8037, buttons=76, tables=0, svgsOrCanvases=32
+PASS [Browser E2E] Workspace page #IED_SIGNAL_CHAIN renders cleanly textLen=17888, buttons=44, tables=1, svgsOrCanvases=48
+PASS [Browser E2E] Workspace page #NETWORK renders cleanly textLen=3608, buttons=77, tables=1, svgsOrCanvases=42
+PASS [Browser E2E] Workspace page #GOOSE renders cleanly textLen=4184, buttons=43, tables=1, svgsOrCanvases=35
+PASS [Browser E2E] Workspace page #MMS renders cleanly textLen=4871, buttons=52, tables=3, svgsOrCanvases=43
+PASS [Browser E2E] Workspace page #MODBUS_LAB renders cleanly textLen=7240, buttons=40, tables=1, svgsOrCanvases=37
+PASS [Browser E2E] Workspace page #IEC104_LAB renders cleanly textLen=13447, buttons=40, tables=1, svgsOrCanvases=36
+PASS [Browser E2E] Workspace page #OPCUA_LAB renders cleanly textLen=11292, buttons=77, tables=1, svgsOrCanvases=36
+PASS [Browser E2E] Workspace page #SIGNALS renders cleanly textLen=17882, buttons=44, tables=1, svgsOrCanvases=48
+PASS [Browser E2E] Workspace page #FAULTS renders cleanly textLen=5339, buttons=57, tables=0, svgsOrCanvases=64
+PASS [Browser E2E] Workspace page #FATSAT renders cleanly textLen=4770, buttons=66, tables=0, svgsOrCanvases=63
+PASS [Browser E2E] Workspace page #IEC61850_ACADEMY renders cleanly textLen=4318, buttons=50, tables=0, svgsOrCanvases=49
+PASS [Browser E2E] Workspace page #INTERVIEW_PREP renders cleanly textLen=2668, buttons=52, tables=0, svgsOrCanvases=47
+PASS [Browser E2E] Workspace page #CCNA_ACADEMY renders cleanly textLen=1670, buttons=56, tables=0, svgsOrCanvases=50
+PASS [Browser E2E] Workspace page #LEARNING renders cleanly textLen=4729, buttons=63, tables=0, svgsOrCanvases=66
+PASS [Browser E2E] Language EN translates UI & lessons, preserves technical tokens, and persists across reload firstNav='Substation Workspace', htmlLang='en'
+PASS [Browser E2E] Language TE translates UI & lessons, preserves technical tokens, and persists across reload firstNav='సబ్‌స్టేషన్ వర్క్‌స్పేస్', htmlLang='te'
+PASS [Browser E2E] Language TA translates UI & lessons, preserves technical tokens, and persists across reload firstNav='துணை மின் நிலையப் பணியிடம்', htmlLang='ta'
+PASS [Browser E2E] Language HI translates UI & lessons, preserves technical tokens, and persists across reload firstNav='सबस्टेशन कार्यक्षेत्र', htmlLang='hi'
+PASS [Browser E2E] Language PT translates UI & lessons, preserves technical tokens, and persists across reload firstNav='Área de trabalho da subestação', htmlLang='pt'
+PASS [Browser E2E] Language KO translates UI & lessons, preserves technical tokens, and persists across reload firstNav='변전소 작업 공간', htmlLang='ko'
+PASS [Browser E2E] Language FR translates UI & lessons, preserves technical tokens, and persists across reload firstNav='Espace de travail du poste', htmlLang='fr'
+PASS [Browser E2E] Language JA translates UI & lessons, preserves technical tokens, and persists across reload firstNav='変電所ワークスペース', htmlLang='ja'
+PASS [Browser E2E] Responsive layout Desktop 1920x1080 has no horizontal overflow innerWidth=1920, scrollWidth=1905
+PASS [Browser E2E] Responsive layout Tablet 768x1024 has no horizontal overflow innerWidth=768, scrollWidth=753
+PASS [Browser E2E] Responsive layout Mobile 390x844 has no horizontal overflow innerWidth=390, scrollWidth=375
+PASS [Browser E2E] Responsive layout Compact Mobile 320x640 has no horizontal overflow innerWidth=320, scrollWidth=305
+PASS [Browser E2E] Zero critical browser console errors during full E2E session severeCount=0
+E2E Browser Summary: Passed=33, Failed=0, Blocked=0, Skipped=0
+Exit code: 0

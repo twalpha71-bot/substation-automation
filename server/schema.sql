@@ -1,0 +1,72 @@
+-- SAS Engineering Hub — Persistent Authentication, RBAC & Learning Progress Schema (PostgreSQL / SQLite)
+
+CREATE TABLE IF NOT EXISTS users (
+  id VARCHAR(64) PRIMARY KEY,
+  full_name VARCHAR(160) NOT NULL,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  role VARCHAR(24) NOT NULL DEFAULT 'STUDENT' CHECK (role IN ('STUDENT', 'ADMIN')),
+  specialization VARCHAR(255) NOT NULL DEFAULT '',
+  status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'SUSPENDED')),
+  email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  password_hash TEXT NOT NULL, -- Argon2id / PBKDF2-SHA256 salted hash
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_login_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  session_id VARCHAR(128) PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  csrf_token VARCHAR(128) NOT NULL,
+  ip_address VARCHAR(64),
+  user_agent TEXT,
+  expires_at TIMESTAMP NOT NULL,
+  revoked BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  token_hash VARCHAR(128) PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TIMESTAMP NOT NULL,
+  used BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS user_course_progress (
+  user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  academy VARCHAR(32) NOT NULL CHECK (academy IN ('IEC61850', 'INTERVIEW', 'CCNA')),
+  completed_items_json TEXT NOT NULL DEFAULT '[]',
+  quiz_scores_json TEXT NOT NULL DEFAULT '{}',
+  last_item_id VARCHAR(64) NOT NULL DEFAULT '',
+  preferred_lang VARCHAR(8) NOT NULL DEFAULT 'EN',
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, academy)
+);
+
+CREATE TABLE IF NOT EXISTS course_chapter_metadata (
+  chapter_key VARCHAR(64) PRIMARY KEY,
+  academy VARCHAR(32) NOT NULL,
+  chapter_number INT NOT NULL,
+  title_en VARCHAR(255) NOT NULL,
+  published BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_by VARCHAR(64),
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS announcements (
+  id VARCHAR(64) PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  message TEXT NOT NULL,
+  severity VARCHAR(24) NOT NULL DEFAULT 'INFO',
+  author VARCHAR(160) NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  published_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id VARCHAR(64) PRIMARY KEY,
+  timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  actor_email VARCHAR(255) NOT NULL,
+  actor_role VARCHAR(32) NOT NULL,
+  action VARCHAR(64) NOT NULL,
+  target TEXT NOT NULL,
+  ip_address VARCHAR(64)
+);

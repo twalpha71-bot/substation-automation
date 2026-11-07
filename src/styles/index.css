@@ -1,0 +1,279 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #030712;
+  color: #DCEAF5;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+
+.ied-device-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  image-rendering: auto;
+  filter: none;
+  transform: none;
+}
+
+.sas-landing{position:relative;isolation:isolate;width:100%;min-height:100svh;background:#030c1c;color:#f3faff;overflow:hidden;display:flex;align-items:center;justify-content:center;font-family:Inter,system-ui,sans-serif}
+.sas-landing-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-3}
+.sas-landing-shade{position:absolute;inset:0;z-index:-2;background:linear-gradient(180deg,#01091899,#010c1e44 45%,#010a1999),linear-gradient(90deg,#00071344,transparent 35%,transparent 65%,#00071344)}
+.sas-landing-brand{position:absolute;top:clamp(20px,3vw,42px);left:clamp(20px,3vw,45px);display:flex;align-items:center;gap:18px;z-index:2}
+.sas-landing-brand-icon{width:72px;height:72px;display:grid;place-items:center;color:#ffb82c;border:2px solid #ffab18;border-radius:20px;background:#271b16c9;box-shadow:0 0 24px #ff991e75}
+.sas-landing-brand-copy{display:flex;flex-direction:column;line-height:1.05}
+.sas-landing-brand-copy strong{font-size:clamp(27px,3.3vw,53px);font-weight:850;letter-spacing:-1px;background:linear-gradient(100deg,#00edff,#5b9bff 60%,#e54cfc);background-clip:text;-webkit-background-clip:text;color:transparent}
+.sas-landing-brand-copy span{margin-top:4px;font-size:clamp(12px,1.25vw,19px);font-weight:750;letter-spacing:.28em;text-transform:uppercase;color:#c8eaff}
+/* Independent, decorative neon rings. Dimensions include the visible border. */
+@property --sas-search-orbit { syntax: '<angle>'; inherits: true; initial-value: 0deg; }
+@property --sas-button-orbit { syntax: '<angle>'; inherits: true; initial-value: 135deg; }
+@keyframes sasSearchNeonOrbit { from { --sas-search-orbit: 0deg; } to { --sas-search-orbit: 360deg; } }
+@keyframes sasButtonNeonOrbit { from { --sas-button-orbit: 135deg; } to { --sas-button-orbit: -225deg; } }
+.sas-landing-center{width:min(500px,calc(100% - 40px));display:flex;flex-direction:column;align-items:center;gap:24px;padding-top:80px}
+.sas-landing-search-wrap{position:relative;isolation:isolate;z-index:2;box-sizing:border-box;width:500px;max-width:100%;height:41px;min-height:41px;display:flex;align-items:center;gap:9px;padding:0 15px;border:0;border-radius:24px;background:#03132df2;color:#dffbff;animation:sasSearchNeonOrbit 5s linear infinite}
+.sas-landing-search-wrap>svg{width:17px;height:17px;flex-shrink:0}
+.sas-landing-search-wrap input{position:relative;z-index:1;flex:1;min-width:0;height:100%;background:transparent;outline:none;border:0;color:white;font-size:12px}
+.sas-landing-search-wrap input::placeholder{color:#c1ccdd;opacity:1}
+.sas-landing-search-wrap::before,.sas-landing-search-wrap::after,.sas-landing-enter::before,.sas-landing-enter::after{content:'';position:absolute;inset:0;box-sizing:border-box;padding:2px;border-radius:inherit;pointer-events:none;-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);mask-composite:exclude}
+.sas-landing-search-wrap::before,.sas-landing-search-wrap::after{background:conic-gradient(from var(--sas-search-orbit),#00eaff,#4387ff,#bb42ff,#ff4ba0,#ffbf42,#7cff86,#00eaff)}
+.sas-landing-enter::before,.sas-landing-enter::after{background:conic-gradient(from var(--sas-button-orbit),#ff52cf,#985bff,#36c9ff,#49ffd2,#ffe45c,#ff7642,#ff52cf)}
+.sas-landing-search-wrap::after,.sas-landing-enter::after{filter:blur(5px);opacity:.85}
+.sas-landing-results{position:absolute;top:calc(100% + 10px);left:0;width:100%;padding:6px;background:#061a31f5;border:1px solid #2bc8ee;border-radius:12px;z-index:5;box-shadow:0 15px 40px #0008;font-size:12px}
+.sas-landing-results button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-radius:8px;text-align:left}
+.sas-landing-results button:hover,.sas-landing-results button:focus-visible{background:#11466a}
+.sas-landing-enter{position:relative;isolation:isolate;z-index:1;box-sizing:border-box;display:flex;align-items:center;justify-content:center;flex-shrink:0;gap:5px;width:200px;height:30px;min-height:30px;padding:0 10px;border-radius:18px;border:0;color:white;background:linear-gradient(110deg,#073b57,#102558 55%,#391b5b);font-size:10px;line-height:1;font-weight:700;white-space:nowrap;animation:sasButtonNeonOrbit 3.2s linear infinite;transition:background .2s}
+.sas-landing-enter>span,.sas-landing-enter>svg{position:relative;z-index:1}.sas-landing-enter>svg{width:11px;height:11px;flex-shrink:0}
+.sas-landing-enter:hover{background:linear-gradient(110deg,#095071,#173573 55%,#502774)}
+.sas-landing-enter:focus-visible,.sas-landing-search-wrap:focus-within{outline:2px solid white;outline-offset:4px}
+@media(max-width:600px){.sas-landing-brand-icon{width:51px;height:51px;border-radius:14px}.sas-landing-brand-icon svg{width:26px}.sas-landing-brand{gap:12px}.sas-landing-center{padding-top:60px}}
+@media(prefers-reduced-motion:reduce){.sas-landing-search-wrap,.sas-landing-enter{animation:none;transition:none}}
+
+
+/* High-DPI Crisp Image & Sidebar Text Rendering */
+.sas-crisp-cover {
+  image-rendering: -webkit-optimize-contrast;
+  filter: none !important;
+  transform: none !important;
+}
+.sas-nav-item, .sas-nav-label {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+  text-shadow: none !important;
+  filter: none !important;
+}
+
+
+/* Complete Missing Tailwind Utility Rules for Modified Academy & Layout Components */
+.border-l-4 { border-left-width: 4px; }
+.border-l-\[\#00E5FF\] { border-left-color: #00E5FF; }
+.border-l-\[\#22C985\] { border-left-color: #22C985; }
+.border-l-\[\#C44DFF\] { border-left-color: #C44DFF; }
+.fill-current { fill: currentColor; }
+.h-32 { height: 8rem; }
+.w-32 { width: 8rem; }
+.w-0\.5 { width: 0.125rem; }
+.w-3\/4 { width: 75%; }
+.items-baseline { align-items: baseline; }
+.last\:border-b-0:last-child { border-bottom-width: 0px; }
+.last\:pb-0:last-child { padding-bottom: 0px; }
+.mix-blend-screen { mix-blend-mode: screen; }
+.mt-3\.5 { margin-top: 0.875rem; }
+.pt-3\.5 { padding-top: 0.875rem; }
+.opacity-0 { opacity: 0; }
+.opacity-45 { opacity: 0.45; }
+.opacity-75 { opacity: 0.75; }
+.group:hover .group-hover\:opacity-100 { opacity: 1; }
+.group:hover .group-hover\:translate-x-0\.5 { transform: translateX(0.125rem); }
+.right-48 { right: 12rem; }
+.right-52 { right: 13rem; }
+.shadow-sm { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border-width: 0; }
+.text-ellipsis { text-overflow: ellipsis; }
+.tracking-widest { letter-spacing: 0.1em; }
+.underline { text-decoration-line: underline; }
+@media (min-width: 640px) {
+  .sm\:gap-2\.5 { gap: 0.625rem; }
+  .sm\:inline-flex { display: inline-flex; }
+  .sm\:mx-5 { margin-left: 1.25rem; margin-right: 1.25rem; }
+  .sm\:pb-2\.5 { padding-bottom: 0.625rem; }
+  .sm\:px-5 { padding-left: 1.25rem; padding-right: 1.25rem; }
+}
+@media (min-width: 768px) {
+  .md\:block { display: block; }
+  .md\:inline { display: inline; }
+  .md\:grid-cols-12 { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .lg\:block { display: block; }
+  .lg\:ml-\[256px\] { margin-left: 256px; }
+  .lg\:top-16 { top: 4rem; }
+  .lg\:transform-none { transform: none !important; }
+}
+@media (min-width: 1280px) {
+  .xl\:flex { display: flex; }
+  .xl\:p-5 { padding: 1.25rem; }
+}
+.sas-sidebar nav::-webkit-scrollbar { width: 4px; }
+.sas-sidebar nav::-webkit-scrollbar-track { background: rgba(4, 14, 28, 0.6); }
+.sas-sidebar nav::-webkit-scrollbar-thumb { background: rgba(0, 207, 255, 0.25); border-radius: 4px; }
+
+
+/* Global responsive refinements: desktop, tablet and mobile. */
+:root { color-scheme: dark; }
+html, body, #root { width: 100%; min-width: 0; }
+#root { min-height: 100dvh; }
+.sas-sidebar { max-width: min(256px, 88vw); }
+.sas-sidebar .sas-nav-item { min-width: 0; }
+.sas-sidebar .sas-nav-label { min-width: 0; }
+/* Compact account avatar without reducing the menu's clickable usability. */
+.sas-account-controls .sas-profile-trigger {
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  min-height: 36px !important;
+  padding: 5px !important;
+  border-radius: 50% !important;
+}
+.sas-account-controls .sas-profile-trigger > svg,
+.sas-account-controls .sas-profile-trigger > span > svg { width: 19px !important; height: 19px !important; }
+.sas-account-controls .sas-profile-trigger img { width: 27px !important; height: 27px !important; object-fit: cover; border-radius: 50%; }
+.sas-account-controls .sas-account-bell { width: 19px; height: 19px; }
+/* Prevent grid and flex children from pushing the page beyond the viewport. */
+main, main > *, .sas-account-controls { min-width: 0; }
+main img { max-width: 100%; }
+main table { border-collapse: collapse; }
+main pre { max-width: 100%; overflow-x: auto; }
+@media (max-width: 1023px) {
+  .sas-sidebar { width: min(256px, 88vw) !important; }
+  main .grid > * { min-width: 0; }
+}
+@media (max-width: 767px) {
+  .sas-account-controls .sas-profile-trigger { width: 34px !important; height: 34px !important; min-width: 34px !important; min-height: 34px !important; }
+  main { overflow-wrap: anywhere; }
+  main .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+  main button, main select { max-width: 100%; }
+  main svg { max-width: 100%; }
+}
+@media (max-width: 479px) {
+  .sas-account-controls { gap: 4px !important; }
+  .sas-account-controls .sas-account-bell { width: 17px; height: 17px; }
+}
+
+/* Opening page copyright: fixed at the bottom, clear of the primary actions. */
+.sas-landing-copyright { position: absolute; z-index: 3; bottom: 14px; left: 12px; right: 12px; text-align: center; color: #a8c5da; font-size: 11px; line-height: 1.5; letter-spacing: .025em; text-shadow: 0 1px 5px #00101f; pointer-events: none; }
+@media (max-width: 600px) { .sas-landing-copyright { font-size: 10px; bottom: 10px; } .sas-landing-center { padding-bottom: 38px; } }
+
+/* Header language picker: beside the notification bell, never floating over content. */
+.sas-header-language { flex-shrink: 0; }
+.sas-language-trigger {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  min-height: 34px; padding: 5px 8px; border: 1px solid #245474;
+  border-radius: 18px; background: #071d31; color: #e9f3ff;
+  font-size: 11px; font-weight: 750; cursor: pointer;
+}
+.sas-language-trigger:hover, .sas-language-trigger:focus-visible { border-color: #00cfff; outline-offset: 2px; }
+.sas-language-trigger > svg:first-child { color: #00cfff; }
+.sas-language-code { min-width: 18px; text-align: center; }
+.sas-language-menu {
+  position: absolute; top: calc(100% + 10px); right: 0; z-index: 80;
+  width: min(290px, calc(100vw - 20px)); max-height: min(480px, 75dvh);
+  overflow-y: auto; padding: 7px; border: 1px solid #168bff;
+  border-radius: 14px; background: #061728; box-shadow: 0 16px 44px #000b;
+}
+.sas-language-heading { padding: 8px 10px 10px; color: #00d9ff; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; }
+.sas-language-option {
+  display: flex; width: 100%; align-items: center; gap: 8px; min-height: 39px;
+  padding: 7px 10px; border: 1px solid transparent; border-radius: 8px;
+  text-align: left; color: #dceaf5; font-size: 12px;
+}
+.sas-language-option:hover, .sas-language-option:focus-visible { background: #12344e; }
+.sas-language-selected { background: #0a354a; border-color: #00cfff; }
+.sas-language-native { flex: 1; font-weight: 700; }
+.sas-language-english { color: #8fb0c9; font-size: 10px; }
+.sas-language-check { color: #00e5ff; font-weight: 800; }
+.sas-language-note { margin-top: 5px; padding: 9px; border-top: 1px solid #23415a; color: #94b4cb; font-size: 10px; line-height: 1.5; }
+@media (max-width: 420px) {
+  .sas-language-trigger { gap: 3px; padding: 5px 6px; }
+  .sas-language-menu { right: -48px; }
+}
+
+/* Header language and account controls: maintain alignment on small screens. */
+.sas-header-language { position: relative; display: inline-flex; align-items: center; }
+@media (max-width: 520px) { .sas-language-menu { right: -42px; } .sas-language-trigger { min-height: 32px; } }
+
+
+/* Floating language selector — visible while scrolling */
+.sas-language-floating {
+  position: fixed !important;
+  right: 20px !important;
+  bottom: 20px !important;
+  z-index: 99999 !important;
+}
+
+.sas-language-floating button {
+  border-radius: 999px;
+}
+
+.sas-language-floating .sas-language-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  max-height: min(420px, 65vh);
+  overflow-y: auto;
+  z-index: 100000;
+}
+
+@media (max-width: 768px) {
+  .sas-language-floating {
+    right: 12px !important;
+    bottom: 12px !important;
+  }
+
+  .sas-language-floating .sas-language-menu {
+    max-height: 55vh;
+  }
+}
+
+/* Language bubble fixed at bottom-right */
+.sas-language-floating {
+  position: fixed !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  top: auto !important;
+  z-index: 99999 !important;
+}
+
+/* Language dropdown opens UPWARD */
+.sas-language-floating .sas-language-menu {
+  position: absolute !important;
+  bottom: calc(100% + 10px) !important;
+  top: auto !important;
+  right: 0 !important;
+  left: auto !important;
+
+  min-width: 190px;
+  max-height: min(420px, 65dvh);
+  overflow-y: auto;
+
+  z-index: 100000 !important;
+  transform: none !important;
+}
+
+/* Mobile and tablet */
+@media (max-width: 768px) {
+  .sas-language-floating {
+    right: 12px !important;
+    bottom: 12px !important;
+  }
+
+  .sas-language-floating .sas-language-menu {
+    max-height: 55dvh;
+  }
+}
+
+/* Final override: floating language menu always opens above its trigger. */
+.sas-language-floating .sas-language-menu { top: auto !important; bottom: calc(100% + 10px) !important; right: 0 !important; max-height: min(420px, 65dvh); overscroll-behavior: contain; }

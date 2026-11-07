@@ -1,0 +1,22 @@
+{
+  "sharedBrand": true,
+  "openingAnimation": true,
+  "visibleArcs": true,
+  "authBrand": true,
+  "workspacePages": [
+    "IEC 61850 Digital Substation",
+    "CCNA Networking Academy",
+    "Interview Preparation",
+    "SCADA / HMI Operator Station",
+    "IED Explorer",
+    "PRP / HSR Network",
+    "Learning Academies"
+  ],
+  "mobileWidths": [
+    390,
+    320
+  ],
+  "reducedMotion": true,
+  "documentTitle": true,
+  "errors": []
+}

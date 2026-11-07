@@ -1,0 +1,135 @@
+{
+  "scenes": [
+    {
+      "scene": 1,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 2,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 3,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 4,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 5,
+      "images": 4,
+      "inspection": "pass"
+    },
+    {
+      "scene": 6,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 7,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 8,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 9,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 10,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 11,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 12,
+      "images": 7,
+      "inspection": "pass"
+    },
+    {
+      "scene": 13,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 14,
+      "images": 5,
+      "inspection": "pass"
+    },
+    {
+      "scene": 15,
+      "images": 4,
+      "inspection": "pass"
+    },
+    {
+      "scene": 16,
+      "images": 1,
+      "inspection": "pass"
+    },
+    {
+      "scene": 17,
+      "images": 3,
+      "inspection": "pass"
+    },
+    {
+      "scene": 18,
+      "images": 4,
+      "inspection": "pass"
+    },
+    {
+      "scene": 19,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 20,
+      "images": 2,
+      "inspection": "pass"
+    },
+    {
+      "scene": 21,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 22,
+      "images": 6,
+      "inspection": "pass"
+    },
+    {
+      "scene": 23,
+      "images": 5,
+      "inspection": "pass"
+    },
+    {
+      "scene": 24,
+      "images": 6,
+      "inspection": "pass"
+    }
+  ],
+  "zoom": true,
+  "search": true,
+  "fullscreen": true,
+  "highlight": true,
+  "lesson": true,
+  "examples": true,
+  "mobile": {
+    "viewport": 390,
+    "document": 390
+  },
+  "errors": []
+}

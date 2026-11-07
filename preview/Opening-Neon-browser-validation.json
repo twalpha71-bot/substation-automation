@@ -1,0 +1,41 @@
+{
+  "desktop": {
+    "search": [
+      500,
+      41
+    ],
+    "button": [
+      200,
+      30
+    ]
+  },
+  "mobile": {
+    "viewport": 390,
+    "search": [
+      350,
+      41
+    ],
+    "button": [
+      200,
+      30
+    ]
+  },
+  "independentAnimations": [
+    {
+      "name": "sasSearchNeonOrbit",
+      "duration": "5s",
+      "angle": "65.9984deg"
+    },
+    {
+      "name": "sasButtonNeonOrbit",
+      "duration": "3.2s",
+      "angle": "31.8776deg"
+    }
+  ],
+  "reducedMotion": true,
+  "labelFits": true,
+  "profileMenu": true,
+  "searchNavigation": true,
+  "enterNavigation": true,
+  "errors": []
+}

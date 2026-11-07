@@ -1,0 +1,18 @@
+.sas-unified-brand{--brand-badge:44px;--brand-title:21px;--brand-subtitle:10px;--brand-gap:12px;display:inline-flex;align-items:center;gap:var(--brand-gap);flex-shrink:0;text-align:left;vertical-align:middle;font-family:Inter,system-ui,sans-serif;line-height:1}
+.sas-brand--opening{--brand-badge:72px;--brand-title:clamp(27px,3.3vw,53px);--brand-subtitle:clamp(12px,1.25vw,19px);--brand-gap:18px}
+.sas-brand--auth{--brand-badge:48px;--brand-title:24px;--brand-subtitle:10px}
+.sas-brand--mini{--brand-badge:30px;--brand-title:15px;--brand-subtitle:7px;--brand-gap:7px}
+.sas-thunder-badge{position:relative;display:block;isolation:isolate;width:var(--brand-badge);height:var(--brand-badge);flex-shrink:0;border:1.5px solid #ffa42b;border-radius:27%;background:linear-gradient(135deg,#36251d,#122335 60%,#071526);box-shadow:0 0 13px #ff941a66,inset 0 0 12px #ffa42b13;animation:sasThunderHalo 5.8s ease-in-out infinite}
+.sas-thunder-badge svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.sas-thunder-bolt{fill:#ffc247;stroke:#ffdf80;stroke-width:1.5;stroke-linejoin:round;transform-origin:center;filter:drop-shadow(0 0 3px #ff9e26);animation:sasThunderStrike 5.8s ease-in-out infinite}
+.sas-thunder-arcs{opacity:0;stroke:#c9f6ff;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:80;stroke-dashoffset:80;filter:drop-shadow(0 0 3px #49d9ff);animation:sasThunderArcs 5.8s ease-in-out infinite}
+.sas-brand-wordmark{display:flex;flex-direction:column;gap:4px;white-space:nowrap;min-width:0}
+.sas-brand-wordmark strong{font-size:var(--brand-title);font-weight:850;line-height:1.07;letter-spacing:-.035em;background:linear-gradient(100deg,#00edff,#5b9bff 60%,#d55aff);background-clip:text;-webkit-background-clip:text;color:transparent}
+.sas-brand-wordmark>span{font-size:var(--brand-subtitle);line-height:1.1;font-weight:800;letter-spacing:.26em;text-transform:uppercase;color:#b9def3}
+button.sas-unified-brand{cursor:pointer;border-radius:12px}button.sas-unified-brand:focus-visible{outline:2px solid #72e8ff;outline-offset:5px}
+@keyframes sasThunderStrike{0%,13%,48%,100%{transform:rotate(0) scale(1);fill:#ffc247;filter:drop-shadow(0 0 3px #ff9e26)}20%{transform:rotate(-5deg) scale(1.12);fill:#fff8d9;filter:drop-shadow(0 0 8px #ffd65e)}29%{transform:rotate(2deg) scale(1.03);fill:#ffd45c;filter:drop-shadow(0 0 4px #ffae29)}37%{transform:rotate(-2deg) scale(1.08);fill:#fff1a7;filter:drop-shadow(0 0 7px #ffcc4b)}}
+@keyframes sasThunderHalo{0%,13%,48%,100%{border-color:#ffa42b;box-shadow:0 0 13px #ff941a66,inset 0 0 12px #ffa42b13}20%{border-color:#fff0a0;box-shadow:0 0 26px #ffb72ba6,0 0 10px #70e7ff77,inset 0 0 18px #ffd75540}37%{border-color:#ffd77a;box-shadow:0 0 20px #ffc44a88,inset 0 0 16px #ffd75528}}
+@keyframes sasThunderArcs{0%,13%{opacity:0;stroke-dashoffset:80}20%{opacity:.9;stroke-dashoffset:0}29%{opacity:.2;stroke-dashoffset:0}37%{opacity:.65;stroke-dashoffset:0}48%,100%{opacity:0;stroke-dashoffset:0}}
+@media(max-width:600px){.sas-brand--opening{--brand-badge:37px;--brand-title:22px;--brand-subtitle:9px;--brand-gap:8px}.sas-brand--auth{--brand-badge:42px;--brand-title:22px;--brand-subtitle:9px}}
+@media(max-width:360px){.sas-brand--opening{--brand-badge:30px;--brand-title:19px;--brand-subtitle:8px}}
+@media(prefers-reduced-motion:reduce){.sas-thunder-badge,.sas-thunder-bolt,.sas-thunder-arcs{animation:none}.sas-thunder-arcs{display:none}}

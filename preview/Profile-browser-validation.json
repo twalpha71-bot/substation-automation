@@ -1,0 +1,18 @@
+{
+  "guestMenu": true,
+  "signedInMenu": true,
+  "landingAuth": true,
+  "registration": true,
+  "signIn": true,
+  "signOut": true,
+  "dynamicIdentity": true,
+  "profileRoutes": 4,
+  "continueAsGuest": true,
+  "keyboard": true,
+  "outsideClick": true,
+  "mobileWidths": [
+    390,
+    320
+  ],
+  "errors": []
+}
