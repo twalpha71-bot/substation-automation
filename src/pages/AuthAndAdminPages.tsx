@@ -1,4 +1,3 @@
-import { SUPPORTED_LANGUAGE_LIST, setOnlineLanguage, SupportedLanguageCode } from '../i18n/offlineTranslation';
 import { SubstationBrand } from '../components/SubstationBrand';
 import React, { useEffect, useState } from 'react';
 import { useAuthStore, computeUserInitials, ProfileSectionTab } from '../auth/useAuthStore';
@@ -148,16 +147,16 @@ export const AuthPortalPage: React.FC<{
     else setActiveTab('HERO');
   };
 
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = signIn(email, password, rememberMe);
+    const res = await signIn(email, password, rememberMe);
     setStatusMsg({ ok: res.ok, text: res.message });
     if (res.ok) {
       finishSuccess();
     }
   };
 
-  const handleSignUp = (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!acceptTerms) {
       setStatusMsg({
@@ -175,7 +174,7 @@ export const AuthPortalPage: React.FC<{
       });
       return;
     }
-    const res = signUp({
+    const res = await signUp({
       fullName,
       email,
       password,
@@ -625,7 +624,7 @@ export const UserProfilePage: React.FC = () => {
   const [fullName, setFullName] = useState(user?.fullName || '');
   const [email, setEmail] = useState(user?.email || '');
   const [specialization, setSpecialization] = useState(user?.specialization || '');
-  const [preferredLang, setPreferredLang] = useState<SupportedLanguageCode>((user?.progress.lang as SupportedLanguageCode) || 'EN');
+  const [preferredLang, setPreferredLang] = useState<'EN' | 'TE'>(user?.progress.lang === 'TE' ? 'TE' : 'EN');
   const [avatarDataUrl, setAvatarDataUrl] = useState<string | undefined>(user?.avatarDataUrl);
 
   const [curPwd, setCurPwd] = useState('');
@@ -638,7 +637,7 @@ export const UserProfilePage: React.FC = () => {
       setFullName(user.fullName);
       setEmail(user.email);
       setSpecialization(user.specialization);
-      setPreferredLang(user.progress.lang);
+      setPreferredLang(user.progress.lang === 'TE' ? 'TE' : 'EN');
       setAvatarDataUrl(user.avatarDataUrl);
     }
   }, [user?.id, user?.fullName, user?.email, user?.avatarDataUrl, user?.progress.lang]);
@@ -786,7 +785,7 @@ export const UserProfilePage: React.FC = () => {
                 <div className="rounded-lg border border-[#142D47] bg-[#071628] p-3">
                   <div className="text-[10px] font-mono uppercase text-[#8FAFC8]">Preferred Language</div>
                   <div className="mt-1 font-bold text-white">
-                    {SUPPORTED_LANGUAGE_LIST.find((l) => l.code === user.progress.lang)?.label || 'English'}
+                    {user.progress.lang === 'TE' ? 'తెలుగు (Telugu)' : 'English'}
                   </div>
                 </div>
                 <div className="rounded-lg border border-[#142D47] bg-[#071628] p-3">
@@ -1061,14 +1060,11 @@ export const UserProfilePage: React.FC = () => {
               <label className="font-bold text-[#E9F3FF]">Preferred Language</label>
               <select
                 value={preferredLang}
-                onChange={(e) => setPreferredLang(e.target.value as SupportedLanguageCode)}
+                onChange={(e) => setPreferredLang(e.target.value as 'EN' | 'TE')}
                 className="mt-1 w-full rounded-xl border border-[#1E466E] bg-[#030B18] px-3.5 py-2.5 text-white focus:border-[#00CFFF] focus:outline-none"
               >
-                {SUPPORTED_LANGUAGE_LIST.map((l) => (
-                  <option key={l.code} value={l.code} data-no-translate="true">
-                    {l.label}
-                  </option>
-                ))}
+                <option value="EN">English</option>
+                <option value="TE">తెలుగు (Telugu)</option>
               </select>
             </div>
 

@@ -25672,26 +25672,62 @@ function registerTePair(en?: string, te?: string) {
   if (k && v && k !== v) AUTHORED_TE_MAP.set(k, v);
 }
 
+
+// Collect authored pairs in nested data, including aligned paragraph/step arrays.
+function registerRecursiveTePairs(value: unknown, seen = new WeakSet<object>()): void {
+  if (!value || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) registerRecursiveTePairs(item, seen);
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+  const registerValues = (en: unknown, te: unknown): void => {
+    if (typeof en === 'string' && typeof te === 'string') {
+      registerTePair(en, te);
+    } else if (Array.isArray(en) && Array.isArray(te)) {
+      en.forEach((item, index) => {
+        if (typeof item === 'string' && typeof te[index] === 'string') {
+          registerTePair(item, te[index]);
+        }
+      });
+    }
+  };
+
+  // CCNA key concepts and command explanations use plain en/te fields.
+  registerValues(record.en, record.te);
+  for (const [key, translated] of Object.entries(record)) {
+    const suffix = key.endsWith('Telugu') ? 'Telugu' : key.endsWith('Te') ? 'Te' : null;
+    if (suffix) {
+      const base = key.slice(0, -suffix.length);
+      registerValues(record[base + 'En'] ?? record[base], translated);
+    }
+    registerRecursiveTePairs(translated, seen);
+  }
+}
+
 try {
   for (const ch of IEC61850_ACADEMY_CHAPTERS || []) {
-    registerTePair(ch.title, ch.titleTe);
-    registerTePair(ch.subtitle, ch.subtitleTe);
-    registerTePair(ch.workedExampleTitle, ch.workedExampleTitleTe);
+    registerTePair(ch.titleEn, ch.titleTe);
+    registerTePair(ch.subtitleEn, ch.subtitleTe);
+    registerTePair(ch.workedExample.titleEn, ch.workedExample.titleTe);
     for (const sec of ch.sections || []) {
-      registerTePair(sec.heading, sec.headingTe);
-      (sec.paragraphsEn || []).forEach((p, idx) => registerTePair(p, sec.paragraphsTe?.[idx]));
+      registerTePair(sec.headingEn, sec.headingTe);
+      (sec.bodyEn || []).forEach((p, idx) => registerTePair(p, sec.bodyTe?.[idx]));
     }
-    (ch.workedExampleStepsEn || []).forEach((s, idx) => registerTePair(s, ch.workedExampleStepsTe?.[idx]));
+    (ch.workedExample.stepsEn || []).forEach((s, idx) => registerTePair(s, ch.workedExample.stepsTe?.[idx]));
     (ch.commonMistakesEn || []).forEach((m, idx) => registerTePair(m, ch.commonMistakesTe?.[idx]));
     for (const ts of ch.troubleshooting || []) {
       registerTePair(ts.symptomEn, ts.symptomTe);
-      registerTePair(ts.likelyCauseEn, ts.likelyCauseTe);
-      registerTePair(ts.howToCheckEn, ts.howToCheckTe);
-      registerTePair(ts.howToFixEn, ts.howToFixTe);
-      registerTePair(ts.howToVerifyEn, ts.howToVerifyTe);
+      registerTePair(ts.causeEn, ts.causeTe);
+      registerTePair(ts.diagnosticCheckEn, ts.diagnosticCheckTe);
+      registerTePair(ts.correctiveActionEn, ts.correctiveActionTe);
+      registerTePair(ts.validationEn, ts.validationTe);
     }
-    for (const iq of ch.interviewQuestions || []) {
-      registerTePair(iq.qEn, iq.aTe);
+    for (const iq of ch.interviewPreview || []) {
+      // The preview question has no authored Telugu counterpart.
       registerTePair(iq.aEn, iq.aTe);
     }
   }
@@ -25703,8 +25739,8 @@ try {
   }
   for (const q of INTERVIEW_QUESTIONS_BANK || []) {
     registerTePair(q.shortAnswerEn, q.shortAnswerTe);
-    registerTePair(q.projectExampleEn, q.projectExampleTe);
-    (q.stepByStepEn || []).forEach((s, idx) => registerTePair(s, q.stepByStepTe?.[idx]));
+    registerTePair(q.practicalExampleEn, q.practicalExampleTe);
+    (q.workingPrincipleStepsEn || []).forEach((s, idx) => registerTePair(s, q.workingPrincipleStepsTe?.[idx]));
   }
   for (const sc of TROUBLESHOOTING_SCENARIOS_20 || []) {
     registerTePair(sc.titleEn, sc.titleTe);
@@ -25735,8 +25771,8 @@ try {
     }
   }
   for (const ch of CCNA_CHAPTERS || []) {
-    registerTePair(ch.title, ch.titleTe);
-    registerTePair(ch.subtitle, ch.subtitleTe);
+    registerTePair(ch.titleEn, ch.titleTe);
+    registerTePair(ch.subtitleEn, ch.subtitleTe);
   }
   registerRecursiveTePairs([IEC61850_ACADEMY_CHAPTERS, ACADEMY_GLOSSARY_TERMS, INTERVIEW_MODULES_LIST, INTERVIEW_QUESTIONS_BANK, TROUBLESHOOTING_SCENARIOS_20, CCNA_EXAM_DOMAINS, CCNA_TOPOLOGIES, CCNA_PACKET_FLOWS, CCNA_CHAPTERS, LEARNING_MODULES]);
   for (const lm of LEARNING_MODULES || []) {
