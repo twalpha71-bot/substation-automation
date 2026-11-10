@@ -88,6 +88,13 @@ export default function App() {
   } = useAuthStore();
 
   const [showLanding, setShowLanding] = useState(() => !window.location.hash.startsWith('#/workspace/'));
+  // Reset the main document scroll when navigating between workspace sections.
+  // The sidebar has its own scroll container and is intentionally unaffected.
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [activeTab, showLanding]);
   // Deep-link the active workspace: refreshing /workspace/GOOSE stays in GOOSE Lab.
   useEffect(() => {
     const restoreLocation = () => {
