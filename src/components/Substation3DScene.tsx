@@ -733,7 +733,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
   const [followRoadActive, setFollowRoadActive] = useState<boolean>(false);
   const [walkSpeedMult, setWalkSpeedMult] = useState<number>(1.0);
   const [selectedWorldItem, setSelectedWorldItem] = useState<WorldInspectableItem | null>(null);
-  const [labelMode, setLabelMode] = useState<LabelLodMode>('SMART_LOD');
+  const [labelMode, setLabelMode] = useState<LabelLodMode>('HIDDEN');
   const [xraySwitchgearRoof, setXraySwitchgearRoof] = useState<boolean>(true);
   const [showElectricalConnections, setShowElectricalConnections] = useState<boolean>(true);
   const [showPowerFlowPulses, setShowPowerFlowPulses] = useState<boolean>(true);
@@ -2966,15 +2966,21 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       pulseCount = 2,
       speed = 0.24
     ) => {
+      // Residential distribution is now routed in underground XLPE ducts.
+      // Keep the same voltage-tier actors and simulation associations, but
+      // bury the visible conductors and travelling pulses below the terrain.
+      const burialDepth = -0.75;
+      const buriedStart = new THREE.Vector3(p1[0], burialDepth, p1[2]);
+      const buriedEnd = new THREE.Vector3(p2[0], burialDepth, p2[2]);
       const mid: [number, number, number] = [
         (p1[0] + p2[0]) / 2,
-        (p1[1] + p2[1]) / 2 - sag,
+        burialDepth,
         (p1[2] + p2[2]) / 2,
       ];
       const curve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(...p1),
+        buriedStart,
         new THREE.Vector3(...mid),
-        new THREE.Vector3(...p2),
+        buriedEnd,
       ]);
       // Base metallic wire
       const wireGeo = new THREE.TubeGeometry(curve, 12, radius * 0.75, 6, false);
@@ -3995,8 +4001,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       });
     };
 
-    ltRowAPoles.forEach(([lx, lz]) => buildLtPole(lx, lz));
-    ltRowBPoles.forEach(([lx, lz]) => buildLtPole(lx, lz));
+    // No above-ground LT poles: the 415 V distribution network is underground.
 
     [-0.75, -0.25, 0.25, 0.75].forEach((wOff, wIdx) => {
       addSaggedConductor(
@@ -4177,7 +4182,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
           ? [first[0] + (last[0] - first[0]) * t, centerZ + 3.8]
           : [centerX + 3.8, first[2] + (last[2] - first[2]) * t];
       });
-      trunkPoles.forEach(([x, z]) => buildLtPole(x, z));
+      // Underground LT trunk: no roadside poles required.
       // Four closely spaced conductors follow the same pole-to-pole route.
       for (const off of [-0.54, -0.18, 0.18, 0.54]) {
         const shift = (p: [number, number]): [number, number, number] =>
@@ -4606,6 +4611,25 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         dtTank.position.y = 1.7;
         dtTank.castShadow = true;
         grp.add(dtTank);
+        // Small permanent nameplate mounted on the transformer tank itself.
+        const txPlateCanvas = document.createElement('canvas');
+        txPlateCanvas.width = 512;
+        txPlateCanvas.height = 128;
+        const txPlateCtx = txPlateCanvas.getContext('2d');
+        if (txPlateCtx) {
+          txPlateCtx.fillStyle = '#102337';
+          txPlateCtx.fillRect(0, 0, 512, 128);
+          txPlateCtx.fillStyle = '#e9f3ff';
+          txPlateCtx.textAlign = 'center';
+          txPlateCtx.font = 'bold 38px Arial';
+          txPlateCtx.fillText(node.code, 256, 79);
+          const txPlate = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.8, 0.45),
+            new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(txPlateCanvas), side: THREE.DoubleSide })
+          );
+          txPlate.position.set(0, 2.25, 1.14);
+          grp.add(txPlate);
+        }
 
         const dtCons = new THREE.Mesh(
           new THREE.CylinderGeometry(0.38, 0.38, 2.25, 12),
@@ -5194,7 +5218,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         circuit.pulses.forEach((dp) => {
           const active = live && (dp.tier === 'HV_11KV' || st.distTxClosed) &&
             (dp.tier !== 'SERVICE_230V' || st.serviceDropClosed);
-          dp.mesh.visible = active && st.showPowerFlowPulses && showDistLinks;
+          dp.mesh.visible = false; // Underground pulses remain below the surface.
           if (dp.mesh.visible) dp.mesh.position.copy(dp.curve.getPointAt((now * 0.001 * dp.speed + dp.offset) % 1));
         });
       });
@@ -5208,7 +5232,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
             : dp.tier === 'LT_415V'
             ? lt415Energized
             : housesEnergized;
-        const vis = Boolean(tierActive && st.showPowerFlowPulses && showDistLinks);
+        const vis = false; // Underground residential feeder animation is concealed.
         dp.mesh.visible = vis;
         if (vis) {
           const u = (distTime * dp.speed + dp.offset) % 1;
@@ -6304,125 +6328,9 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
             <button type="button" title={isFullscreen ? 'Exit fullscreen' : 'Expand 3D view'} aria-label="Toggle enlarged 3D view" onClick={() => { if (isFullscreen && onCloseFullscreen) onCloseFullscreen(); else setIsFullscreen(f => !f); }} className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-400/45 bg-transparent text-white hover:bg-cyan-400/20">{isFullscreen ? <Minimize2 className="h-6 w-6" /> : <Maximize2 className="h-6 w-6" />}</button>
           </div>
 
-          {/* Collision-Avoidant Contextual 3D Labels with Separate Position & Alarm Indicators */}
-          <div className="absolute inset-0 pointer-events-none overflow-hidden">
-            {projectedLabels.map((lbl) => (
-              <React.Fragment key={lbl.id}>
-                <div
-                  style={{
-                    left: `${lbl.anchorX}px`,
-                    top: `${lbl.anchorY}px`,
-                    transform: 'translate(-50%, -50%)',
-                  }}
-                  className={`absolute w-2 h-2 rounded-full border border-black ${
-                    lbl.isSelected
-                      ? 'bg-[#00D9FF] scale-125'
-                      : lbl.voltageKv === 132
-                      ? 'bg-[#38BDF8]'
-                      : lbl.voltageKv === 33
-                      ? 'bg-[#4ADE80]'
-                      : 'bg-[#FBBF24]'
-                  }`}
-                />
-                <button
-                  type="button"
-                  onClick={() => focusCameraOnBay(lbl.bayId)}
-                  style={{
-                    left: `${lbl.x}px`,
-                    top: `${lbl.y}px`,
-                    transform: 'translate(-50%, -100%)',
-                  }}
-                  className={`absolute pointer-events-auto px-2 py-1 rounded-md border text-left transition-shadow shadow-lg backdrop-blur-sm ${
-                    lbl.isSelected
-                      ? 'bg-[#030712]/95 border-[#00D9FF] ring-2 ring-[#00D9FF]/50 z-30'
-                      : lbl.isInUpstreamTrace
-                      ? 'bg-[#0A1F38]/95 border-[#38BDF8] z-25'
-                      : lbl.hasCriticalAlarm
-                      ? 'bg-[#3B0D15]/95 border-[#FF4D62] animate-pulse z-20'
-                      : lbl.hasWarningAlarm
-                      ? 'bg-[#2E1F08]/95 border-[#FFB547] z-20'
-                      : 'bg-[#030712]/85 border-slate-700/80 hover:border-[#00D9FF] z-10'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`w-2 h-2 rounded-sm ${
-                        lbl.breakerState === 'CLOSED' ? 'bg-[#00D9FF]' : 'bg-[#22C55E]'
-                      }`}
-                      title={`Breaker Position: ${lbl.breakerState}`}
-                    />
-                    <span className="text-[10px] font-bold text-[#DCEAF5] whitespace-nowrap">
-                      {lbl.code}
-                    </span>
-                    {lbl.hasCriticalAlarm && (
-                      <span className="px-1 rounded bg-[#FF4D62] text-white text-[8px] font-bold">
-                        TRIP
-                      </span>
-                    )}
-                    {!lbl.hasCriticalAlarm && lbl.hasWarningAlarm && (
-                      <span className="px-1 rounded bg-[#FFB547] text-slate-950 text-[8px] font-bold">
-                        ALM
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[9px] font-mono text-slate-300 whitespace-nowrap">
-                    {lbl.subText}
-                  </div>
-                </button>
-              </React.Fragment>
-            ))}
-
-            {/* SVG Cyan Leader Lines & Engineering Callout Cards for 11 kV -> 250 kVA DT -> 415 V LT -> 230 V Service Drop */}
-            <svg className="absolute inset-0 w-full h-full pointer-events-none">
-              {distCalloutLabels.map((cl) => (
-                <g key={cl.id}>
-                  <line
-                    x1={cl.x}
-                    y1={cl.y}
-                    x2={cl.ax}
-                    y2={cl.ay}
-                    stroke={cl.active ? '#00DFFF' : '#64748B'}
-                    strokeWidth="1.6"
-                  />
-                  <circle
-                    cx={cl.ax}
-                    cy={cl.ay}
-                    r="3.2"
-                    fill={cl.active ? '#FFB000' : '#64748B'}
-                    stroke="#020B1C"
-                    strokeWidth="1"
-                  />
-                </g>
-              ))}
-            </svg>
-            {distCalloutLabels.map((cl) => (
-              <div
-                key={cl.id}
-                style={{
-                  left: `${cl.x}px`,
-                  top: `${cl.y}px`,
-                  transform: 'translate(-50%, -100%)',
-                }}
-                className={`absolute pointer-events-auto px-2.5 py-1 rounded-lg border text-center shadow-lg backdrop-blur-md transition ${
-                  cl.active
-                    ? 'bg-[#041428]/92 border-[#00DFFF]/80 text-[#DCEAF5] shadow-[0_0_15px_rgba(0,223,255,0.22)]'
-                    : 'bg-[#030712]/85 border-slate-700 text-slate-400'
-                }`}
-              >
-                <div className="text-[10px] font-bold text-white leading-tight whitespace-nowrap">
-                  {cl.title}
-                </div>
-                <div className="text-[9.5px] font-medium text-cyan-200 leading-tight whitespace-nowrap">
-                  {cl.sub1}
-                </div>
-                {cl.sub2 && (
-                  <div className="text-[9px] font-mono text-amber-300 leading-tight whitespace-nowrap">
-                    {cl.sub2}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+          {/* Clear 3D view: floating callout cards intentionally removed.
+              Bay identification is printed directly on the equipment meshes;
+              the existing equipment selection and inspection controls remain active. */}
 
           {/* Compact Semi-Transparent Camera Mode Toolbar (Orbit | Pan | Walk | Fly | Focus | Follow Road | Fit All | Reset) */}
           <div
