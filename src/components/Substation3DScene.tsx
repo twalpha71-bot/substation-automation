@@ -733,7 +733,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
   const [followRoadActive, setFollowRoadActive] = useState<boolean>(false);
   const [walkSpeedMult, setWalkSpeedMult] = useState<number>(1.0);
   const [selectedWorldItem, setSelectedWorldItem] = useState<WorldInspectableItem | null>(null);
-  const [labelMode, setLabelMode] = useState<LabelLodMode>('HIDDEN');
+  const [labelMode, setLabelMode] = useState<LabelLodMode>('SMART_LOD');
   const [xraySwitchgearRoof, setXraySwitchgearRoof] = useState<boolean>(true);
   const [showElectricalConnections, setShowElectricalConnections] = useState<boolean>(true);
   const [showPowerFlowPulses, setShowPowerFlowPulses] = useState<boolean>(true);
@@ -2966,21 +2966,15 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       pulseCount = 2,
       speed = 0.24
     ) => {
-      // Residential distribution is now routed in underground XLPE ducts.
-      // Keep the same voltage-tier actors and simulation associations, but
-      // bury the visible conductors and travelling pulses below the terrain.
-      const burialDepth = -0.75;
-      const buriedStart = new THREE.Vector3(p1[0], burialDepth, p1[2]);
-      const buriedEnd = new THREE.Vector3(p2[0], burialDepth, p2[2]);
       const mid: [number, number, number] = [
         (p1[0] + p2[0]) / 2,
-        burialDepth,
+        (p1[1] + p2[1]) / 2 - sag,
         (p1[2] + p2[2]) / 2,
       ];
       const curve = new THREE.CatmullRomCurve3([
-        buriedStart,
+        new THREE.Vector3(...p1),
         new THREE.Vector3(...mid),
-        buriedEnd,
+        new THREE.Vector3(...p2),
       ]);
       // Base metallic wire
       const wireGeo = new THREE.TubeGeometry(curve, 12, radius * 0.75, 6, false);
@@ -4001,7 +3995,8 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       });
     };
 
-    // No above-ground LT poles: the 415 V distribution network is underground.
+    ltRowAPoles.forEach(([lx, lz]) => buildLtPole(lx, lz));
+    ltRowBPoles.forEach(([lx, lz]) => buildLtPole(lx, lz));
 
     [-0.75, -0.25, 0.25, 0.75].forEach((wOff, wIdx) => {
       addSaggedConductor(
@@ -4182,7 +4177,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
           ? [first[0] + (last[0] - first[0]) * t, centerZ + 3.8]
           : [centerX + 3.8, first[2] + (last[2] - first[2]) * t];
       });
-      // Underground LT trunk: no roadside poles required.
+      trunkPoles.forEach(([x, z]) => buildLtPole(x, z));
       // Four closely spaced conductors follow the same pole-to-pole route.
       for (const off of [-0.54, -0.18, 0.18, 0.54]) {
         const shift = (p: [number, number]): [number, number, number] =>
@@ -4611,25 +4606,6 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         dtTank.position.y = 1.7;
         dtTank.castShadow = true;
         grp.add(dtTank);
-        // Small permanent nameplate mounted on the transformer tank itself.
-        const txPlateCanvas = document.createElement('canvas');
-        txPlateCanvas.width = 512;
-        txPlateCanvas.height = 128;
-        const txPlateCtx = txPlateCanvas.getContext('2d');
-        if (txPlateCtx) {
-          txPlateCtx.fillStyle = '#102337';
-          txPlateCtx.fillRect(0, 0, 512, 128);
-          txPlateCtx.fillStyle = '#e9f3ff';
-          txPlateCtx.textAlign = 'center';
-          txPlateCtx.font = 'bold 38px Arial';
-          txPlateCtx.fillText(node.code, 256, 79);
-          const txPlate = new THREE.Mesh(
-            new THREE.PlaneGeometry(1.8, 0.45),
-            new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(txPlateCanvas), side: THREE.DoubleSide })
-          );
-          txPlate.position.set(0, 2.25, 1.14);
-          grp.add(txPlate);
-        }
 
         const dtCons = new THREE.Mesh(
           new THREE.CylinderGeometry(0.38, 0.38, 2.25, 12),
@@ -5218,7 +5194,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         circuit.pulses.forEach((dp) => {
           const active = live && (dp.tier === 'HV_11KV' || st.distTxClosed) &&
             (dp.tier !== 'SERVICE_230V' || st.serviceDropClosed);
-          dp.mesh.visible = false; // Underground pulses remain below the surface.
+          dp.mesh.visible = active && st.showPowerFlowPulses && showDistLinks;
           if (dp.mesh.visible) dp.mesh.position.copy(dp.curve.getPointAt((now * 0.001 * dp.speed + dp.offset) % 1));
         });
       });
@@ -5232,7 +5208,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
             : dp.tier === 'LT_415V'
             ? lt415Energized
             : housesEnergized;
-        const vis = false; // Underground residential feeder animation is concealed.
+        const vis = Boolean(tierActive && st.showPowerFlowPulses && showDistLinks);
         dp.mesh.visible = vis;
         if (vis) {
           const u = (distTime * dp.speed + dp.offset) % 1;
@@ -6277,13 +6253,93 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         </div>
       )}
 
+      {/* 3D controls live in document flow ABOVE the WebGL canvas. */}
+      <div className="w-full bg-[#061427] border-y border-cyan-900/50 px-3 py-2 space-y-2">
+          {/* Top-Left Search & Smooth Focus Controls + Top-Right Selected-Equipment Telemetry Overlay (Normal Mode Only) */}
+          <div className={`flex flex-wrap items-start justify-between gap-2 w-full`}>
+            <div className="flex flex-wrap items-center gap-1.5  bg-[#030712]/90 p-1.5 rounded-xl border border-slate-800 shadow-lg">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search bay/TX..."
+                  className="pl-7 pr-2 py-1 rounded bg-[#081629] border border-slate-700 text-[11px] text-white w-36 focus:outline-none focus:border-[#00D9FF]"
+                />
+              </div>
+
+              <select
+                value={selectedBay.id}
+                onChange={(e) => focusCameraOnBay(e.target.value)}
+                className="px-2 py-1 rounded bg-[#081629] border border-slate-700 text-[11px] text-[#00D9FF] font-semibold"
+              >
+                {filteredSpatialNodes.map((n) => (
+                  <option key={n.id} value={n.bayId}>
+                    {n.code} — {n.category}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={() => setFocusOnSelection((f) => !f)}
+                className={`px-2 py-1 rounded text-[10px] font-semibold border flex items-center gap-1 ${
+                  focusOnSelection
+                    ? 'bg-[#00D9FF]/20 text-[#00D9FF] border-[#00D9FF]/50'
+                    : 'bg-[#081629] text-slate-400 border-slate-700'
+                }`}
+              >
+                <Focus className="w-3 h-3" />
+                Fly-To
+              </button>
+            </div>
+
+            <div className=" flex flex-col items-end gap-1.5">
+              <div className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-[#030712]/92 border border-slate-800 text-[10px]">
+                <span className="font-bold text-slate-400 uppercase">Position:</span>
+                <span className="flex items-center gap-1 text-slate-200">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-[#00D9FF]" /> CB CLOSED (10)
+                </span>
+                <span className="flex items-center gap-1 text-slate-200">
+                  <span className="w-2.5 h-2.5 rounded-sm bg-[#22C55E]" /> CB OPEN (01)
+                </span>
+                <span className="text-slate-600">|</span>
+                <span className="font-bold text-slate-400 uppercase">Alarms:</span>
+                <span className="flex items-center gap-1 text-slate-200">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#FF4D62]" /> Critical Trip
+                </span>
+                <span className="flex items-center gap-1 text-slate-200">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#FFB547]" /> Major/Warn
+                </span>
+              </div>
+
+              <div className="hidden md:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-[#030712]/92 border border-[#00D9FF]/50 text-[11px] font-mono shadow-lg">
+                <span className="font-bold text-[#00D9FF]">{selectedBay.bayCode}</span>
+                <span
+                  className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                    selectedBay.breakerState === 'CLOSED'
+                      ? 'bg-[#00D9FF]/20 text-[#00D9FF]'
+                      : 'bg-[#22C55E]/20 text-[#22C55E]'
+                  }`}
+                >
+                  52:{selectedBay.breakerState}
+                </span>
+                <span className="text-white">{selectedBay.activePowerMw.toFixed(1)} MW</span>
+                <span className="text-emerald-400">{selectedBay.voltageAbKv.toFixed(2)} kV</span>
+                <span className="text-slate-300">{selectedBay.currentA.toFixed(0)} A</span>
+              </div>
+            </div>
+          </div>
+
+      </div>
       {/* Full-width 3D viewport with inspector underneath */}
       <div className="flex flex-col flex-1 min-h-0">
         {/* Left 8 Columns: Photorealistic Three.js 3D Viewport */}
         <div
           style={isFullscreen ? { flex: '1 1 0%', minHeight: 0, height: '100%' } : undefined}
           className={`relative w-full ${
-            isFullscreen ? 'flex-1 min-h-0' : 'h-[300px] sm:h-[360px] lg:h-[400px]'
+            isFullscreen ? 'flex-1 min-h-0' : 'h-[400px] sm:h-[500px] lg:h-[620px]'
           } bg-[#030712] select-none overflow-hidden border-b border-[#1E3A5F]`}
         >
           {!threeLoaded && !webglError && (
@@ -6303,44 +6359,20 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
           {/* Three.js WebGL Mount */}
           <div ref={mountRef} className="w-full h-full" />
 
-          {/* Compact right-side camera controls, matching the requested reference. */}
-          <div className="absolute right-3 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-2 pointer-events-auto" aria-label="3D camera controls">
-            <div className="relative h-[90px] w-[90px] rounded-full border border-cyan-400/45 bg-transparent shadow-none">
-              {([
-                ['up', '▲', 'left-1/2 top-1 -translate-x-1/2'],
-                ['left', '◀', 'left-2 top-1/2 -translate-y-1/2'],
-                ['right', '▶', 'right-2 top-1/2 -translate-y-1/2'],
-                ['down', '▼', 'left-1/2 bottom-1 -translate-x-1/2'],
-              ] as const).map(([direction, symbol, position]) => (
-                <button key={direction} type="button" title={`Rotate camera ${direction}`} aria-label={`Rotate camera ${direction}`}
-                  onClick={() => nudgeCamera(direction)}
-                  className={`absolute ${position} flex h-7 w-7 items-center justify-center rounded-full text-sm text-white hover:bg-cyan-400/20 hover:text-cyan-200`}>{symbol}</button>
-              ))}
-            </div>
-            <div className="flex w-12 flex-col overflow-hidden rounded-xl border border-cyan-400/45 bg-transparent text-white shadow-none">
-              <button type="button" title="Zoom in" aria-label="Zoom in" onClick={() => setZoom(z => Math.min(1.8, Number((z + 0.15).toFixed(2))))} className="flex h-10 items-center justify-center text-3xl hover:bg-cyan-400/20">+</button>
-              <div className="mx-2 border-t border-cyan-400/70" />
-              <button type="button" title="Zoom out" aria-label="Zoom out" onClick={() => setZoom(z => Math.max(0.6, Number((z - 0.15).toFixed(2))))} className="flex h-10 items-center justify-center text-3xl hover:bg-cyan-400/20">−</button>
-            </div>
-            <button type="button" title="Toggle automatic 360 degree rotation" aria-label="Toggle 360 degree rotation" aria-pressed={autoRotate} onClick={() => { setCameraNavMode('ORBIT'); setAutoRotate(v => !v); }} className={`flex h-11 w-11 items-center justify-center rounded-xl border ${autoRotate ? 'border-cyan-300 bg-cyan-400/25 text-cyan-200' : 'border-cyan-400/45 bg-transparent text-white'} hover:bg-cyan-400/20`}><span className="text-sm font-bold">360°</span></button>
-            <button type="button" title="Reset camera" aria-label="Reset camera" onClick={() => { setZoom(1); applyCameraPreset('ISOMETRIC'); setAutoRotate(false); }} className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-400/45 bg-transparent text-white hover:bg-cyan-400/20"><RotateCcw className="h-6 w-6" /></button>
-            <button type="button" title="Cycle 3D camera views" aria-label="Cycle 3D camera views" onClick={cycleCameraView} className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-400/45 bg-transparent text-white hover:bg-cyan-400/20"><Box className="h-6 w-6" /></button>
-            <button type="button" title={isFullscreen ? 'Exit fullscreen' : 'Expand 3D view'} aria-label="Toggle enlarged 3D view" onClick={() => { if (isFullscreen && onCloseFullscreen) onCloseFullscreen(); else setIsFullscreen(f => !f); }} className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-400/45 bg-transparent text-white hover:bg-cyan-400/20">{isFullscreen ? <Minimize2 className="h-6 w-6" /> : <Maximize2 className="h-6 w-6" />}</button>
-          </div>
+        </div>
 
-          {/* Clear 3D view: floating callout cards intentionally removed.
-              Bay identification is printed directly on the equipment meshes;
-              the existing equipment selection and inspection controls remain active. */}
-
+        {/* Controls and feeder actions live BELOW the WebGL canvas, never over it. */}
+        <div className="w-full bg-[#061427] border-b border-cyan-900/50 p-3 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
           {/* Compact Semi-Transparent Camera Mode Toolbar (Orbit | Pan | Walk | Fly | Focus | Follow Road | Fit All | Reset) */}
           <div
             style={{
-              bottom: isFullscreen ? '12px' : '54px',
-              left: '12px',
+              
+              
               backgroundColor: 'rgba(3, 11, 24, 0.86)',
               borderColor: 'rgba(0, 207, 255, 0.45)',
             }}
-            className="absolute z-30 flex flex-wrap items-center gap-1.5 px-2.5 py-1.5 rounded-xl border backdrop-blur-md pointer-events-auto shadow-lg"
+            className="relative flex flex-wrap items-center gap-1.5 px-2.5 py-1.5 rounded-xl border backdrop-blur-md pointer-events-auto shadow-lg"
             aria-label="Camera navigation mode toolbar"
           >
             {([
@@ -6484,16 +6516,74 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
             )}
           </div>
 
+          {/* Compact right-side camera controls, matching the requested reference. */}
+          <div className="relative flex flex-wrap items-center gap-2" aria-label="3D camera controls">
+            <div className="relative h-[70px] w-[70px] rounded-full border border-cyan-400/45 bg-transparent shadow-none">
+              {([
+                ['up', '▲', 'left-1/2 top-1 -translate-x-1/2'],
+                ['left', '◀', 'left-2 top-1/2 -translate-y-1/2'],
+                ['right', '▶', 'right-2 top-1/2 -translate-y-1/2'],
+                ['down', '▼', 'left-1/2 bottom-1 -translate-x-1/2'],
+              ] as const).map(([direction, symbol, position]) => (
+                <button key={direction} type="button" title={`Rotate camera ${direction}`} aria-label={`Rotate camera ${direction}`}
+                  onClick={() => nudgeCamera(direction)}
+                  className={`absolute ${position} flex h-7 w-7 items-center justify-center rounded-full text-sm text-white hover:bg-cyan-400/20 hover:text-cyan-200`}>{symbol}</button>
+              ))}
+            </div>
+            <div className="flex w-12 flex-col overflow-hidden rounded-xl border border-cyan-400/45 bg-transparent text-white shadow-none">
+              <button type="button" title="Zoom in" aria-label="Zoom in" onClick={() => setZoom(z => Math.min(1.8, Number((z + 0.15).toFixed(2))))} className="flex h-10 items-center justify-center text-3xl hover:bg-cyan-400/20">+</button>
+              <div className="mx-2 border-t border-cyan-400/70" />
+              <button type="button" title="Zoom out" aria-label="Zoom out" onClick={() => setZoom(z => Math.max(0.6, Number((z - 0.15).toFixed(2))))} className="flex h-10 items-center justify-center text-3xl hover:bg-cyan-400/20">−</button>
+            </div>
+            <button type="button" title="Toggle automatic 360 degree rotation" aria-label="Toggle 360 degree rotation" aria-pressed={autoRotate} onClick={() => { setCameraNavMode('ORBIT'); setAutoRotate(v => !v); }} className={`flex h-11 w-11 items-center justify-center rounded-xl border ${autoRotate ? 'border-cyan-300 bg-cyan-400/25 text-cyan-200' : 'border-cyan-400/45 bg-transparent text-white'} hover:bg-cyan-400/20`}><span className="text-sm font-bold">360°</span></button>
+            <button type="button" title="Reset camera" aria-label="Reset camera" onClick={() => { setZoom(1); applyCameraPreset('ISOMETRIC'); setAutoRotate(false); }} className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-400/45 bg-transparent text-white hover:bg-cyan-400/20"><RotateCcw className="h-6 w-6" /></button>
+            <button type="button" title="Cycle 3D camera views" aria-label="Cycle 3D camera views" onClick={cycleCameraView} className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-400/45 bg-transparent text-white hover:bg-cyan-400/20"><Box className="h-6 w-6" /></button>
+            <button type="button" title={isFullscreen ? 'Exit fullscreen' : 'Expand 3D view'} aria-label="Toggle enlarged 3D view" onClick={() => { if (isFullscreen && onCloseFullscreen) onCloseFullscreen(); else setIsFullscreen(f => !f); }} className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-400/45 bg-transparent text-white hover:bg-cyan-400/20">{isFullscreen ? <Minimize2 className="h-6 w-6" /> : <Maximize2 className="h-6 w-6" />}</button>
+          </div>
+
+          </div>
+          {/* Transparent Camera Preset Bar inside Enlarged 3D Popup (All 11 Destinations) */}
+          {isFullscreen && (
+            <div className="relative flex flex-wrap items-center gap-1.5 pointer-events-auto">
+              {([
+                ['ISOMETRIC', 'Entire Substation'],
+                ['HV_132_YARD', '132 kV Switchyard'],
+                ['TX_T1', 'Transformer T1'],
+                ['TX_T2', 'Transformer T2'],
+                ['SWG_33_HALL', '33 kV Switchgear'],
+                ['SWG_11_HALL', '11 kV Switchgear'],
+                ['RESIDENTIAL', 'Residential Distribution'],
+                ['DIST_TX', 'Distribution Transformer'],
+                ['RCC_CENTER', 'Remote Control Center (RCC)'],
+                ['GATEWAY_COMM', 'Substation Gateway'],
+                ['IEC104_PATH', 'IEC-104 WAN Path'],
+              ] as [CameraPreset, string][]).map(([presetKey, label]) => (
+                <button
+                  key={presetKey}
+                  type="button"
+                  onClick={() => applyCameraPreset(presetKey)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border backdrop-blur-sm transition ${
+                    cameraPreset === presetKey
+                      ? 'bg-cyan-400/25 text-cyan-100 border-cyan-300'
+                      : 'bg-[#020b18]/55 hover:bg-cyan-400/15 text-slate-200 border-cyan-400/35'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Selected Residential House / Road Inspection Card */}
           {selectedWorldItem && (
             <div
               style={{
-                top: isFullscreen ? '78px' : '56px',
-                left: '12px',
+                
+                
                 backgroundColor: 'rgba(3, 11, 24, 0.92)',
                 borderColor: '#00CFFF',
               }}
-              className="absolute z-30 max-w-md px-3 py-2 rounded-xl border backdrop-blur-md pointer-events-auto shadow-xl text-xs space-y-1"
+              className="relative max-w-md px-3 py-2 rounded-xl border backdrop-blur-md pointer-events-auto shadow-xl text-xs space-y-1"
             >
               <div className="flex items-center justify-between gap-3">
                 <span className="font-mono font-extrabold text-[#00CFFF]">{selectedWorldItem.id}</span>
@@ -6526,118 +6616,9 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
             </div>
           )}
 
-          {/* Transparent Camera Preset Bar inside Enlarged 3D Popup (All 11 Destinations) */}
-          {isFullscreen && (
-            <div className="absolute top-3 left-3 right-16 z-30 flex flex-wrap items-center gap-1.5 pointer-events-auto">
-              {([
-                ['ISOMETRIC', 'Entire Substation'],
-                ['HV_132_YARD', '132 kV Switchyard'],
-                ['TX_T1', 'Transformer T1'],
-                ['TX_T2', 'Transformer T2'],
-                ['SWG_33_HALL', '33 kV Switchgear'],
-                ['SWG_11_HALL', '11 kV Switchgear'],
-                ['RESIDENTIAL', 'Residential Distribution'],
-                ['DIST_TX', 'Distribution Transformer'],
-                ['RCC_CENTER', 'Remote Control Center (RCC)'],
-                ['GATEWAY_COMM', 'Substation Gateway'],
-                ['IEC104_PATH', 'IEC-104 WAN Path'],
-              ] as [CameraPreset, string][]).map(([presetKey, label]) => (
-                <button
-                  key={presetKey}
-                  type="button"
-                  onClick={() => applyCameraPreset(presetKey)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border backdrop-blur-sm transition ${
-                    cameraPreset === presetKey
-                      ? 'bg-cyan-400/25 text-cyan-100 border-cyan-300'
-                      : 'bg-[#020b18]/55 hover:bg-cyan-400/15 text-slate-200 border-cyan-400/35'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Top-Left Search & Smooth Focus Controls + Top-Right Selected-Equipment Telemetry Overlay (Normal Mode Only) */}
-          <div className={`${isFullscreen ? 'hidden' : 'flex'} absolute top-3 left-3 right-3 flex-wrap items-start justify-between gap-2 pointer-events-none`}>
-            <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto bg-[#030712]/90 p-1.5 rounded-xl border border-slate-800 shadow-lg">
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search bay/TX..."
-                  className="pl-7 pr-2 py-1 rounded bg-[#081629] border border-slate-700 text-[11px] text-white w-36 focus:outline-none focus:border-[#00D9FF]"
-                />
-              </div>
-
-              <select
-                value={selectedBay.id}
-                onChange={(e) => focusCameraOnBay(e.target.value)}
-                className="px-2 py-1 rounded bg-[#081629] border border-slate-700 text-[11px] text-[#00D9FF] font-semibold"
-              >
-                {filteredSpatialNodes.map((n) => (
-                  <option key={n.id} value={n.bayId}>
-                    {n.code} — {n.category}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                type="button"
-                onClick={() => setFocusOnSelection((f) => !f)}
-                className={`px-2 py-1 rounded text-[10px] font-semibold border flex items-center gap-1 ${
-                  focusOnSelection
-                    ? 'bg-[#00D9FF]/20 text-[#00D9FF] border-[#00D9FF]/50'
-                    : 'bg-[#081629] text-slate-400 border-slate-700'
-                }`}
-              >
-                <Focus className="w-3 h-3" />
-                Fly-To
-              </button>
-            </div>
-
-            <div className="pointer-events-auto flex flex-col items-end gap-1.5">
-              <div className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-[#030712]/92 border border-slate-800 text-[10px]">
-                <span className="font-bold text-slate-400 uppercase">Position:</span>
-                <span className="flex items-center gap-1 text-slate-200">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-[#00D9FF]" /> CB CLOSED (10)
-                </span>
-                <span className="flex items-center gap-1 text-slate-200">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-[#22C55E]" /> CB OPEN (01)
-                </span>
-                <span className="text-slate-600">|</span>
-                <span className="font-bold text-slate-400 uppercase">Alarms:</span>
-                <span className="flex items-center gap-1 text-slate-200">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#FF4D62]" /> Critical Trip
-                </span>
-                <span className="flex items-center gap-1 text-slate-200">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#FFB547]" /> Major/Warn
-                </span>
-              </div>
-
-              <div className="hidden md:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-[#030712]/92 border border-[#00D9FF]/50 text-[11px] font-mono shadow-lg">
-                <span className="font-bold text-[#00D9FF]">{selectedBay.bayCode}</span>
-                <span
-                  className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
-                    selectedBay.breakerState === 'CLOSED'
-                      ? 'bg-[#00D9FF]/20 text-[#00D9FF]'
-                      : 'bg-[#22C55E]/20 text-[#22C55E]'
-                  }`}
-                >
-                  52:{selectedBay.breakerState}
-                </span>
-                <span className="text-white">{selectedBay.activePowerMw.toFixed(1)} MW</span>
-                <span className="text-emerald-400">{selectedBay.voltageAbKv.toFixed(2)} kV</span>
-                <span className="text-slate-300">{selectedBay.currentA.toFixed(0)} A</span>
-              </div>
-            </div>
-          </div>
-
           {/* Bottom Landmark & Suburban Distribution Quick-Jump Pills (Normal Mode Only) */}
-          <div className={`${isFullscreen ? 'hidden' : 'flex'} absolute bottom-3 left-3 right-3 flex-wrap items-center justify-between gap-2 pointer-events-none`}>
-            <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto">
+          <div className={`flex flex-wrap items-center justify-between gap-2 w-full`}>
+            <div className="flex flex-wrap items-center gap-1.5 ">
               <button
                 type="button"
                 onClick={() => {
