@@ -434,7 +434,7 @@ export default function App() {
                     {topMenuOpen === group.key && <div className="sas-top-dropdown" role="menu">
                       {navItems.filter(item => group.ids.includes(item.id)).map(item =>
                         <button type="button" role="menuitem" key={item.id} onClick={() => navigate(item.id)}
-                          className={`sas-top-dropdown-item ${(testingGuidanceOpen ? item.id === 'TESTING_GUIDANCE' : activeTab === item.id) ? 'is-active' : ''}`}>
+                          className={`sas-top-dropdown-item ${(testingGuidanceOpen ? item.id === ('TESTING_GUIDANCE' as ActiveWorkspaceTab) : activeTab === item.id) ? 'is-active' : ''}`}>
                           {item.icon}<span>{item.label}</span>
                           {!!item.badge && <span className="sas-top-badge">{item.badge}</span>}
                         </button>
