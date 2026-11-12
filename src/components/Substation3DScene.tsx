@@ -11,12 +11,17 @@ import {
   Cpu,
   Eye,
   Focus,
+  Gauge,
   GitCommit,
   Layers,
   Lock,
   Maximize2,
   Minimize2,
   Network,
+  RadioTower,
+  PlugZap,
+  Database,
+  Clock3,
   Power,
   RefreshCw,
   RotateCcw,
@@ -677,7 +682,7 @@ const PROTOCOL_3D_PATHS = [
   { id: 'TIME', filter: 'Time Synchronization', color: '#EAB308', path: 'Meinberg LANTIME M400 GNSS GM → All IEDs, Switches & Servers', label: 'SNTP / NTP / PTP (IEEE 1588v2)', detail: 'Hardware Timestamping (±38 ns PTP 0x88F7 / UDP Port 123 SNTP)' },
 ];
 
-export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseFullscreen?: () => void }> = ({ initialFullscreen = false, onCloseFullscreen }) => {
+export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseFullscreen?: () => void; equipmentInspector?: React.ReactNode }> = ({ initialFullscreen = false, onCloseFullscreen, equipmentInspector }) => {
   const {
     bays,
     transformers,
@@ -5980,7 +5985,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       className={
         isFullscreen
           ? 'fixed left-1/2 top-1/2 z-[9999] flex h-[88vh] w-[93vw] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-cyan-400/75 bg-[#020b18] shadow-[0_0_55px_rgba(0,217,255,0.32),0_25px_90px_rgba(0,0,0,0.88)]'
-          : 'rounded-2xl border border-[#1E3A5F] bg-[#081629] overflow-hidden shadow-2xl space-y-0'
+          : 'sas-scene rounded-2xl border border-[#1E3A5F] bg-[#081629] overflow-hidden shadow-2xl space-y-0'
       }
     >
       {isFullscreen && (
@@ -5999,7 +6004,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         </div>
       )}
       {/* ==================== TOP 3D DIGITAL TWIN COMMAND & CAMERA BAR (HIDDEN IN ENLARGED POPUP) ==================== */}
-      <div className={`${isFullscreen ? 'hidden' : 'flex'} flex-wrap items-center justify-between gap-2.5 px-4 py-2.5 bg-[#030712]/95 border-b border-[#1E3A5F]`}>
+      <div className={`${isFullscreen ? 'hidden' : 'flex'} sas-scene-title-bar flex-wrap items-center justify-between gap-2.5 px-4 py-2.5 bg-[#030712]/95 border-b border-[#1E3A5F]`}>
         <div className="flex flex-wrap items-center gap-2">
           <div className="p-1.5 rounded-lg bg-[#00D9FF]/15 border border-[#00D9FF]/40 text-[#00D9FF]">
             <Box className="w-4 h-4" />
@@ -6078,7 +6083,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       </div>
 
       {/* Compact engineering toolbar — existing simulation handlers retained */}
-      <div className={`${isFullscreen ? 'hidden' : ''} px-4 py-3 bg-[#07192c] border-b border-[#1E3A5F] space-y-3`}>
+      <div className={`${isFullscreen ? 'hidden' : ''} sas-scene-extra-controllers px-4 py-3 bg-[#07192c] border-b border-[#1E3A5F] space-y-3`}>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5">
           <label className="text-[10px] uppercase font-bold text-slate-400 space-y-1">Camera View (11 Destinations)
             <select value={cameraPreset} onChange={(e) => applyCameraPreset(e.target.value as CameraPreset)} className="w-full rounded-lg bg-[#030d1c] border border-[#1E3A5F] text-[#DCEAF5] p-2 text-xs">
@@ -6099,7 +6104,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
           </label>
           <div className="text-[10px] uppercase font-bold text-slate-400 space-y-1">Equipment Layers
             <details className="relative group"><summary className="cursor-pointer list-none rounded-lg bg-[#030d1c] border border-[#1E3A5F] text-[#DCEAF5] p-2 text-xs flex justify-between">{Object.values(layerVis).filter(Boolean).length} layers visible <span>⌄</span></summary>
-              <div className="absolute z-40 top-full mt-1 w-56 rounded-xl bg-[#07192c] border border-[#1E3A5F] shadow-2xl p-3 space-y-2">
+              <div className="absolute z-40 top-full right-0 mt-1 w-56 max-w-[calc(100vw-40px)] rounded-xl bg-[#07192c] border border-[#1E3A5F] shadow-2xl p-3 space-y-2">
                 {([['LAYER_132_AIS','132 kV AIS'],['LAYER_50MVA_TX','50 MVA T1/T2'],['LAYER_33_SWG','33 kV Switchgear'],['LAYER_11_SWG_DT','11 kV & DT1/DT2'],['LAYER_CIVIL_GANTRIES','Gantries & Trenches']] as [keyof LayerVisibilityState,string][]).map(([key,label]) => <label key={key} className="flex gap-2 items-center text-xs normal-case text-slate-200 cursor-pointer"><input type="checkbox" checked={layerVis[key]} onChange={() => toggleLayer(key)} />{label}</label>)}
               </div>
             </details>
@@ -6333,12 +6338,13 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
           </div>
 
       </div>
-      {/* Full-width 3D viewport with inspector underneath */}
+      {/* Only the viewport shares a row with the compact inspector; all controls below span the workspace. */}
       <div className="flex flex-col flex-1 min-h-0">
-        {/* Left 8 Columns: Photorealistic Three.js 3D Viewport */}
+        <div className={isFullscreen ? "flex flex-1 min-h-0" : `sas-scene-overview ${equipmentInspector ? "has-inspector" : ""}`}>
+        {/* Photorealistic Three.js 3D Viewport */}
         <div
           style={isFullscreen ? { flex: '1 1 0%', minHeight: 0, height: '100%' } : undefined}
-          className={`relative w-full ${
+          className={`sas-scene-viewport relative w-full ${
             isFullscreen ? 'flex-1 min-h-0' : 'h-[400px] sm:h-[500px] lg:h-[620px]'
           } bg-[#030712] select-none overflow-hidden border-b border-[#1E3A5F]`}
         >
@@ -6361,8 +6367,11 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
 
         </div>
 
+        {!isFullscreen && equipmentInspector}
+        </div>
+
         {/* Controls and feeder actions live BELOW the WebGL canvas, never over it. */}
-        <div className="w-full bg-[#061427] border-b border-cyan-900/50 p-3 space-y-3">
+        <div className="sas-scene-bottom-controllers w-full bg-[#061427] border-b border-cyan-900/50 p-3 space-y-3">
           <div className="flex flex-wrap items-center gap-3">
           {/* Compact Semi-Transparent Camera Mode Toolbar (Orbit | Pan | Walk | Fly | Focus | Follow Road | Fit All | Reset) */}
           <div
@@ -6772,13 +6781,16 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
           </div>
         </div>
 
-        {/* Right 4 Columns: Enhanced Selected-Device Inspector & IEC 61850 Signal Audit */}
+        {/* Three-column engineering console: device, SBO/IED, and RCC. */}
+        <div className="sas-engineering-console">
+        {/* Full-width selected-device details, SBO controls and IEC 61850 signal audit. */}
         <div
-          className={`${isFullscreen ? 'hidden' : ''} w-full bg-[#081629] p-4 border-t border-[#00D9FF]/30`}
+          className={`${isFullscreen ? 'hidden' : ''} sas-feeder-details w-full bg-[#081629] p-4 border-t border-[#00D9FF]/30`}
         >
-          <div className="space-y-3">
+          <div className="sas-feeder-grid">
+            <div className="sas-device-column">
             {/* Equipment Header with Separate Breaker Position vs Alarm Severity Badges */}
-            <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-2.5">
+            <div className="sas-device-heading sas-feeder-heading flex flex-wrap items-start justify-between gap-2 border-b border-slate-800 pb-2.5">
               <div>
                 <div className="flex items-center gap-1.5">
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#00D9FF]/15 text-[#00D9FF] border border-[#00D9FF]/40">
@@ -6820,7 +6832,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
             </div>
 
             {/* Selected-Device Single-Line Apparatus Chain Mimic & Derived SCADA Status */}
-            <div className="p-2.5 rounded-xl bg-[#030712] border border-slate-800 space-y-2 text-[11px]">
+            <div className="sas-device-apparatus p-2.5 rounded-xl bg-[#030712] border border-slate-800 space-y-2 text-[11px]">
               <div className="flex items-center justify-between text-[10px] text-slate-400">
                 <span className="font-bold uppercase text-[#DCEAF5]">
                   Apparatus Chain & Derived SCADA Indications
@@ -6828,9 +6840,9 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
                 <span className="font-mono text-[#00D9FF]">t: {selectedBay.lastUpdated.split('T')[1]}</span>
               </div>
 
-              <div className="grid grid-cols-4 gap-1.5 text-center font-mono text-[10px]">
+              <div className="sas-apparatus-grid grid gap-1.5 text-center font-mono text-[10px]">
                 <div className="p-1.5 rounded bg-[#081629] border border-slate-800">
-                  <div className="text-slate-400">Q1 Bus DS</div>
+                  <GitCommit className="sas-apparatus-icon" aria-hidden="true" /><div className="text-slate-400">Q1 Bus DS</div>
                   <div
                     className={`font-bold ${
                       selectedBay.busDisconnectorState === 'CLOSED' ? 'text-[#00D9FF]' : 'text-[#22C55E]'
@@ -6840,7 +6852,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
                   </div>
                 </div>
                 <div className="p-1.5 rounded bg-[#081629] border border-slate-800">
-                  <div className="text-slate-400">52 CB (Dbpos)</div>
+                  <Box className="sas-apparatus-icon" aria-hidden="true" /><div className="text-slate-400">52 CB (Dbpos)</div>
                   <div
                     className={`font-bold ${
                       selectedBay.breakerState === 'CLOSED' ? 'text-[#00D9FF]' : 'text-[#22C55E]'
@@ -6850,7 +6862,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
                   </div>
                 </div>
                 <div className="p-1.5 rounded bg-[#081629] border border-slate-800">
-                  <div className="text-slate-400">Q9 Line DS</div>
+                  <GitCommit className="sas-apparatus-icon" aria-hidden="true" /><div className="text-slate-400">Q9 Line DS</div>
                   <div
                     className={`font-bold ${
                       selectedBay.lineDisconnectorState === 'CLOSED' ? 'text-[#00D9FF]' : 'text-[#22C55E]'
@@ -6860,7 +6872,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
                   </div>
                 </div>
                 <div className="p-1.5 rounded bg-[#081629] border border-slate-800">
-                  <div className="text-slate-400">Q8 Earth Sw</div>
+                  <Zap className="sas-apparatus-icon" aria-hidden="true" /><div className="text-slate-400">Q8 Earth Sw</div>
                   <div
                     className={`font-bold ${
                       selectedBay.earthSwitchState === 'CLOSED' ? 'text-[#FFB547]' : 'text-slate-400'
@@ -6887,32 +6899,25 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
               </div>
             </div>
 
-            {/* Live Electrical Measurements */}
-            <div className="grid grid-cols-3 gap-2 text-center bg-[#030712] p-2.5 rounded-xl border border-slate-800 font-mono text-xs">
-              <div>
-                <div className="text-[10px] text-slate-400 font-sans">P / Q Power</div>
-                <div className="text-[#00D9FF] font-bold mt-0.5">
-                  {selectedBay.activePowerMw.toFixed(1)} MW
-                </div>
-                <div className="text-[10px] text-slate-400">
-                  {selectedBay.reactivePowerMvar.toFixed(1)} MVAr
-                </div>
+            {/* Live Electrical Measurements — reference-matched neon icons and dividers */}
+            <div className="sas-device-measurements grid grid-cols-3 gap-0 text-center bg-[#030712] p-2.5 rounded-xl border border-slate-800 font-mono text-xs">
+              <div className="sas-measurement-cell">
+                <Zap className="sas-measurement-icon" size={26} fill="currentColor" strokeWidth={1.8} aria-hidden="true" />
+                <div className="text-[10px] text-slate-300 font-sans">P / Q Power</div>
+                <div className="text-[#00D9FF] font-bold mt-0.5">{selectedBay.activePowerMw.toFixed(1)} MW</div>
+                <div className="text-[10px] text-slate-400">{selectedBay.reactivePowerMvar.toFixed(1)} MVAr</div>
               </div>
-              <div>
-                <div className="text-[10px] text-slate-400 font-sans">Vab / Freq</div>
-                <div className="text-[#22C55E] font-bold mt-0.5">
-                  {selectedBay.voltageAbKv.toFixed(2)} kV
-                </div>
+              <div className="sas-measurement-cell">
+                <Activity className="sas-measurement-icon" size={26} strokeWidth={2.5} aria-hidden="true" />
+                <div className="text-[10px] text-slate-300 font-sans">Vab / Freq</div>
+                <div className="text-[#22C55E] font-bold mt-0.5">{selectedBay.voltageAbKv.toFixed(2)} kV</div>
                 <div className="text-[10px] text-slate-400">{selectedBay.frequencyHz.toFixed(2)} Hz</div>
               </div>
-              <div>
-                <div className="text-[10px] text-slate-400 font-sans">Ia / Quality</div>
+              <div className="sas-measurement-cell">
+                <Gauge className="sas-measurement-icon" size={26} strokeWidth={2.5} aria-hidden="true" />
+                <div className="text-[10px] text-slate-300 font-sans">Ia / Quality</div>
                 <div className="text-white font-bold mt-0.5">{selectedBay.currentA.toFixed(1)} A</div>
-                <div
-                  className={`text-[10px] font-bold ${
-                    selectedBay.quality === 'GOOD' ? 'text-emerald-400' : 'text-amber-400'
-                  }`}
-                >
+                <div className={`text-[10px] font-bold ${selectedBay.quality === 'GOOD' ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {selectedBay.quality}
                 </div>
               </div>
@@ -6920,7 +6925,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
 
             {/* Transformer Supervision & OLTC Card when T1, T2, DT1, or DT2 is selected */}
             {selectedTx && (
-              <div className="p-2.5 rounded-xl bg-[#10243A] border border-[#00D9FF]/40 space-y-1.5 text-xs">
+              <div className="sas-device-transformer p-2.5 rounded-xl bg-[#10243A] border border-[#00D9FF]/40 space-y-1.5 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-[#DCEAF5]">{selectedTx.designation}</span>
                   <span className="font-mono text-[11px] text-[#00D9FF]">
@@ -6956,8 +6961,10 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
               </div>
             )}
 
+            </div>
+            <div className="sas-sbo-column">
             {/* Interlocking (CILO1), Synchronism-Check (RSYN1) & Select-Before-Operate (CSWI1) Controls */}
-            <div className="p-3 rounded-xl bg-[#10243A] border border-slate-700 space-y-2 text-xs">
+            <div className="sas-device-sbo p-3 rounded-xl bg-[#10243A] border border-slate-700 space-y-2 text-xs">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-[#DCEAF5] flex items-center gap-1.5">
                   <Power className="w-3.5 h-3.5 text-[#00D9FF]" />
@@ -7102,7 +7109,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
 
             {/* Associated Multi-Vendor IED, PRP Network Health & Audited IEC 61850 References */}
             {selectedIed && (
-              <div className="p-2.5 rounded-xl bg-[#030712] border border-slate-800 space-y-1.5 text-[11px]">
+              <div className="sas-device-ied p-2.5 rounded-xl bg-[#030712] border border-slate-800 space-y-1.5 text-[11px]">
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="text-slate-400">IED: </span>
@@ -7169,7 +7176,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
             )}
 
             {/* Active Protection Alarms & SOE */}
-            <div className="space-y-1">
+            <div className="sas-device-alarms space-y-1">
               <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-slate-400 font-bold">
                 <span>Bay Alarms ({selectedBayAlarms.length}) & SOE</span>
                 <button
@@ -7195,11 +7202,11 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
                 ))}
               </div>
             </div>
+            </div>
           </div>
         </div>
-      </div>
       {/* ==================== REMOTE CONTROL CENTER (RCC) & IEC 60870-5-104 TELECONTROL CONSOLE (NORMAL VIEW ONLY) ==================== */}
-      <div className={`${isFullscreen ? 'hidden' : ''} px-4 py-3 bg-[#04101E] border-t border-b border-cyan-500/35 space-y-2.5 text-xs`}>
+      <div className={`${isFullscreen ? 'hidden' : ''} sas-rcc-panel px-4 py-3 bg-[#04101E] border-t border-b border-cyan-500/35 space-y-2.5 text-xs`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="px-2.5 py-1 rounded-md bg-cyan-500/15 border border-cyan-400/50 text-cyan-300 font-extrabold uppercase tracking-wider text-[11px]">
@@ -7235,52 +7242,52 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         </div>
 
         {/* Live IEC-104 Status Badges */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2 font-mono text-[10.5px]">
+        <div className="sas-rcc-telemetry grid gap-2 font-mono text-[10.5px]">
           <div className="p-2 rounded-lg bg-[#08182B] border border-slate-800">
-            <div className="text-slate-400 text-[9.5px]">IEC-104 Link</div>
+            <Network className="sas-rcc-status-icon" aria-hidden="true" /><div className="text-slate-400 text-[9.5px]">IEC-104 Link</div>
             <div className={`font-bold ${iec104Connected ? 'text-cyan-300' : 'text-rose-400'}`}>
               {iec104Connected ? 'CONNECTED' : 'DISCONNECTED'}
             </div>
           </div>
           <div className="p-2 rounded-lg bg-[#08182B] border border-slate-800">
-            <div className="text-slate-400 text-[9.5px]">STARTDT State</div>
+            <Power className="sas-rcc-status-icon" aria-hidden="true" /><div className="text-slate-400 text-[9.5px]">STARTDT State</div>
             <div className={`font-bold ${startDtActive ? 'text-emerald-400' : 'text-rose-400'}`}>
               {startDtActive ? 'STARTDT ACTIVE' : 'STARTDT INACTIVE'}
             </div>
           </div>
           <div className="p-2 rounded-lg bg-[#08182B] border border-slate-800">
-            <div className="text-slate-400 text-[9.5px]">Telemetry (Cyan)</div>
+            <Activity className="sas-rcc-status-icon" aria-hidden="true" /><div className="text-slate-400 text-[9.5px]">Telemetry (Cyan)</div>
             <div className={`font-bold ${telemetryHealth === 'HEALTHY' ? 'text-cyan-300' : telemetryHealth === 'STALE' ? 'text-amber-400' : 'text-rose-400'}`}>
               {telemetryHealth === 'HEALTHY' ? 'HEALTHY (Sub→RCC)' : telemetryHealth === 'STALE' ? 'STALE (OLD_DATA)' : 'OFFLINE'}
             </div>
           </div>
           <div className="p-2 rounded-lg bg-[#08182B] border border-slate-800">
-            <div className="text-slate-400 text-[9.5px]">Remote Control (Green)</div>
+            <Lock className="sas-rcc-status-icon" aria-hidden="true" /><div className="text-slate-400 text-[9.5px]">Remote Control (Green)</div>
             <div className={`font-bold ${iec104Connected && rccAuthorityEnabled && rccFault !== 'RCC_AUTH_UNAVAILABLE' && selectedBay.localRemote === 'REMOTE' ? 'text-emerald-400' : 'text-amber-400'}`}>
               {iec104Connected && rccAuthorityEnabled && rccFault !== 'RCC_AUTH_UNAVAILABLE' && selectedBay.localRemote === 'REMOTE' ? 'ENABLED (RCC→Sub)' : 'BLOCKED'}
             </div>
           </div>
           <div className="p-2 rounded-lg bg-[#08182B] border border-slate-800">
-            <div className="text-slate-400 text-[9.5px]">WAN Routing</div>
+            <ArrowRight className="sas-rcc-status-icon" aria-hidden="true" /><div className="text-slate-400 text-[9.5px]">WAN Routing</div>
             <div className={`font-bold ${wanMode === 'PRIMARY_FIBER' ? 'text-cyan-300' : 'text-amber-300'}`}>
               {wanMode === 'PRIMARY_FIBER' ? 'WAN PRIMARY (FIBER)' : 'WAN BACKUP (MW)'}
             </div>
           </div>
           <div className="p-2 rounded-lg bg-[#08182B] border border-slate-800">
-            <div className="text-slate-400 text-[9.5px]">Firewall Cluster</div>
+            <ShieldAlert className="sas-rcc-status-icon" aria-hidden="true" /><div className="text-slate-400 text-[9.5px]">Firewall Cluster</div>
             <div className={`font-bold ${firewallMode === 'PRIMARY_FW1' ? 'text-emerald-400' : 'text-rose-400'}`}>
               {firewallMode === 'PRIMARY_FW1' ? 'FW-1 PRIMARY' : 'TCP:2404 BLOCKED'}
             </div>
           </div>
           <div className="p-2 rounded-lg bg-[#08182B] border border-slate-800">
-            <div className="text-slate-400 text-[9.5px]">Last Telemetry Update</div>
+            <RefreshCw className="sas-rcc-status-icon" aria-hidden="true" /><div className="text-slate-400 text-[9.5px]">Last Telemetry Update</div>
             <div className="font-bold text-slate-200">{lastTelemetryTime} UTC</div>
           </div>
         </div>
 
         {/* RCC Remote Breaker Command Console & 8 Fault Scenario Controls */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-center bg-[#071628] p-2.5 rounded-xl border border-slate-800">
-          <div className="lg:col-span-5 flex flex-wrap items-center gap-2">
+        <div className="sas-rcc-controls grid gap-2.5 items-center bg-[#071628] p-2.5 rounded-xl border border-slate-800">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold text-emerald-300 text-[11px]">
               RCC Remote Command ({selectedBay.bayCode}):
             </span>
@@ -7311,7 +7318,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
             </button>
           </div>
 
-          <div className="lg:col-span-4 flex items-center gap-2">
+          <div className="flex flex-col items-stretch gap-2 min-w-0">
             <span className="text-[11px] font-bold text-slate-300 whitespace-nowrap">RCC / IEC-104 Faults:</span>
             <select
               value={rccFault}
@@ -7330,10 +7337,11 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
             </select>
           </div>
 
-          <div className="lg:col-span-3 font-mono text-[10px] text-cyan-200 bg-[#030914] p-2 rounded border border-slate-800 truncate" title={rccCommandStatus}>
+          <div className="font-mono text-[10px] text-cyan-200 bg-[#030914] p-2 rounded border border-slate-800 break-words" title={rccCommandStatus}>
             {rccCommandStatus}
           </div>
         </div>
+      </div>
       </div>
 
       {/* ==================== COMPLETE SUBSTATION EQUIPMENT DIRECTORY & QUICK-FOCUS STRIP ==================== */}
@@ -7408,80 +7416,64 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       </div>
 
 
-      {/* SECTION 3: 3D DIGITAL TWIN PROTOCOL VISUALIZATION OVERLAY (HIDDEN IN ENLARGED POPUP) */}
-      <div
-        style={{
-          backgroundColor: 'rgba(5, 19, 36, 0.94)',
-          borderColor: '#1B4B72',
-        }}
-        className={`${isFullscreen ? 'hidden' : ''} mt-2 rounded-xl border p-3 space-y-2 text-xs`}
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="font-extrabold text-white uppercase tracking-wider">
-              3D Digital Twin — Protocol Visualization &amp; Communication Paths
-            </span>
-            <button
-              type="button"
-              onClick={() => setShowProtocolOverlay((p: boolean) => !p)}
-              className="px-2 py-0.5 rounded bg-[#0B2540] border border-[#00CFFF] text-[#77E7FF] text-[10.5px] font-bold"
-            >
+      {/* 3D Digital Twin protocol visualization — compact 3 x 2 neon card layout */}
+      <section className={`${isFullscreen ? 'hidden' : ''} sas-protocol-visualization`}>
+        <header className="sas-protocol-visualization-header">
+          <div className="sas-protocol-visualization-title">
+            <Network size={30} strokeWidth={2.1} aria-hidden="true" />
+            <div>
+              <strong>3D DIGITAL TWIN — PROTOCOL VISUALIZATION &amp; COMMUNICATION PATHS</strong>
+              <small>Live packet monitoring · Protocol paths · IED / Gateway / SCADA communication</small>
+            </div>
+          </div>
+          <div className="sas-protocol-visualization-actions">
+            <button type="button" className="sas-protocol-path-toggle" onClick={() => setShowProtocolOverlay((p: boolean) => !p)}>
               {showProtocolOverlay ? 'Hide Path Labels' : 'Show Path Labels'}
             </button>
+            <div className="sas-protocol-filter-buttons">
+              {['All Protocols', 'IEC 61850 MMS', 'IEC 61850 GOOSE', 'Modbus TCP', 'IEC-104', 'OPC UA', 'Time Synchronization'].map((pf) => (
+                <button key={pf} type="button" onClick={() => setProtocolVisFilter(pf)}
+                  className={protocolVisFilter === pf ? 'is-active' : ''}>{pf}</button>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-1">
-            {[
-              'All Protocols',
-              'IEC 61850 MMS',
-              'IEC 61850 GOOSE',
-              'Modbus TCP',
-              'IEC-104',
-              'OPC UA',
-              'Time Synchronization',
-            ].map((pf) => (
-              <button
-                key={pf}
-                type="button"
-                onClick={() => setProtocolVisFilter(pf)}
-                style={{
-                  backgroundColor: protocolVisFilter === pf ? '#00CFFF' : '#081C30',
-                  color: protocolVisFilter === pf ? '#02101F' : '#DCEAF5',
-                  borderColor: protocolVisFilter === pf ? '#00F0FF' : '#1E466E',
-                }}
-                className="px-2.5 py-1 rounded-lg border text-[10.5px] font-extrabold transition"
-              >
-                {pf}
-              </button>
-            ))}
-          </div>
-        </div>
-
+        </header>
         {showProtocolOverlay && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 pt-1">
-            {PROTOCOL_3D_PATHS.filter(
-              (p) => protocolVisFilter === 'All Protocols' || p.filter === protocolVisFilter
-            ).map((p) => (
-              <div
-                key={p.id}
-                style={{ backgroundColor: '#04101E', borderColor: p.color }}
-                className="rounded-lg border p-2 flex flex-col justify-between gap-1"
-              >
-                <div className="flex items-center justify-between gap-1">
-                  <span style={{ color: p.color }} className="font-mono font-extrabold text-[11px]">
-                    ● {p.label}
-                  </span>
-                  <span className="px-1.5 py-0.2 rounded bg-[#06291E] text-[#4ADE80] font-mono text-[9.5px] font-bold">
-                    PACKETS ACTIVE
-                  </span>
-                </div>
-                <div className="text-[11px] font-bold text-white">{p.path}</div>
-                <div className="text-[10px] text-[#9BC0DF]">{p.detail}</div>
-              </div>
-            ))}
+          <div className="sas-protocol-neon-grid">
+            {PROTOCOL_3D_PATHS.filter((p) => protocolVisFilter === 'All Protocols' || p.filter === protocolVisFilter).map((p) => {
+              const iconMap = [Network, Zap, PlugZap, RadioTower, Database, Clock3];
+              const index = PROTOCOL_3D_PATHS.findIndex((entry) => entry.id === p.id);
+              const ProtocolIcon = iconMap[index] || Network;
+              return (
+                <article key={p.id} className={`sas-protocol-neon-card sas-protocol-neon-card-${index + 1}`}
+                  style={{ '--protocol-accent': p.color } as React.CSSProperties}>
+                  <div className="sas-protocol-neon-heading">
+                    <ProtocolIcon size={34} strokeWidth={2.2} aria-hidden="true" />
+                    <strong>{p.label}</strong>
+                    <span className="sas-protocol-active-pill"><span aria-hidden="true">●</span> PACKETS ACTIVE</span>
+                  </div>
+                  <div className="sas-protocol-neon-description">
+                    <strong>{p.path}</strong>
+                    <p>{p.detail}</p>
+                  </div>
+                  <div className="sas-protocol-neon-footer">
+                    <Activity size={20} aria-hidden="true" />
+                    <span>Live communication path</span>
+                    <ArrowRight size={19} aria-hidden="true" />
+                    <span>Protocol: {p.filter}</span>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
-      </div>
+        <footer className="sas-protocol-visualization-footer">
+          <span>ⓘ &nbsp; Select a protocol filter to view its communication path and associated devices.</span>
+          <span className="sas-protocol-live-monitor"><Activity size={17} /> LIVE MONITORING</span>
+        </footer>
+      </section>
 
+    </div>
     </div>
     </>
   );

@@ -1,10 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Zap, Layers3, Activity, Network, CircuitBoard, Cpu, Bell } from 'lucide-react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { Substation3DScene } from '../components/Substation3DScene';
 import { buildProtocolSummaryCards } from '../data/protocolRegistry';
 export const HeroDashboardPage: React.FC = () => {
   const {
     bays,
+    selectedBayId,
+    setSelectedBayId,
+    simulationRunning,
+    busbars,
+    trendHistory,
     transformers,
     ieds,
     alarms,
@@ -13,6 +19,9 @@ export const HeroDashboardPage: React.FC = () => {
     setActiveTab,
     triggerProtectionTrip,
   } = useSubstationStore();
+  const [detailTab, setDetailTab] = useState<'STATUS' | 'MEASUREMENTS' | 'ALARMS'>('STATUS');
+  const selectedBay = bays.find(b => b.id === selectedBayId) || bays[0];
+  const latestTrend = trendHistory[trendHistory.length - 1];
   const protocolCards = buildProtocolSummaryCards(bays, ieds, gooseControlBlocks, faultScenarios);
 
   const energizedBays = bays.filter((b) => b.energized).length;
@@ -21,64 +30,52 @@ export const HeroDashboardPage: React.FC = () => {
     (bays.find((b) => b.id === 'BAY-132-L1')?.activePowerMw || 0) +
     (bays.find((b) => b.id === 'BAY-132-L2')?.activePowerMw || 0);
 
+  const equipmentInspector = (
+    <aside className="sas-equipment-panel" aria-label="Equipment and feeder control">
+          <div className="sas-region-title"><div><span className="sas-eyebrow">EQUIPMENT INSPECTOR</span><h2>Feeder & Bay Status</h2></div><span className="sas-live-dot">● LIVE</span></div>
+          <label className="sas-field-label" htmlFor="sas-bay-select">Selected equipment</label>
+          <select id="sas-bay-select" value={selectedBayId} onChange={e => setSelectedBayId(e.target.value)} className="sas-field-select">{bays.map(b => <option value={b.id} key={b.id}>{b.id}</option>)}</select>
+          <div className="sas-detail-tabs" role="tablist" aria-label="Equipment details">{(['STATUS','MEASUREMENTS','ALARMS'] as const).map(tab => <button role="tab" aria-selected={detailTab === tab} className={detailTab === tab ? 'active' : ''} onClick={() => setDetailTab(tab)} key={tab}>{tab === 'MEASUREMENTS' ? 'Meters' : tab === 'ALARMS' ? 'Alarms' : 'Status'}</button>)}</div>
+          {selectedBay ? <div className="sas-detail-content">
+            {detailTab === 'STATUS' && <><div className="sas-equipment-hero"><span>{selectedBay.id}</span><strong className={selectedBay.energized ? 'sas-ok' : 'sas-alert-value'}>{selectedBay.energized ? '● ENERGIZED' : '● DE-ENERGIZED'}</strong></div><div className="sas-info-line"><span>Breaker</span><b>{selectedBay.breakerState}</b></div><div className="sas-info-line"><span>Bus disconnector</span><b>{selectedBay.busDisconnectorState}</b></div><div className="sas-info-line"><span>Line disconnector</span><b>{selectedBay.lineDisconnectorState}</b></div><div className="sas-info-line"><span>Earth switch</span><b>{selectedBay.earthSwitchState}</b></div><div className="sas-info-line"><span>Protection trip</span><b>{selectedBay.protectionTripActive ? 'ACTIVE' : 'Clear'}</b></div></>}
+            {detailTab === 'MEASUREMENTS' && <><div className="sas-info-line"><span>Active power</span><b>{selectedBay.activePowerMw.toFixed(2)} MW</b></div><div className="sas-info-line"><span>Voltage AB</span><b>{selectedBay.voltageAbKv?.toFixed(2) ?? '—'} kV</b></div><div className="sas-info-line"><span>Voltage BC</span><b>{selectedBay.voltageBcKv?.toFixed(2) ?? '—'} kV</b></div><div className="sas-info-line"><span>Voltage CA</span><b>{selectedBay.voltageCaKv?.toFixed(2) ?? '—'} kV</b></div></>}
+            {detailTab === 'ALARMS' && <><div className="sas-info-line"><span>Active station alarms</span><b>{activeAlarms}</b></div><p className="sas-inspector-note">Open SCADA/HMI for the complete alarm and event log.</p></>}
+          </div> : <p className="sas-inspector-note">No equipment available.</p>}
+          <div className="sas-inspector-actions"><button onClick={() => setActiveTab('SLD')}>Open Control SLD</button><button onClick={() => setActiveTab('SCADA')}>Operator HMI</button></div>
+          <details className="sas-panel-details"><summary>Engineering tools & safety tests</summary><div><button onClick={() => setActiveTab('FAULTS')}>Fault troubleshooting</button><button onClick={() => setActiveTab('FATSAT')}>FAT / SAT tests</button><button onClick={() => { triggerProtectionTrip('BAY-33-F03', '50/51 Overcurrent'); setActiveTab('SLD'); }}>Demo: Trip Feeder 03</button></div></details>
+        </aside>
+  );
+
   return (
-    <div className="space-y-7 pb-8">
-      {/* Visual redesign only: all actions still use the existing simulation store. */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <span className="rounded-lg border border-cyan-700/50 bg-cyan-950/30 px-4 py-2 text-xs font-bold tracking-wide text-cyan-300">Engineering Lab v2</span>
-        <span className="text-xs text-slate-400">IEC 61850 / Digital Substation Workspace</span>
-      </div>
-
-      {/* Full-width cinematic hero uses the project's existing image asset. */}
-      <section className="relative isolate overflow-hidden rounded-2xl border border-[#1E5275] bg-[#06182c] shadow-2xl min-h-[350px] sm:min-h-[410px] lg:min-h-[445px]">
-        <img src="assets/substation/substation_hero_opt.jpg" alt="132/33 kV substation switchyard" className="absolute inset-0 h-full w-full object-cover object-center" />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#03101f] via-[#03101f]/95 via-[42%] to-[#03101f]/15" />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#03101f]/80 via-transparent to-transparent" />
-        <div className="relative z-10 flex min-h-[350px] sm:min-h-[410px] lg:min-h-[445px] flex-col justify-center px-6 py-10 sm:px-10 lg:px-12 max-w-[760px]">
-          <div className="flex items-center gap-2 text-[10px] sm:text-xs font-bold uppercase tracking-[0.2em] text-cyan-200"><span className="h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_12px_#00cfff]" /> Your Substation Automation Workspace</div>
-          <h1 className="mt-6 font-black uppercase leading-[0.93] tracking-tight" style={{ textShadow: '0 3px 0 #163c60, 0 8px 12px #000b18, 0 0 22px #00a7ff33' }}>
-            <span className="block text-[clamp(4rem,8vw,6.5rem)] bg-gradient-to-b from-white via-[#bfeaff] to-[#268cdb] bg-clip-text text-transparent">SAS</span>
-            <span className="mt-2 block text-[clamp(1.7rem,4vw,3.4rem)] bg-gradient-to-b from-white via-[#8ce8ff] to-[#1676c4] bg-clip-text text-transparent">ENGINEERING HUB</span>
-          </h1>
-          <p className="mt-5 text-[10px] sm:text-xs font-semibold tracking-[0.18em] text-slate-200">LEARN • CONFIGURE • SIMULATE • TROUBLESHOOT • COMMISSION</p>
-          <div className="mt-7 flex flex-wrap items-center gap-3 sm:gap-5">
-            <span className="text-[10px] sm:text-xs font-mono text-slate-300">IEC 61850 / DIGITAL SUBSTATION</span>
-            <button type="button" onClick={() => setActiveTab('SLD')} className="rounded-lg border border-cyan-400/80 bg-[#05243b]/90 px-4 py-2.5 text-xs font-bold text-cyan-100 transition hover:bg-cyan-800/70">ENTER 132/33/11 kV SLD →</button>
-          </div>
-        </div>
-        <div className="absolute bottom-3 right-4 z-10 hidden gap-2 text-[9px] font-mono text-slate-200 md:flex">
-          <span className="rounded border border-slate-500/40 bg-[#03101f]/80 px-3 py-1.5">132 / 33 / 11 kV SWITCHYARD</span>
-          <span className="rounded border border-slate-500/40 bg-[#03101f]/80 px-3 py-1.5">SCADA / PROTECTION & CONTROL</span>
-        </div>
+    <div className="sas-dashboard space-y-5 pb-8">
+      <header className="sas-workspace-heading">
+        <div><span className="sas-eyebrow">SUBSTATION AUTOMATION / WORKSPACE</span><h1>132 / 33 / 11 kV Substation</h1><p>Digital Twin · SCADA / HMI · Protection & Control</p></div>
+        <div className="sas-heading-actions"><span className={`sas-sim-state ${simulationRunning ? 'is-running' : ''}`}>● {simulationRunning ? 'Simulation Running' : 'Simulation Paused'}</span><button onClick={() => setActiveTab('SLD')}>Open SLD</button><button className="sas-action-primary" onClick={() => setActiveTab('SCADA')}>SCADA / HMI</button></div>
+      </header>
+      <section className="sas-kpi-strip" aria-label="Substation telemetry">
+        {[
+          ['Active Power', `${totalMw.toFixed(1)} MW`, 'Live import'],
+          ['132 kV Bus', busbars.find(b => b.voltageKv === 132)?.voltageKvLive != null ? `${busbars.find(b => b.voltageKv === 132)!.voltageKvLive.toFixed(1)} kV` : '—', 'Measured voltage'],
+          ['Frequency', latestTrend?.freqHz != null ? `${latestTrend.freqHz.toFixed(2)} Hz` : '—', 'Simulation trend'],
+          ['Energized Bays', `${energizedBays}/${bays.length}`, 'Online circuits'],
+          ['Transformer T1', `${transformers[0]?.loadPercent ?? '—'}%`, 'Loading'],
+          ['Transformer T2', `${transformers[1]?.loadPercent ?? '—'}%`, 'Loading'],
+          ['IED Devices', String(ieds.length), 'Configured'],
+          ['Active Alarms', String(activeAlarms), activeAlarms ? 'Needs attention' : 'Normal'],
+        ].map(([label, value, note], index) => {
+          const KpiIcon = [Zap, Layers3, Activity, Network, CircuitBoard, CircuitBoard, Cpu, Bell][index];
+          return <div className="sas-kpi" key={label}>
+            <div className="sas-kpi-icon" aria-hidden="true"><KpiIcon size={24} strokeWidth={2.3} /></div>
+            <div className="sas-kpi-copy"><span>{label}</span><strong className={label === 'Active Alarms' && activeAlarms ? 'sas-alert-value' : ''}>{value}</strong><small>{note}</small></div>
+          </div>;
+        })}
       </section>
+        <section className="sas-twin-region" aria-label="3D digital twin">
+          <div className="sas-region-title"><div><span className="sas-eyebrow">LIVE ENGINEERING VIEW</span><h2>3D Digital Twin</h2></div><span className="sas-region-tag">132 / 33 / 11 kV</span></div>
+          <div id="sas-3d-switchyard" className="sas-twin-embed"><Substation3DScene equipmentInspector={equipmentInspector} /></div>
+        </section>
 
-      <section className="space-y-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-[#7ea3c0]">Substation Automation / Practice Lab</p>
-            <h2 className="mt-2 text-2xl sm:text-3xl font-bold text-[#e9f3ff]">132 / 33 / 11 kV Substation</h2>
-            <p className="mt-1 text-sm text-slate-400">Explore the equipment. Follow the power. Understand the automation.</p>
-          </div>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setActiveTab('SLD')} className="rounded-lg border border-[#315674] bg-[#102940] px-4 py-2.5 text-xs font-semibold text-slate-200 hover:bg-[#173c59]">Open SLD</button>
-            <button type="button" onClick={() => setActiveTab('LEARNING')} className="rounded-lg border border-[#168bff] bg-gradient-to-r from-[#079cdb] to-[#166de2] px-4 py-2.5 text-xs font-bold text-white hover:brightness-110">▷ Guided Practice</button>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <div className="rounded-xl border border-[#1b5074] bg-gradient-to-b from-[#0b253d] to-[#061426] p-4"><div className="text-[11px] text-slate-300">Station Import Load</div><div className="mt-3 text-xl font-bold text-cyan-300">{totalMw.toFixed(1)} MW</div><div className="mt-2 text-[10px] text-emerald-400">50.00 Hz • PF 0.952</div></div>
-          <div className="rounded-xl border border-[#1b5074] bg-gradient-to-b from-[#0b253d] to-[#061426] p-4"><div className="text-[11px] text-slate-300">Energized Bays</div><div className="mt-3 text-xl font-bold text-emerald-400">{energizedBays} / {bays.length}</div><div className="mt-2 text-[10px] text-slate-400">Live simulation status</div></div>
-          <div className="rounded-xl border border-[#1b5074] bg-gradient-to-b from-[#0b253d] to-[#061426] p-4"><div className="text-[11px] text-slate-300">Transformers T1 & T2</div><div className="mt-3 text-xl font-bold text-white">2 × 50 MVA</div><div className="mt-2 text-[10px] text-cyan-300">T1: {transformers[0]?.loadPercent}% | T2: {transformers[1]?.loadPercent}%</div></div>
-          <div className="rounded-xl border border-[#1b5074] bg-gradient-to-b from-[#0b253d] to-[#061426] p-4"><div className="text-[11px] text-slate-300">PRP / PTPv2 Sync</div><div className="mt-3 text-xl font-bold text-emerald-400">LOCKED</div><div className="mt-2 text-[10px] text-slate-400">±45 ns IEEE 1588 GM</div></div>
-          <div className="rounded-xl border border-[#1b5074] bg-gradient-to-b from-[#0b253d] to-[#061426] p-4"><div className="text-[11px] text-slate-300">IED Connections</div><div className="mt-3 text-xl font-bold text-cyan-300">{ieds.length} IEDs</div><div className="mt-2 text-[10px] text-slate-400">Configured devices</div></div>
-          <div className="rounded-xl border border-[#1b5074] bg-gradient-to-b from-[#0b253d] to-[#061426] p-4"><div className="text-[11px] text-slate-300">Active Alarms</div><div className={`mt-3 text-xl font-bold ${activeAlarms ? 'text-rose-400' : 'text-emerald-400'}`}>{activeAlarms}</div><div className="mt-2 text-[10px] text-slate-400">{activeAlarms ? 'Review active alarms' : 'System Healthy'}</div></div>
-        </div>
-      </section>
-
-      <div id="sas-3d-switchyard"><Substation3DScene /></div>
-
-      {/* Preserve the existing feeder-trip demo action below the 3D switchyard. */}
-      <button type="button" onClick={() => { triggerProtectionTrip('BAY-33-F03', '50/51 Overcurrent'); setActiveTab('SLD'); }} className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-semibold text-rose-400 hover:bg-rose-500/20">Demo: Trip Feeder 03 Cascade</button>
-
+      <details className="sas-protocol-disclosure"><summary><span><strong>Communication Protocol Overview</strong><small>Six communication workspaces · Open for diagnostics and protocol status</small></span><span>Expand ▾</span></summary>
       {/* SECTION 1: COMMUNICATION PROTOCOL OVERVIEW (6 Core Substation Protocols) */}
       <section
         style={{ backgroundColor: '#061628', borderColor: '#1B4B72' }}
@@ -98,7 +95,7 @@ export const HeroDashboardPage: React.FC = () => {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <div className="sas-protocol-cards grid gap-3">
           {protocolCards.map((card) => (
             <div
               key={card.id}
@@ -160,6 +157,7 @@ export const HeroDashboardPage: React.FC = () => {
         </div>
       </section>
 
+      </details>
     </div>
   );
 };

@@ -16,6 +16,7 @@ import { OpcUaLabPage } from './pages/OpcUaLabPage';
 import { SignalMappingSclPage } from './pages/SignalMappingSclPage';
 import { FaultTroubleshootingPage } from './pages/FaultTroubleshootingPage';
 import { FatSatLabPage } from './pages/FatSatLabPage';
+import { TestingGuidancePage } from './pages/TestingGuidancePage';
 import { LearningAcademyPage } from './pages/LearningAcademyPage';
 import { Iec61850AcademyPage } from './pages/Iec61850AcademyPage';
 import { InterviewPrepPage } from './pages/InterviewPrepPage';
@@ -29,6 +30,7 @@ import {
   Bell,
   BookOpen,
   CheckSquare,
+  ClipboardCheck,
   ChevronDown,
   ChevronRight,
   Cpu,
@@ -87,17 +89,17 @@ export default function App() {
     setUserLanguage,
   } = useAuthStore();
 
+  const [testingGuidanceOpen, setTestingGuidanceOpen] = useState(() => window.location.hash === '#/workspace/TESTING_GUIDANCE');
   const [showLanding, setShowLanding] = useState(() => !window.location.hash.startsWith('#/workspace/'));
-  // Reset the main document scroll when navigating between workspace sections.
-  // The sidebar has its own scroll container and is intentionally unaffected.
-  useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
-  }, [activeTab, showLanding]);
   // Deep-link the active workspace: refreshing /workspace/GOOSE stays in GOOSE Lab.
   useEffect(() => {
     const restoreLocation = () => {
+      if (window.location.hash === '#/workspace/TESTING_GUIDANCE') {
+        setTestingGuidanceOpen(true);
+        setShowLanding(false);
+        return;
+      }
+      setTestingGuidanceOpen(false);
       const match = window.location.hash.match(/^#\/workspace\/([A-Z0-9_]+)$/);
       if (match) {
         const requested = match[1] as ActiveWorkspaceTab;
@@ -120,14 +122,39 @@ export default function App() {
   }, [setActiveTab]);
 
 
+  // Reset the page scroll whenever workspace navigation changes.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
+    return () => cancelAnimationFrame(frame);
+  }, [activeTab, showLanding]);
+
   const openLanding = () => {
     setProfileMenuOpen(false);
     setMobileNavOpen(false);
     window.history.pushState(null, '', '#/');
+    setTestingGuidanceOpen(false);
     setShowLanding(true);
   };
 
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
+  const [topMenuOpen, setTopMenuOpen] = useState<string | null>(null);
+  const [navSearch, setNavSearch] = useState('');
+  const navSearchRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        navSearchRef.current?.focus();
+      }
+      if (event.key === 'Escape') {
+        setTopMenuOpen(null);
+        navSearchRef.current?.blur();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const [profileMenuOpen, setProfileMenuOpen] = useState<boolean>(false);
   const [notifMenuOpen, setNotifMenuOpen] = useState<boolean>(false);
   const [langMenuOpen, setLangMenuOpen] = useState<boolean>(false);
@@ -230,16 +257,38 @@ export default function App() {
     { id: 'FAULTS', label: t('Fault Injection'), icon: <AlertOctagon className="w-4 h-4" />, badge: activeFaults },
     { id: 'FATSAT', label: t('FAT / SAT Laboratory'), icon: <CheckSquare className="w-4 h-4" /> },
     { id: 'IEC61850_ACADEMY', label: t('IEC 61850 Digital Substation'), icon: <GraduationCap className="w-4 h-4" /> },
+    { id: 'TESTING_GUIDANCE' as ActiveWorkspaceTab, label: 'Testing Guidance', icon: <ClipboardCheck className="w-4 h-4" /> },
     { id: 'INTERVIEW_PREP', label: t('Interview Preparation'), icon: <Award className="w-4 h-4" /> },
     { id: 'CCNA_ACADEMY', label: t('CCNA Networking Academy'), icon: <Network className="w-4 h-4" /> },
     { id: 'LEARNING', label: t('Training (EN/TE)'), icon: <BookOpen className="w-4 h-4" /> },
   ];
 
+  const topNavGroups = [
+    { key: 'overview', title: 'Overview', icon: Home, ids: ['HERO'] },
+    { key: 'sld', title: 'SLD & Operation', icon: GitBranch, ids: ['SLD', 'SCADA'] },
+    { key: 'ied', title: 'IED & Signals', icon: Cpu, ids: ['IED', 'IED_SIGNAL_CHAIN'] },
+    { key: 'comms', title: 'Communication', icon: Radio, ids: ['NETWORK', 'GOOSE', 'MMS', 'MODBUS_LAB', 'IEC104_LAB', 'OPCUA_LAB'] },
+    { key: 'tools', title: 'Tools & Test', icon: Settings, ids: ['SIGNALS', 'FAULTS', 'FATSAT', 'IEC61850_ACADEMY', 'TESTING_GUIDANCE', 'INTERVIEW_PREP', 'CCNA_ACADEMY', 'LEARNING'] },
+  ];
+  const filteredNavItems = navItems.filter(item => item.label.toLowerCase().includes(navSearch.trim().toLowerCase()));
+
   const navigate = (tab: ActiveWorkspaceTab) => {
+    if (tab === ('TESTING_GUIDANCE' as ActiveWorkspaceTab)) {
+      window.history.pushState(null, '', '#/workspace/TESTING_GUIDANCE');
+      setTestingGuidanceOpen(true);
+      setShowLanding(false);
+      setMobileNavOpen(false);
+      setTopMenuOpen(null);
+      setNavSearch('');
+      return;
+    }
+    setTestingGuidanceOpen(false);
     window.history.pushState(null, '', `#/workspace/${tab}`);
     setShowLanding(false);
     setActiveTab(tab);
     setMobileNavOpen(false);
+    setTopMenuOpen(null);
+    setNavSearch('');
     setProfileMenuOpen(false);
     setNotifMenuOpen(false);
   };
@@ -260,6 +309,7 @@ export default function App() {
   };
 
   const activeBreadcrumbLabel = () => {
+    if (testingGuidanceOpen) return 'Testing Guidance';
     if (activeTab === 'HERO') return t('Substation Workspace');
     if (activeTab === 'ADMIN_DASHBOARD') return t('Admin Dashboard');
     if (activeTab === 'USER_PROFILE') return t('My Profile');
@@ -346,7 +396,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#030D1B] text-[#DCEAF5] font-sans overflow-x-hidden">
+    <div className="sas-app-shell min-h-screen bg-[#030D1B] text-[#DCEAF5] font-sans overflow-x-hidden">
       {languageBubble}
       <style>{`
         html, body { max-width: 100vw; overflow-x: hidden; }
@@ -389,154 +439,65 @@ export default function App() {
         @media (prefers-reduced-motion: reduce) { .sas-fire-icon,.sas-logo-halo,.sas-gradient-title { animation: none !important; } .sas-nav-item:hover { transform: none; } }
       `}</style>
 
-      {/* Mobile / Tablet Navigation Drawer Overlay */}
-      {mobileNavOpen && (
-        <button
-          type="button"
-          aria-label="Close navigation overlay"
-          onClick={() => setMobileNavOpen(false)}
-          className="fixed inset-0 z-40 bg-black/65 lg:hidden"
-        />
-      )}
-
-      {/* Left Sidebar (Fixed on >=1024px, Slide-Out Drawer on Mobile & Tablet) */}
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 w-[274px] flex flex-col bg-gradient-to-b from-[#0C2339] via-[#07192D] to-[#061323] transition-transform duration-200 ${
-          mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
-        } lg:translate-x-0`}
-      >
-        <div className="px-5 pt-6 pb-5 flex items-center gap-3 border-b border-[#00cfff]/25 bg-gradient-to-r from-[#0b2a44]/60 to-transparent">
-          <button
-            type="button"
-            onClick={() => navigate('HERO')}
-            aria-label="Open substation workspace"
-            className="sas-shared-brand-icon sas-logo-halo w-14 h-14 rounded-2xl border border-[#168bff] bg-[#071d38] flex items-center justify-center shrink-0"
-          >
-            <Zap className="sas-fire-icon w-8 h-8 text-[#aaf6ff] fill-current" />
-          </button>
-          <div className="min-w-0">
-            <div className="sas-shared-brand-title text-[22px] leading-none font-black tracking-tight">
-              Substation
-            </div>
-            <div className="sas-shared-brand-subtitle text-[10px] font-extrabold tracking-[0.24em] text-[#c8eaff] mt-1">
-              AUTOMATION
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setMobileNavOpen(false)}
-            aria-label="Close menu"
-            className="ml-auto lg:hidden p-1.5 rounded-lg border border-[#2A4A64] text-slate-200"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="px-6 pt-4 pb-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.15em] text-[#7D9DB6]">
-          <span>{t('Your Workspace')}</span>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto px-4 pb-4 space-y-1" aria-label="Engineering modules">
-          {navItems.map((item) => {
-            const active = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => navigate(item.id)}
-                aria-current={active ? 'page' : undefined}
-                className={`sas-nav-item w-full min-h-[44px] text-left flex items-center gap-3 rounded-lg px-3.5 py-2 border ${
-                  active
-                    ? 'sas-nav-active bg-gradient-to-r from-[#0D425D] to-[#09283e] border-[#00cfff] text-[#F1FDFF]'
-                    : 'border-transparent text-[#a9c7da] hover:text-white hover:border-[#00cfff]/40 hover:bg-[#123b55]'
-                }`}
-              >
-                <span className={`sas-nav-icon shrink-0 ${active ? 'text-[#77E7FF]' : 'text-[#89A8C0]'}`}>
-                  {item.icon}
-                </span>
-                <span className="text-[12.5px] leading-5 font-semibold flex-1">{item.label}</span>
-                {item.badge !== undefined && item.badge > 0 && (
-                  <span className="rounded bg-[#C43F58]/25 text-[#FF8B9D] px-1.5 text-[10px] font-bold">
-                    {item.badge}
-                  </span>
-                )}
-                {active && <ChevronRight className="w-3.5 h-3.5 text-[#00CFFF]" />}
-              </button>
-            );
-          })}
-
-          {/* RBAC: Admin Dashboard Item (Visible ONLY when authenticated role === 'ADMIN') */}
-          {currentRole === 'ADMIN' && (
-            <div className="pt-2 mt-2 border-t border-[#183B59]">
-              <button
-                type="button"
-                onClick={() => navigate('ADMIN_DASHBOARD')}
-                aria-current={activeTab === 'ADMIN_DASHBOARD' ? 'page' : undefined}
-                className={`sas-nav-item w-full min-h-[44px] text-left flex items-center gap-3 rounded-lg px-3.5 py-2 border ${
-                  activeTab === 'ADMIN_DASHBOARD'
-                    ? 'sas-nav-active bg-gradient-to-r from-[#2D1A47] to-[#132942] border-[#00CFFF] text-white'
-                    : 'border-[#00CFFF]/35 bg-[#092238] text-[#77E7FF] hover:text-white hover:border-[#00CFFF]'
-                }`}
-              >
-                <Shield className="w-4 h-4 text-[#00CFFF] shrink-0" />
-                <span className="text-[12.5px] leading-5 font-extrabold flex-1">Admin Dashboard</span>
-                <span className="rounded bg-[#00CFFF]/20 border border-[#00CFFF]/50 text-[#00CFFF] px-1.5 py-0.5 font-mono text-[9.5px] font-bold">
-                  ADMIN
-                </span>
-              </button>
-            </div>
-          )}
-        </nav>
-
-        <div className="px-5 py-3.5 border-t border-[#00cfff]/30 bg-[#061b2c]/70 text-[10px] text-[#94bed3]">
-          <div className="flex items-center gap-2 truncate">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#22C55E] shrink-0" />
-            <span className="truncate">
-              {currentUser ? displayFullName : 'Private engineering workspace'}
-            </span>
-          </div>
-          <div className="mt-0.5 text-[#7FA6C4]">132/33/11 kV Digital Twin & Academies</div>
-        </div>
-      </aside>
-
-      <div className="min-h-screen lg:ml-[274px] flex flex-col min-w-0">
+      <div className="sas-app-content min-h-screen flex flex-col min-w-0">
         {/* Responsive Sticky Header (Top-Right has Bell + Sign In / Sign Up buttons OR Dynamic User Profile Menu) */}
-        <header className="sticky top-0 z-30 bg-[#061525]/95 backdrop-blur border-b border-[#18334B]">
-          <div className="min-h-[60px] px-3 sm:px-6 py-2 flex items-center justify-between gap-2.5">
-            {/* Left: Hamburger Menu (Mobile/Tablet) + Breadcrumb */}
-            <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-[13px] min-w-0">
-              <button
-                type="button"
-                onClick={() => setMobileNavOpen(true)}
-                aria-label="Open navigation"
-                className="lg:hidden p-2 rounded-lg border border-[#2A4A64] bg-[#081A30] text-[#C6DFEF] hover:border-[#00CFFF]"
-              >
-                <Menu className="w-5 h-5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('HERO')}
-                className="lg:hidden flex items-center gap-1.5 font-black tracking-wider text-[#00CFFF]"
-              >
-                <Zap className="w-4 h-4 text-[#ffb344]" />
-                <span>SAS</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('HERO')}
-                className="hidden sm:inline text-[#8BA9C0] hover:text-[#00CFFF]"
-              >
-                Engineering Hub
-              </button>
-              <span className="hidden sm:inline text-[#66859C]">/</span>
-              <span className="font-bold text-[#E9F3FF] truncate max-w-[165px] sm:max-w-[340px]">
-                {activeBreadcrumbLabel()}
+        <header className="sas-app-header sticky top-0 z-30 bg-[#061525]/95 backdrop-blur border-b border-[#18334B]">
+          <div className="sas-header-single-row px-3 sm:px-5 py-2 flex items-center gap-3">
+            <button type="button" onClick={() => navigate('HERO')} className="sas-top-brand flex shrink-0 items-center gap-2.5 text-left" aria-label="Substation Automation home">
+              <span className="sas-shared-brand-icon sas-logo-halo flex h-11 w-11 items-center justify-center rounded-xl border border-[#168bff] bg-[#071d38]">
+                <Zap className="sas-fire-icon h-7 w-7 fill-current text-[#aaf6ff]" />
               </span>
-              <button type="button" onClick={openLanding} title="Back to opening page" className="ml-1 rounded-lg border border-[#23516B] px-2 py-1.5 text-[11px] font-semibold text-[#72DFFF] hover:bg-[#0A3448] whitespace-nowrap">← {t('Opening Page')}</button>
-            </div>
+              <span>
+                <span className="sas-shared-brand-title block text-[21px] font-black leading-none">Substation</span>
+                <span className="mt-1 block text-[9px] font-extrabold tracking-[0.23em] text-[#c8eaff]">AUTOMATION</span>
+              </span>
+            </button>
 
+          <nav className="sas-top-navigation" aria-label="Engineering modules">
+            <div className="sas-top-groups">
+              <button type="button" className="sas-top-home" title="Substation Workspace" onClick={() => navigate('HERO')}><Home className="h-4 w-4" /></button>
+              {topNavGroups.map(group => {
+                const Icon = group.icon;
+                const active = group.ids.includes(testingGuidanceOpen ? 'TESTING_GUIDANCE' : activeTab);
+                return (
+                  <div key={group.key} className="sas-top-group">
+                    <button type="button" className={`sas-top-group-trigger ${active ? 'is-active' : ''}`}
+                      aria-expanded={topMenuOpen === group.key} aria-haspopup="menu"
+                      onClick={() => setTopMenuOpen(prev => prev === group.key ? null : group.key)}>
+                      <Icon className="h-4 w-4" /><span>{group.title}</span><ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                    {topMenuOpen === group.key && <div className="sas-top-dropdown" role="menu">
+                      {navItems.filter(item => group.ids.includes(item.id)).map(item =>
+                        <button type="button" role="menuitem" key={item.id} onClick={() => navigate(item.id)}
+                          className={`sas-top-dropdown-item ${(testingGuidanceOpen ? item.id === 'TESTING_GUIDANCE' : activeTab === item.id) ? 'is-active' : ''}`}>
+                          {item.icon}<span>{item.label}</span>
+                          {!!item.badge && <span className="sas-top-badge">{item.badge}</span>}
+                        </button>
+                      )}
+                      {group.key === 'tools' && currentRole === 'ADMIN' &&
+                        <button type="button" role="menuitem" className="sas-top-dropdown-item" onClick={() => navigate('ADMIN_DASHBOARD')}>
+                          <Shield className="h-4 w-4" />Admin Dashboard
+                        </button>}
+                    </div>}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="sas-top-search">
+              <input ref={navSearchRef} aria-label="Search navigation" placeholder="Search menu..."
+                value={navSearch} onChange={e => {setNavSearch(e.target.value); setTopMenuOpen(null);}} />
+              <kbd>Ctrl + K</kbd>
+              {navSearch.trim() && <div className="sas-top-search-results" role="menu">
+                {filteredNavItems.length ? filteredNavItems.map(item =>
+                  <button key={item.id} role="menuitem" type="button" onClick={() => navigate(item.id)}>
+                    {item.icon}<span>{item.label}</span>
+                  </button>
+                ) : <span className="sas-top-no-results">No matching modules</span>}
+              </div>}
+            </div>
+          </nav>
             {/* Right: Notifications Bell + Sign In & Sign Up Options (when unauthenticated) OR Dynamic Profile Avatar & Dropdown */}
-            <div className="flex items-center gap-2 sm:gap-3">
+            <div className="sas-header-actions flex items-center gap-2 sm:gap-3">
               {/* Notifications Bell */}
               <div ref={notifRef} className="relative">
                 <button
@@ -592,6 +553,11 @@ export default function App() {
                 )}
               </div>
 
+              <button type="button" title="Settings" aria-label="Account settings"
+                onClick={() => currentUser ? openProfileSection('EDIT_PROFILE') : (setAuthPopupMode('SIGN_IN'), setProfileMenuOpen(false))}
+                className="rounded-full p-2 text-[#DCEAF5] transition hover:bg-[#123B60] hover:text-[#00CFFF]">
+                <Settings className="h-5 w-5" />
+              </button>
               {/* Compact guest profile menu matching the approved visual design. */}
               {!currentUser ? (
                 <div ref={profileRef} className="relative">
@@ -736,38 +702,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Compact Telemetry & Simulator Status Strip */}
-          <div className="px-3 sm:px-6 pb-2.5 flex flex-wrap items-center gap-2 text-[11px] font-mono">
-            <span className="rounded-md border border-[#21405A] bg-[#0A1E32] px-2.5 py-1 text-[#00D9FF]">
-              LOAD: {totalMw.toFixed(1)} MW
-            </span>
-            <span className="rounded-md border border-[#21405A] bg-[#0A1E32] px-2.5 py-1 text-[#22C55E]">
-              FREQ: 50.00 Hz
-            </span>
-            <button
-              type="button"
-              onClick={() => navigate('SCADA')}
-              className={`rounded-md border px-2.5 py-1 font-bold ${
-                unackAlarms
-                  ? 'border-[#FF4D62] text-[#FF7181] bg-[#FF4D62]/10'
-                  : 'border-[#21405A] text-[#A7BBD0] bg-[#0A1E32]'
-              }`}
-            >
-              ALARMS: {unackAlarms} UNACK
-            </button>
-            <button
-              type="button"
-              onClick={toggleSimulationRunning}
-              className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-bold ${
-                simulationRunning
-                  ? 'border-[#22C55E]/40 bg-[#22C55E]/10 text-[#22C55E]'
-                  : 'border-[#FFB547]/40 bg-[#FFB547]/10 text-[#FFB547]'
-              }`}
-            >
-              {simulationRunning ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-              {simulationRunning ? t('Sim Live') : t('Sim Paused')}
-            </button>
-          </div>
         </header>
 
         {lastCommandFeedback && (
@@ -797,7 +731,8 @@ export default function App() {
         )}
 
         {/* Main Workspace Container */}
-        <main className="flex-1 p-2.5 sm:p-5 xl:p-6 w-full min-w-0">
+        <main className="sas-workspace-main flex-1 p-2.5 sm:p-5 xl:p-6 w-full min-w-0">
+          {testingGuidanceOpen ? <TestingGuidancePage /> : <>
           {activeTab === 'HERO' && <HeroDashboardPage />}
           {activeTab === 'IEC61850_ACADEMY' && <Iec61850AcademyPage />}
           {activeTab === 'INTERVIEW_PREP' && <InterviewPrepPage />}
@@ -817,6 +752,7 @@ export default function App() {
           {activeTab === 'LEARNING' && <LearningAcademyPage />}
           {activeTab === 'ADMIN_DASHBOARD' && <AdminDashboardPage />}
           {activeTab === 'USER_PROFILE' && <UserProfilePage />}
+          </>}
         </main>
 
         <footer className="px-4 sm:px-6 py-3 pb-14 sm:pb-3 bg-[#061525] border-t border-[#18334B] text-[10px] text-[#829CB0] flex flex-wrap justify-between gap-2">

@@ -277,3 +277,587 @@ main pre { max-width: 100%; overflow-x: auto; }
 
 /* Final override: floating language menu always opens above its trigger. */
 .sas-language-floating .sas-language-menu { top: auto !important; bottom: calc(100% + 10px) !important; right: 0 !important; max-height: min(420px, 65dvh); overscroll-behavior: contain; }
+
+/* Hybrid SAS UI foundation: shared shell, readable panels and responsive layout. */
+:root {--sas-bg:#030B18;--sas-panel:#081A30;--sas-raised:#142A3C;--sas-cyan:#00CFFF;--sas-blue:#168BFF;--sas-text:#E9F3FF;--sas-healthy:#22C55E;--sas-fault:#FF5C65;--sas-warning:#FFB547}
+html{scroll-behavior:auto}.sas-app-shell{background:var(--sas-bg);color:var(--sas-text)}
+.sas-app-sidebar{background:#07192d;border-right:1px solid #1c4662}.sas-sidebar-nav{scrollbar-width:thin;scrollbar-color:#2a526b transparent}
+.sas-sidebar-nav .sas-nav-item{min-height:40px;border-radius:9px}.sas-app-header{background:rgba(6,21,37,.97);box-shadow:0 5px 18px #0003}
+.sas-workspace-main{width:100%;max-width:1900px;margin-inline:auto}.sas-workspace-main section,.sas-workspace-main article{min-width:0}
+.sas-workspace-main button:focus-visible,.sas-sidebar-nav button:focus-visible{outline:2px solid var(--sas-cyan);outline-offset:2px}
+.sas-dashboard-intro{box-shadow:inset 0 1px #ffffff0b,0 8px 24px #0002}.sas-dashboard #sas-3d-switchyard{scroll-margin-top:110px;min-width:0}
+.sas-dashboard #sas-3d-switchyard canvas{max-width:100%}.sas-dashboard .grid>*{min-width:0}
+@media(min-width:1024px){.sas-app-sidebar{width:248px}.sas-app-content{margin-left:248px}}
+@media(max-width:767px){.sas-workspace-main{padding:10px}.sas-dashboard-intro{padding:14px}.sas-workspace-main table{max-width:100%}}
+@media(prefers-reduced-motion:reduce){.sas-app-shell *{scroll-behavior:auto!important}}
+
+/* Clean hybrid workspace — presentation only; simulation handlers unchanged */
+.sas-dashboard { --sas-line:#1c405c; color:#e9f3ff; }
+.sas-workspace-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:5px 2px 8px; }
+.sas-eyebrow { font-size:10px; letter-spacing:.14em; font-weight:800; color:#69cfe9; }
+.sas-workspace-heading h1 { font-size:clamp(19px,2vw,27px); font-weight:800; margin:3px 0; }
+.sas-workspace-heading p { font-size:12px; color:#91aec5; }
+.sas-heading-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.sas-heading-actions button,.sas-inspector-actions button { padding:9px 12px; background:#0b2841; border:1px solid #295271; border-radius:8px; font-size:12px; font-weight:700; color:#d8eaff; }
+.sas-heading-actions .sas-action-primary { background:#1265ac; border-color:#258de1; color:white; }
+.sas-sim-state { padding:7px 10px; border:1px solid #69462b; border-radius:8px; background:#271d16; color:#ffb547; font-size:11px; font-weight:700; }
+.sas-sim-state.is-running { border-color:#1d624a; background:#0a3028; color:#4ade80; }
+.sas-kpi-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px; }
+.sas-kpi { min-width:0; padding:12px 14px; background:linear-gradient(160deg,#0c2941,#081a30); border:1px solid #20435f; border-radius:11px; display:flex; flex-direction:column; gap:3px; }
+.sas-kpi span { font-size:11px; color:#9bbbd1; } .sas-kpi strong { font-size:clamp(16px,1.5vw,22px); color:#e9f3ff; font-variant-numeric:tabular-nums; } .sas-kpi small { font-size:10px; color:#6c9bb8; }
+.sas-alert-value { color:#ff7079 !important; } .sas-ok { color:#4ade80; }
+.sas-workspace-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(265px,300px); align-items:start; gap:12px; }
+.sas-twin-region,.sas-equipment-panel,.sas-quick-access { background:#081a30; border:1px solid #1c405c; border-radius:13px; min-width:0; overflow:hidden; }
+.sas-region-title { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:13px 15px; border-bottom:1px solid #193a53; }
+.sas-region-title h2 { font-size:15px; font-weight:800; margin-top:2px; } .sas-region-tag,.sas-live-dot { color:#54d9f3; font-size:10px; font-weight:800; white-space:nowrap; }
+.sas-twin-embed { padding:8px; min-width:0; } .sas-twin-embed > div { min-width:0; } .sas-twin-embed select { max-width:100%; }
+.sas-equipment-panel { padding-bottom:13px; } .sas-equipment-panel .sas-field-label { display:block; font-size:11px; color:#a5bed2; margin:14px 14px 6px; }
+.sas-field-select { display:block; width:calc(100% - 28px); margin:0 14px 12px; border-radius:8px; background:#041426; border:1px solid #2b5671; color:#e9f3ff; padding:9px; font-size:12px; }
+.sas-detail-tabs { display:flex; margin:0 13px; border-bottom:1px solid #24455d; } .sas-detail-tabs button { flex:1; padding:9px 2px; font-size:11px; color:#8fb4ce; border-bottom:2px solid transparent; } .sas-detail-tabs button.active { color:#54d9f3; border-color:#00cfff; font-weight:800; }
+.sas-detail-content { padding:12px 14px; min-height:205px; } .sas-equipment-hero { background:#0b2941; border:1px solid #1c405c; border-radius:9px; padding:12px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:11px; } .sas-equipment-hero strong { font-size:10px; }
+.sas-info-line { display:flex; justify-content:space-between; align-items:center; gap:10px; border-bottom:1px solid #19374d; padding:10px 1px; font-size:11px; } .sas-info-line span { color:#9bbbd1; } .sas-info-line b { font-size:11px; text-align:right; } .sas-inspector-note { color:#8eabc3; font-size:11px; padding:12px 0; }
+.sas-inspector-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin:0 13px 13px; } .sas-inspector-actions button { padding:9px 5px; font-size:11px; }
+.sas-panel-details { margin:0 13px; border:1px solid #254760; border-radius:8px; font-size:11px; } .sas-panel-details summary { cursor:pointer; padding:10px; color:#9dc7de; } .sas-panel-details>div { padding:9px; display:grid; gap:7px; } .sas-panel-details button { text-align:left; border:1px solid #28506a; background:#0a243b; border-radius:6px; padding:9px; }
+.sas-quick-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; padding:12px; } .sas-quick-grid button { text-align:left; border:1px solid #24506e; background:#0b2942; border-radius:9px; padding:12px; display:flex; flex-direction:column; gap:5px; } .sas-quick-grid strong { font-size:12px; display:flex; justify-content:space-between; } .sas-quick-grid strong span { color:#00cfff; } .sas-quick-grid small { color:#91b2c9; font-size:10px; }
+.sas-protocol-disclosure { border:1px solid #1c405c; background:#081a30; border-radius:12px; overflow:hidden; } .sas-protocol-disclosure>summary { cursor:pointer; padding:15px; display:flex; justify-content:space-between; align-items:center; gap:10px; list-style:none; } .sas-protocol-disclosure>summary::-webkit-details-marker { display:none; } .sas-protocol-disclosure>summary>span:first-child { display:flex; flex-direction:column; gap:4px; } .sas-protocol-disclosure>summary strong { font-size:13px; } .sas-protocol-disclosure>summary small { font-size:11px; color:#91b2c9; } .sas-protocol-disclosure>section { margin:0 10px 10px; }
+.sas-dashboard button:focus-visible,.sas-dashboard summary:focus-visible,.sas-dashboard select:focus-visible { outline:2px solid #00cfff; outline-offset:2px; }
+@media(min-width:1650px){.sas-kpi-strip{grid-template-columns:repeat(8,minmax(0,1fr))}.sas-workspace-grid{grid-template-columns:minmax(0,1fr) 315px}}
+@media(max-width:1150px){.sas-workspace-grid{grid-template-columns:minmax(0,1fr)}.sas-equipment-panel{max-width:none}.sas-kpi-strip{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:650px){.sas-kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.sas-quick-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sas-workspace-heading{align-items:flex-start}}
+
+
+/* Full-width horizontal engineering navigation; original 3D scene untouched. */
+.sas-app-shell .sas-app-content { margin-left: 0 !important; width: 100%; max-width: none; }
+.sas-app-shell .sas-app-header { z-index: 60; overflow: visible; border-bottom: 1px solid #00cfff; }
+.sas-app-shell .sas-workspace-main { width: 100%; max-width: none; min-width: 0; }
+.sas-top-navigation {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 6px 14px 9px; border-top: 1px solid #16415a;
+  background: #041424; overflow: visible;
+}
+.sas-top-groups { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; min-width: 0; }
+.sas-top-home, .sas-top-group-trigger {
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  min-height: 38px; padding: 7px 12px; border: 1px solid #147a9c;
+  border-radius: 9px; color: #e9f3ff; background: #061b2d;
+  font-size: 12px; font-weight: 750; white-space: nowrap;
+}
+.sas-top-home:hover, .sas-top-group-trigger:hover { border-color: #00cfff; background: #10394c; }
+.sas-top-group-trigger.is-active { background: #00d9ee; color: #001b29; border-color: #00edff; }
+.sas-top-group { position: relative; }
+.sas-top-dropdown, .sas-top-search-results {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 120;
+  min-width: 250px; max-width: min(360px, 94vw); max-height: min(65vh, 480px);
+  overflow-y: auto; padding: 6px; background: #06182b;
+  border: 1px solid #00cfff; border-radius: 10px;
+  box-shadow: 0 15px 32px #000b, 0 0 18px #00cfff2b;
+}
+.sas-top-dropdown-item, .sas-top-search-results button {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 10px; border-radius: 7px; font-size: 12px; color: #dceaf5;
+}
+.sas-top-dropdown-item:hover, .sas-top-search-results button:hover,
+.sas-top-dropdown-item.is-active { color: #00eaff; background: #10354c; }
+.sas-top-badge { margin-left: auto; color: #ff7a8c; }
+.sas-top-search { position: relative; flex: 0 1 245px; min-width: 175px; }
+.sas-top-search input {
+  width: 100%; height: 38px; padding: 8px 65px 8px 13px; outline: none;
+  border: 1px solid #256480; border-radius: 9px; color: #e9f3ff; background: #071b2e;
+  font-size: 12px;
+}
+.sas-top-search input:focus { border-color: #00cfff; box-shadow: 0 0 0 2px #00cfff26; }
+.sas-top-search kbd {
+  position: absolute; right: 8px; top: 9px; font-size: 10px;
+  color: #cdefff; background: #183247; padding: 3px 5px; border-radius: 4px;
+}
+.sas-top-search-results { right: 0; left: auto; width: 310px; }
+.sas-top-no-results { display: block; padding: 12px; color: #9ab7c8; font-size: 12px; }
+@media(max-width: 900px) {
+  .sas-top-navigation { flex-wrap: wrap; }
+  .sas-top-groups { width: 100%; }
+  .sas-top-search { flex: 1 1 100%; }
+}
+@media(max-width: 540px) {
+  .sas-top-groups { gap: 5px; }
+  .sas-top-group-trigger { font-size: 11px; padding: 7px 8px; }
+  .sas-top-brand .sas-shared-brand-title { font-size: 17px; }
+}
+
+/* One-row header: brand | dropdown menus | search | notifications/settings/profile */
+.sas-app-header .sas-header-single-row { min-height: 68px; width: 100%; flex-wrap: nowrap; }
+.sas-app-header .sas-top-brand { flex: 0 0 auto; }
+.sas-app-header .sas-top-navigation { flex: 1 1 auto; min-width: 0; padding: 0 0 0 14px; border-top: 0; border-left: 1px solid #147a9c; background: transparent; gap: 12px; }
+.sas-app-header .sas-top-groups { flex-wrap: nowrap; gap: clamp(4px,.6vw,10px); }
+.sas-app-header .sas-top-group-trigger { padding: 7px clamp(6px,.6vw,12px); font-size: clamp(10px,.73vw,12px); }
+.sas-app-header .sas-top-home { display: none; }
+.sas-app-header .sas-top-search { flex: 1 1 165px; min-width: 125px; max-width: 250px; margin-left: auto; }
+.sas-app-header .sas-header-actions { flex: 0 0 auto; margin-left: auto; }
+@media (max-width: 1280px) {
+  .sas-app-header .sas-top-navigation { gap: 7px; padding-left: 8px; }
+  .sas-app-header .sas-top-group-trigger { gap: 5px; }
+  .sas-app-header .sas-top-search { min-width: 105px; }
+}
+@media (max-width: 1050px) {
+  .sas-app-header .sas-header-single-row { flex-wrap: wrap; }
+  .sas-app-header .sas-top-navigation { order: 3; flex: 1 1 100%; border-left: 0; padding: 6px 0; }
+  .sas-app-header .sas-header-actions { margin-left: auto; }
+}
+@media (max-width: 650px) {
+  .sas-app-header .sas-top-navigation { flex-wrap: wrap; }
+  .sas-app-header .sas-top-groups { flex-wrap: wrap; }
+  .sas-app-header .sas-top-search { flex: 1 1 100%; max-width: none; }
+}
+
+/* Digital Twin + Equipment Inspector: clean two-column presentation */
+.sas-dashboard .sas-scene-extra-controllers,
+.sas-dashboard .sas-scene-bottom-controllers { display:none !important; }
+.sas-dashboard .sas-scene-title-bar > div:last-child { display:none !important; }
+.sas-dashboard .sas-scene-overview.has-inspector {
+  display:grid !important; grid-template-columns:minmax(0, 1fr) minmax(285px, 24%);
+  gap:12px; align-items:stretch; padding:10px; min-width:0;
+}
+.sas-dashboard .sas-scene-overview.has-inspector > .sas-scene-viewport {
+  width:100% !important; min-width:0; height:clamp(430px,42vw,620px) !important;
+  border:1px solid #00cfff; border-radius:12px; overflow:hidden;
+  box-shadow:0 0 14px #00cfff35;
+}
+.sas-dashboard .sas-scene-overview.has-inspector > .sas-equipment-panel {
+  width:100%; min-width:0; height:auto; align-self:stretch;
+  border:1px solid #00cfff; border-radius:12px;
+  box-shadow:0 0 14px #00cfff25;
+}
+.sas-dashboard .sas-scene-overview.has-inspector .sas-detail-content { min-height:0; }
+.sas-dashboard .sas-scene-overview.has-inspector .sas-equipment-panel .sas-region-title {padding:12px;}
+@media(max-width:850px) {
+  .sas-dashboard .sas-scene-overview.has-inspector {grid-template-columns:minmax(0,1fr);}
+  .sas-dashboard .sas-scene-overview.has-inspector > .sas-scene-viewport {height:420px !important;}
+}
+
+
+/* Compact KPI cards with preserved neon icons and live telemetry. */
+.sas-dashboard .sas-kpi-strip { gap: 9px; }
+.sas-dashboard .sas-kpi {
+  display:flex; flex-direction:row; align-items:center; gap:9px;
+  min-height:76px; padding:9px 11px;
+  border:1px solid #0788a7; border-radius:10px;
+  background:linear-gradient(145deg,#082940,#061a30 80%);
+  box-shadow:inset 0 0 12px #00cfff0d,0 0 8px #00cfff12;
+}
+.sas-dashboard .sas-kpi-icon {
+  flex:0 0 43px; min-width:0; height:45px;
+  display:flex; align-items:center; justify-content:center;
+  color:#00eaff; border-right:1px solid #00dfff;
+  filter:drop-shadow(0 0 4px #00dfff9e);
+}
+.sas-dashboard .sas-kpi-icon svg { width:24px; height:24px; }
+.sas-dashboard .sas-kpi-copy { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.sas-dashboard .sas-kpi-copy span { color:#e0f4ff; font-size:11px; }
+.sas-dashboard .sas-kpi-copy strong { color:#fff; font-size:clamp(16px,1.4vw,22px); line-height:1.2; white-space:nowrap; }
+.sas-dashboard .sas-kpi-copy strong.sas-alert-value { color:#ff465b; }
+.sas-dashboard .sas-kpi-copy small { color:#aac6dc; font-size:10px; }
+@media (max-width: 1100px) { .sas-dashboard .sas-kpi { padding:8px; gap:7px; } .sas-dashboard .sas-kpi-icon { flex-basis:38px; height:40px; } }
+@media (max-width: 520px) { .sas-dashboard .sas-kpi { min-height:72px; padding:7px; gap:6px; } .sas-dashboard .sas-kpi-icon { flex-basis:32px; height:37px; } .sas-dashboard .sas-kpi-icon svg { width:20px; height:20px; } .sas-dashboard .sas-kpi-copy strong { font-size:16px; } }
+
+/* Extra-compact KPI strip: reduce vertical footprint without hiding telemetry. */
+.sas-dashboard .sas-kpi-strip { gap: 6px; }
+.sas-dashboard .sas-kpi {
+  min-height: 56px;
+  padding: 5px 9px;
+  gap: 7px;
+  border-radius: 8px;
+}
+.sas-dashboard .sas-kpi-icon {
+  flex: 0 0 30px;
+  height: 34px;
+}
+.sas-dashboard .sas-kpi-icon svg { width: 19px; height: 19px; }
+.sas-dashboard .sas-kpi-copy { gap: 0; line-height: 1.05; }
+.sas-dashboard .sas-kpi-copy span { font-size: 10px; line-height: 1.15; }
+.sas-dashboard .sas-kpi-copy strong { font-size: 17px; line-height: 1.15; }
+.sas-dashboard .sas-kpi-copy small { font-size: 9px; line-height: 1.1; }
+@media(max-width: 1100px) {
+  .sas-dashboard .sas-kpi { min-height: 56px; padding: 5px 7px; gap: 6px; }
+  .sas-dashboard .sas-kpi-icon { flex-basis: 28px; height: 33px; }
+}
+@media(max-width: 520px) {
+  .sas-dashboard .sas-kpi { min-height: 54px; padding: 5px 6px; }
+  .sas-dashboard .sas-kpi-icon { flex-basis: 25px; height: 31px; }
+  .sas-dashboard .sas-kpi-icon svg { width: 17px; height: 17px; }
+  .sas-dashboard .sas-kpi-copy strong { font-size: 15px; }
+}
+
+/* Selected device / SBO + IED / RCC: equal-width engineering console. */
+.sas-engineering-console {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  padding: 12px;
+  background: #030b18;
+}
+.sas-engineering-console > .sas-feeder-details {
+  min-width: 0;
+  width: 100%;
+  padding: 12px !important;
+  border: 1px solid #14506d;
+  border-radius: 12px;
+  background: #081a30;
+}
+.sas-engineering-console .sas-feeder-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto auto auto 1fr;
+  gap: 10px;
+  align-content: start;
+}
+.sas-engineering-console .sas-feeder-grid > * { min-width: 0; }
+/* Named sections keep their columns even when transformer or IED is absent. */
+.sas-engineering-console .sas-device-heading,
+.sas-engineering-console .sas-device-apparatus,
+.sas-engineering-console .sas-device-measurements,
+.sas-engineering-console .sas-device-transformer { grid-column: 1; }
+.sas-engineering-console .sas-device-sbo,
+.sas-engineering-console .sas-device-ied,
+.sas-engineering-console .sas-device-alarms { grid-column: 2; }
+.sas-engineering-console .sas-device-sbo { grid-row: 1 / span 3; }
+.sas-engineering-console .sas-device-ied { grid-row: 4; }
+.sas-engineering-console .sas-device-alarms { grid-row: 5; }
+.sas-engineering-console > .sas-rcc-panel {
+  min-width: 0;
+  width: 100%;
+  padding: 12px !important;
+  border: 1px solid #14506d;
+  border-radius: 12px;
+  background: #081a30;
+  overflow-wrap: anywhere;
+}
+.sas-engineering-console .sas-rcc-panel button,
+.sas-engineering-console .sas-rcc-panel select { max-width: 100%; }
+@media (max-width: 1199px) {
+  .sas-engineering-console { grid-template-columns: 1fr; }
+  .sas-engineering-console .sas-feeder-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 850px) {
+  .sas-engineering-console .sas-feeder-grid { display: flex; flex-direction: column; }
+  .sas-engineering-console { padding: 6px; gap: 8px; }
+}
+
+/* Reference-matched three equal engineering panels: device | SBO/IED | RCC. */
+.sas-engineering-console {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  width: 100%;
+}
+.sas-engineering-console > .sas-feeder-details { min-width: 0; height: 100%; }
+.sas-engineering-console > .sas-rcc-panel { min-width: 0; height: 100%; align-self: stretch; }
+.sas-engineering-console .sas-feeder-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto auto auto 1fr auto;
+  gap: 10px;
+  height: 100%;
+  align-content: start;
+}
+.sas-engineering-console .sas-device-heading { grid-column: 1; grid-row: 1; }
+.sas-engineering-console .sas-device-apparatus { grid-column: 1; grid-row: 2; }
+.sas-engineering-console .sas-device-measurements { grid-column: 1; grid-row: 3; }
+.sas-engineering-console .sas-device-transformer { grid-column: 1; grid-row: 4; }
+.sas-engineering-console .sas-device-sbo { grid-column: 2; grid-row: 1 / span 2; }
+.sas-engineering-console .sas-device-ied { grid-column: 2; grid-row: 3 / span 2; }
+.sas-engineering-console .sas-device-alarms { grid-column: 2; grid-row: 5; }
+@media (min-width: 1200px) {
+  .sas-engineering-console { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+  .sas-engineering-console .sas-feeder-details { padding: 12px !important; }
+  .sas-engineering-console .sas-rcc-panel { padding: 12px !important; }
+  .sas-engineering-console .sas-feeder-grid { grid-template-rows: auto auto auto 1fr auto; }
+  .sas-engineering-console .sas-device-heading { grid-row: 1; }
+  .sas-engineering-console .sas-device-apparatus { grid-row: 2; }
+  .sas-engineering-console .sas-device-measurements { grid-row: 3; }
+  .sas-engineering-console .sas-device-transformer { grid-row: 4; }
+  .sas-engineering-console .sas-device-sbo { grid-row: 1 / span 2; }
+  .sas-engineering-console .sas-device-ied { grid-row: 3 / span 2; }
+  .sas-engineering-console .sas-device-alarms { grid-row: 5; }
+}
+@media (max-width: 1199px) {
+  .sas-engineering-console { grid-template-columns: minmax(0, 1fr); }
+  .sas-engineering-console .sas-feeder-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 850px) {
+  .sas-engineering-console .sas-feeder-grid { display:flex; flex-direction:column; }
+}
+
+/* FINAL: three independent equal-width engineering panels, matching reference. */
+@media (min-width: 1200px) {
+  .sas-engineering-console {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+    align-items: stretch !important;
+  }
+  .sas-engineering-console > .sas-feeder-details {
+    display: contents !important;
+  }
+  .sas-engineering-console .sas-feeder-grid {
+    display: contents !important;
+  }
+  .sas-engineering-console .sas-device-column,
+  .sas-engineering-console .sas-sbo-column,
+  .sas-engineering-console > .sas-rcc-panel {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 14px !important;
+    background: #06172b !important;
+    border: 1px solid #00cfff !important;
+    border-radius: 16px !important;
+    box-shadow: 0 0 10px rgba(0,207,255,.18), inset 0 0 10px rgba(0,207,255,.06);
+    overflow-wrap: anywhere;
+  }
+  .sas-engineering-console .sas-device-column { grid-column: 1 !important; }
+  .sas-engineering-console .sas-sbo-column { grid-column: 2 !important; }
+  .sas-engineering-console > .sas-rcc-panel { grid-column: 3 !important; }
+  .sas-engineering-console .sas-device-column > *,
+  .sas-engineering-console .sas-sbo-column > * {
+    grid-column: auto !important;
+    grid-row: auto !important;
+    min-width: 0;
+  }
+  .sas-engineering-console .sas-device-column .sas-device-apparatus,
+  .sas-engineering-console .sas-sbo-column .sas-device-ied { flex: 1 1 auto; }
+  .sas-engineering-console .sas-rcc-telemetry { grid-template-columns: minmax(0, 1fr) !important; }
+  .sas-engineering-console .sas-rcc-panel .sas-rcc-controls { grid-template-columns: minmax(0, 1fr) !important; }
+}
+@media (max-width: 1199px) {
+  .sas-engineering-console { grid-template-columns: minmax(0, 1fr) !important; }
+  .sas-engineering-console .sas-feeder-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .sas-engineering-console .sas-device-column,
+  .sas-engineering-console .sas-sbo-column { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .sas-engineering-console .sas-device-column { grid-column: 1; }
+  .sas-engineering-console .sas-sbo-column { grid-column: 2; }
+}
+@media (max-width: 850px) {
+  .sas-engineering-console .sas-feeder-grid { display: flex; flex-direction: column; }
+}
+
+/* Reference compact engineering console: remove stretched blank space. */
+@media (min-width: 1200px) {
+ .sas-engineering-console { align-items:start !important; gap:12px !important; padding:10px !important; }
+ .sas-engineering-console .sas-device-column, .sas-engineering-console .sas-sbo-column, .sas-engineering-console > .sas-rcc-panel { height:auto !important; min-height:0 !important; align-self:start !important; gap:9px !important; padding:12px !important; justify-content:flex-start !important; }
+ .sas-engineering-console .sas-device-column .sas-device-apparatus, .sas-engineering-console .sas-sbo-column .sas-device-ied { flex:0 0 auto !important; height:auto !important; min-height:0 !important; }
+ .sas-engineering-console .sas-device-apparatus { padding:10px !important; }
+ .sas-engineering-console .sas-apparatus-grid { gap:6px !important; }
+ .sas-engineering-console .sas-apparatus-grid > div { display:grid !important; grid-template-columns:34px minmax(0,1fr) auto !important; align-items:center !important; gap:8px !important; min-height:42px !important; padding:7px 10px !important; text-align:left !important; }
+ .sas-engineering-console .sas-apparatus-grid > div > :last-child { justify-self:end; }
+ .sas-engineering-console .sas-rcc-telemetry { gap:5px !important; }
+ .sas-engineering-console .sas-rcc-telemetry > div { display:grid !important; grid-template-columns:28px minmax(0,1fr) minmax(0,1fr) !important; align-items:center !important; gap:8px !important; min-height:37px !important; padding:6px 9px !important; }
+ .sas-engineering-console .sas-rcc-panel { gap:8px !important; }
+ .sas-engineering-console .sas-rcc-panel .sas-rcc-controls { gap:7px !important; padding:8px !important; }
+}
+.sas-engineering-console .sas-apparatus-icon { width:22px; height:22px; color:#00e5f5; filter:drop-shadow(0 0 4px rgba(0,229,245,.5)); }
+.sas-engineering-console .sas-rcc-status-icon { width:19px; height:19px; color:#00e5f5; filter:drop-shadow(0 0 3px rgba(0,229,245,.4)); }
+
+/* RCC: match the compact reference panel; override legacy tall card rules. */
+@media (min-width: 1200px) {
+  .sas-engineering-console > .sas-rcc-panel {
+    height: auto !important;
+    min-height: 0 !important;
+    align-self: start !important;
+    padding: 10px 11px !important;
+    gap: 0 !important;
+    justify-content: flex-start !important;
+  }
+  .sas-engineering-console > .sas-rcc-panel > .flex:first-child {
+    gap: 5px !important;
+    margin-bottom: 7px !important;
+  }
+  .sas-engineering-console > .sas-rcc-panel > .flex:first-child > .flex:first-child {
+    gap: 5px !important;
+  }
+  .sas-engineering-console > .sas-rcc-panel > .flex:first-child span {
+    line-height: 1.25 !important;
+  }
+  .sas-engineering-console .sas-rcc-telemetry {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 4px !important;
+    margin: 0 0 7px !important;
+  }
+  .sas-engineering-console .sas-rcc-telemetry > div {
+    display: grid !important;
+    grid-template-columns: 26px minmax(0, 1fr) minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 6px !important;
+    min-height: 31px !important;
+    height: 31px !important;
+    padding: 3px 8px !important;
+    border-radius: 6px !important;
+  }
+  .sas-engineering-console .sas-rcc-status-icon {
+    width: 17px !important;
+    height: 17px !important;
+  }
+  .sas-engineering-console .sas-rcc-telemetry > div > div {
+    line-height: 1.2 !important;
+    font-size: 10px !important;
+  }
+  .sas-engineering-console .sas-rcc-controls {
+    display: grid !important;
+    grid-template-columns: minmax(0,1fr) !important;
+    align-items: start !important;
+    gap: 5px !important;
+    padding: 7px !important;
+    margin: 0 !important;
+    border-radius: 8px !important;
+  }
+  .sas-engineering-console .sas-rcc-controls > div {
+    gap: 5px !important;
+    margin: 0 !important;
+  }
+  .sas-engineering-console .sas-rcc-controls button {
+    padding: 4px 7px !important;
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+  }
+  .sas-engineering-console .sas-rcc-controls select {
+    padding: 5px 7px !important;
+  }
+  .sas-engineering-console .sas-rcc-controls .font-mono {
+    line-height: 1.3 !important;
+  }
+}
+
+/* RCC: second compact pass, approximately 70-85px shorter on desktop. */
+@media (min-width: 1200px) {
+  .sas-engineering-console > .sas-rcc-panel {
+    padding: 8px 10px !important;
+  }
+  .sas-engineering-console > .sas-rcc-panel > .flex:first-child {
+    gap: 3px !important;
+    margin-bottom: 4px !important;
+  }
+  .sas-engineering-console .sas-rcc-telemetry {
+    gap: 2px !important;
+    margin-bottom: 4px !important;
+  }
+  .sas-engineering-console .sas-rcc-telemetry > div {
+    min-height: 26px !important;
+    height: 26px !important;
+    padding: 2px 7px !important;
+    gap: 5px !important;
+  }
+  .sas-engineering-console .sas-rcc-status-icon {
+    width: 15px !important;
+    height: 15px !important;
+  }
+  .sas-engineering-console .sas-rcc-controls {
+    gap: 3px !important;
+    padding: 5px 7px !important;
+  }
+  .sas-engineering-console .sas-rcc-controls > div {
+    gap: 3px !important;
+  }
+  .sas-engineering-console .sas-rcc-controls button {
+    padding: 3px 6px !important;
+  }
+  .sas-engineering-console .sas-rcc-controls select {
+    padding: 3px 6px !important;
+  }
+  .sas-engineering-console .sas-rcc-controls .font-mono {
+    line-height: 1.15 !important;
+  }
+}
+
+/* Live measurements: reference icons, cyan separators, compact panel height. */
+.sas-engineering-console .sas-device-measurements {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 0 !important;
+  padding: 10px 5px !important;
+  min-height: 112px;
+  align-items: stretch;
+}
+.sas-engineering-console .sas-measurement-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 2px 5px;
+  line-height: 1.25;
+}
+.sas-engineering-console .sas-measurement-cell + .sas-measurement-cell {
+  border-left: 1px solid #00cfff99;
+}
+.sas-engineering-console .sas-measurement-icon {
+  color: #00efff;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 3px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 5px #00eaff70);
+}
+@media (max-width: 600px) {
+  .sas-engineering-console .sas-device-measurements { min-height: 100px; padding: 7px 3px !important; }
+  .sas-engineering-console .sas-measurement-icon { width: 22px; height: 22px; }
+}
+
+/* Equal-height three-panel engineering console (desktop).
+   Let the tallest panel define the shared grid row; retain all controls and icons. */
+@media (min-width: 1200px) {
+  .sas-engineering-console {
+    align-items: stretch !important;
+    grid-auto-rows: minmax(0, auto);
+  }
+  .sas-engineering-console .sas-device-column,
+  .sas-engineering-console .sas-sbo-column,
+  .sas-engineering-console > .sas-rcc-panel {
+    height: 100% !important;
+    min-height: 0 !important;
+    align-self: stretch !important;
+    box-sizing: border-box;
+  }
+  .sas-engineering-console .sas-device-column .sas-device-measurements {
+    margin-top: auto;
+  }
+  .sas-engineering-console .sas-sbo-column .sas-device-alarms {
+    margin-top: auto;
+  }
+  .sas-engineering-console > .sas-rcc-panel .sas-rcc-controls {
+    margin-top: auto !important;
+  }
+}
+
+/* Six-protocol neon reference layout */
+.sas-protocol-visualization{background:linear-gradient(155deg,#031326,#051a30);border:1px solid #008ed1;border-radius:16px;padding:16px;margin-top:12px;color:#f2f9ff;box-shadow:0 0 20px #00bfff15}
+.sas-protocol-visualization-header{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #12405c;padding-bottom:15px;margin-bottom:16px;flex-wrap:wrap}
+.sas-protocol-visualization-title{display:flex;align-items:center;gap:15px;min-width:300px}
+.sas-protocol-visualization-title>svg{color:#00eaff;flex-shrink:0;filter:drop-shadow(0 0 6px #00eaff80)}
+.sas-protocol-visualization-title>div{display:flex;flex-direction:column;gap:4px}
+.sas-protocol-visualization-title strong{font-size:14px;letter-spacing:.2px}
+.sas-protocol-visualization-title small{font-size:11px;color:#a9c9e0}
+.sas-protocol-visualization-actions,.sas-protocol-filter-buttons{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.sas-protocol-visualization-actions button{border:1px solid #31536c;background:#0b233b;color:#e4f5ff;border-radius:8px;padding:8px 10px;font-size:11px;font-weight:750;cursor:pointer}
+.sas-protocol-visualization-actions .sas-protocol-path-toggle{border-color:#00cfff;color:#78edff;background:#062a41}
+.sas-protocol-filter-buttons button.is-active{background:#00cfff;color:#001322;border-color:#00eaff;box-shadow:0 0 12px #00cfff70}
+.sas-protocol-neon-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.sas-protocol-neon-card{--protocol-accent:#00dfff;min-width:0;border:2px solid var(--protocol-accent);border-radius:13px;padding:16px 18px;background:linear-gradient(160deg,#08243a,#041325 80%);box-shadow:inset 0 0 16px #00cfff0a,0 0 12px color-mix(in srgb,var(--protocol-accent) 28%,transparent);display:flex;flex-direction:column;gap:12px;min-height:194px}
+.sas-protocol-neon-heading{display:flex;align-items:center;gap:12px;color:var(--protocol-accent);border-bottom:1px solid #34516b;padding-bottom:12px;min-width:0}
+.sas-protocol-neon-heading>svg{flex-shrink:0;filter:drop-shadow(0 0 5px currentColor)}
+.sas-protocol-neon-heading>strong{font-size:14px;line-height:1.3;flex:1;min-width:0}
+.sas-protocol-active-pill{flex-shrink:0;color:#66ffc2;background:#053626;border:1px solid #148b4c;border-radius:6px;padding:5px 7px;font-size:9px;font-weight:800;white-space:nowrap}
+.sas-protocol-neon-description{flex:1;min-width:0}
+.sas-protocol-neon-description>strong{font-size:12px;line-height:1.5}
+.sas-protocol-neon-description p{font-size:11px;line-height:1.5;color:#a8c9e6;margin:6px 0 0}
+.sas-protocol-neon-footer{display:flex;align-items:center;gap:9px;border-top:1px solid #31516b;padding-top:10px;color:#67eacb;font-size:11px;font-weight:650}
+.sas-protocol-neon-footer svg:nth-of-type(2){margin-left:auto}
+.sas-protocol-visualization-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:16px;padding:10px 12px;border:1px solid #205575;border-radius:9px;background:#09233c;font-size:11px;color:#d3e8f9}
+.sas-protocol-live-monitor{display:flex;align-items:center;gap:7px;border:1px solid #00cc7e;border-radius:7px;padding:5px 9px;color:#7dffd2;font-weight:800;white-space:nowrap}
+@media(max-width:1200px){.sas-protocol-neon-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:740px){.sas-protocol-neon-grid{grid-template-columns:1fr}.sas-protocol-visualization{padding:10px}.sas-protocol-visualization-title{min-width:0}.sas-protocol-neon-card{min-height:0}.sas-protocol-visualization-footer{flex-wrap:wrap}}
