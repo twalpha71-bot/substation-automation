@@ -3,7 +3,6 @@ import { useSubstationStore, ActiveWorkspaceTab } from './simulation/useSubstati
 import { useAuthStore, computeUserInitials, ProfileSectionTab } from './auth/useAuthStore';
 import { useSimulationLoop } from './hooks/useSimulationLoop';
 import { HeroDashboardPage } from './pages/HeroDashboardPage';
-import { SubstationLandingPage } from './pages/SubstationLandingPage';
 import { SldWorkspacePage } from './pages/SldWorkspacePage';
 import { ScadaHmiPage } from './pages/ScadaHmiPage';
 import { IedExplorerPage } from './pages/IedExplorerPage';
@@ -90,7 +89,7 @@ export default function App() {
   } = useAuthStore();
 
   const [testingGuidanceOpen, setTestingGuidanceOpen] = useState(() => window.location.hash === '#/workspace/TESTING_GUIDANCE');
-  const [showLanding, setShowLanding] = useState(() => !window.location.hash.startsWith('#/workspace/'));
+  const [showLanding, setShowLanding] = useState(false);
   // Deep-link the active workspace: refreshing /workspace/GOOSE stays in GOOSE Lab.
   useEffect(() => {
     const restoreLocation = () => {
@@ -110,7 +109,12 @@ export default function App() {
           return;
         }
       }
-      setShowLanding(true);
+      // Unknown or root URL: go directly to the main dashboard.
+      setActiveTab('HERO');
+      setShowLanding(false);
+      if (window.location.hash !== '#/workspace/HERO') {
+        window.history.replaceState(null, '', '#/workspace/HERO');
+      }
     };
     restoreLocation();
     window.addEventListener('popstate', restoreLocation);
@@ -127,14 +131,6 @@ export default function App() {
     const frame = requestAnimationFrame(() => window.scrollTo({top:0,left:0,behavior:'instant'}));
     return () => cancelAnimationFrame(frame);
   }, [activeTab, showLanding]);
-
-  const openLanding = () => {
-    setProfileMenuOpen(false);
-    setMobileNavOpen(false);
-    window.history.pushState(null, '', '#/');
-    setTestingGuidanceOpen(false);
-    setShowLanding(true);
-  };
 
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
   const [topMenuOpen, setTopMenuOpen] = useState<string | null>(null);
@@ -363,37 +359,6 @@ export default function App() {
               </div>
               </>
   );
-
-  if (showLanding) {
-    return (
-      <div className="relative min-h-screen">
-        {languageBubble}
-        <SubstationLandingPage destinations={navItems.map(item => ({ label: item.label, tab: item.id }))} onEnter={(tab) => navigate((tab || 'HERO') as ActiveWorkspaceTab)} />
-        <div ref={profileRef} className="fixed right-4 top-5 sm:right-8 sm:top-7 z-[80] text-[#E9F3FF]">
-          <button type="button" aria-label="Open profile menu" aria-expanded={profileMenuOpen} onClick={() => setProfileMenuOpen(v => !v)} className="flex items-center gap-2 rounded-full border border-[#00CFFF]/65 bg-[#06182B] p-1.5 shadow-[0_0_16px_#00CFFF33]">
-            {currentUser?.avatarDataUrl ? <img src={currentUser.avatarDataUrl} alt="Profile" className="h-9 w-9 rounded-full object-cover" /> : currentUser ? <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#6366F1] to-[#4338CA] text-xs font-black">{userInitials}</span> : <UserRound className="h-7 w-7 m-1 text-[#9EEFFF]" />}
-            <ChevronDown className="h-4 w-4 text-[#9BC0DF]" />
-          </button>
-          {profileMenuOpen && <div className="absolute right-0 top-full mt-2 w-[min(300px,calc(100vw-32px))] rounded-xl border border-[#00CFFF]/65 bg-[#06182B] p-3 shadow-[0_16px_45px_#000b]" style={{backgroundColor:'#06182B',backdropFilter:'none',opacity:1}}>
-            {currentUser ? <>
-              <div className="border-b border-[#25415B] px-2 pb-3"><div className="truncate text-sm font-extrabold">{displayFullName}</div><div className="mt-1 flex justify-between gap-2 text-[11px]"><span className="text-[#00CFFF]">{currentUser.role === 'ADMIN' ? 'Admin' : 'Student'}</span><span className="truncate text-[#A6C5D9]">{currentUser.email}</span></div></div>
-              <div className="py-2 space-y-0.5">
-                <button onClick={() => openProfileSection('MY_PROFILE')} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-xs font-semibold hover:bg-[#102944]"><ShieldCheck className="h-4 w-4" />{t('My Profile')}</button>
-                <button onClick={() => openProfileSection('LEARNING_PROGRESS')} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-xs font-semibold hover:bg-[#102944]"><GraduationCap className="h-4 w-4" />{t('Learning Progress')}</button>
-                <button onClick={() => openProfileSection('EDIT_PROFILE')} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-xs font-semibold hover:bg-[#102944]"><Settings className="h-4 w-4" />{t('Edit Profile')}</button>
-                <button onClick={() => openProfileSection('CHANGE_PASSWORD')} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-xs font-semibold hover:bg-[#102944]"><Lock className="h-4 w-4" />{t('Change Password')}</button>
-              </div>
-              <button onClick={() => {signOut();setProfileMenuOpen(false);}} className="flex w-full items-center gap-3 border-t border-[#25415B] px-2 pt-3 pb-1 text-left text-xs font-bold text-[#FF5C65]"><Power className="h-4 w-4" />{t('Sign Out')}</button>
-            </> : <>
-              <div className="flex items-center gap-3 border-b border-[#25415B] pb-3"><div className="rounded-full border border-[#00CFFF] p-2"><UserRound className="h-5 w-5" /></div><div><div className="text-sm font-extrabold">{t('Guest User')}</div><div className="text-[11px] text-[#A6C5D9]">{t('Sign in to personalize your experience')}</div></div></div>
-              <div className="space-y-2 pt-3"><button onClick={() => {setProfileMenuOpen(false);setAuthPopupMode('SIGN_IN');}} className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#00D9FF] bg-gradient-to-r from-[#008FF0] to-[#1652D6] py-2.5 text-xs font-bold"><LogIn className="h-4 w-4" />{t('Sign In')}</button><button onClick={() => {setProfileMenuOpen(false);setAuthPopupMode('SIGN_UP');}} className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#00D9FF] bg-[#062F3E] py-2.5 text-xs font-bold text-[#4AF1F2]"><UserRoundPlus className="h-4 w-4" />{t('Sign Up')}</button><div className="py-1 text-center text-[11px] text-[#8FAFC8]">or continue as Guest</div><button onClick={() => setProfileMenuOpen(false)} className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#57718B] bg-[#1A334B] py-2.5 text-xs font-semibold"><Rocket className="h-4 w-4" />{t('Continue as Guest')}</button></div>
-            </>}
-          </div>}
-        </div>
-        {authPopupMode && <div role="dialog" aria-modal="true" aria-label="Authentication popup" onClick={() => setAuthPopupMode(null)} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-3 sm:p-5"><AuthPortalPage isModal initialMode={authPopupMode} onClose={() => setAuthPopupMode(null)} onSuccessRedirect={() => setAuthPopupMode(null)} /></div>}
-      </div>
-    );
-  }
 
   return (
     <div className="sas-app-shell min-h-screen bg-[#030D1B] text-[#DCEAF5] font-sans overflow-x-hidden">
