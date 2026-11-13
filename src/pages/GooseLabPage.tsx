@@ -120,9 +120,9 @@ export const GooseLabPage: React.FC = () => {
         gridTemplateColumns: '104px minmax(0, 1fr)',
         alignItems: 'center',
         borderBottom: '1px solid #122E49',
-        padding: '4.5px 0',
+        padding: '3px 0',
       }}
-      className="text-[11.5px] last:border-0"
+      className="goose-detail-row text-[11.5px] last:border-0"
     >
       <span className="text-[#9BC0DF] font-medium">{label}</span>
       <span style={{ color: valueColor }} className="break-all text-right font-mono font-bold">
@@ -132,7 +132,53 @@ export const GooseLabPage: React.FC = () => {
   );
 
   return (
-    <div style={{ backgroundColor: '#030B18', color: '#E9F3FF' }} className="space-y-3 pb-5 text-xs select-none">
+    <div style={{ backgroundColor: '#030B18', color: '#E9F3FF' }} className="goose-compact space-y-2 pb-3 text-xs select-none">
+      <style>{`
+        .goose-compact .goose-equipment-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.16fr) minmax(0,1fr); gap:9px; align-items:stretch; }
+        .goose-compact .goose-device-grid { display:grid; grid-template-columns:40% minmax(0,1fr); gap:8px; align-items:center; }
+        .goose-compact .goose-device-image {height:152px!important; min-width:0; max-width:100%; overflow:hidden; position:relative;}
+        .goose-compact .goose-device-image img {display:block!important; width:100%!important; height:128px!important; max-width:100%!important; max-height:128px!important; min-height:0!important; min-width:0!important; object-fit:contain!important; object-position:center!important; flex-shrink:1!important;}
+        .goose-compact .goose-switch-image {display:block!important;width:100%!important;height:115px!important;max-height:115px!important;max-width:110px!important;object-fit:contain!important;object-position:center!important;}
+        .goose-compact .goose-equipment-grid > div {min-width:0;}
+        .goose-compact .goose-mid-grid {display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;align-items:stretch;}
+        .goose-compact .goose-mid-grid > .goose-mid-row {display:contents;}
+        .goose-compact .goose-mid-grid > .goose-mid-row > div {min-width:0;grid-column:auto!important;width:100%;}
+        .goose-compact .goose-mid-grid > .goose-mid-row > div > section {height:100%;min-width:0;padding:10px!important;}
+        .goose-compact .goose-mid-grid > .goose-mid-row > div > section h3 {font-size:11px!important;line-height:1.3;margin-bottom:7px;padding-bottom:7px;}
+        .goose-compact .goose-mid-grid .goose-detail-row {font-size:10px!important;grid-template-columns:74px minmax(0,1fr)!important;}
+        .goose-compact .goose-mid-grid .goose-detail-row span {overflow-wrap:anywhere;}
+        .goose-compact .goose-mid-grid .goose-mid-row .grid-cols-2 button {padding:7px 4px!important;font-size:10px!important;}
+        .goose-compact .goose-mid-grid table {font-size:10px;}
+        .goose-compact .goose-mid-grid table td,.goose-compact .goose-mid-grid table th {padding:5px 3px!important;}
+        .goose-compact .goose-mid-grid .goose-mid-row {gap:0!important;}
+        .goose-compact .goose-equipment-grid > div {height:250px;min-height:0;}
+        .goose-compact .goose-equipment-grid > div > .goose-device-body {flex:1;min-height:0;}
+        .goose-compact .goose-equipment-grid .goose-detail-row {font-size:10px!important;grid-template-columns:80px minmax(0,1fr)!important;padding:3px 0!important;}
+        .goose-compact .goose-equipment-grid .goose-detail-row span {overflow-wrap:anywhere;}
+        .goose-compact .goose-equipment-grid .goose-device-image {height:142px!important;}
+        .goose-compact .goose-equipment-grid .goose-device-image img {height:122px!important;max-height:122px!important;}
+        .goose-compact .goose-equipment-grid .goose-switch-image {height:105px!important;max-height:105px!important;}
+        .goose-compact .goose-equipment-grid .goose-flow-tag {font-size:9px;line-height:1.35;padding:4px 6px;}
+        .goose-compact .goose-bottom-grid {display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1.55fr) minmax(0,1.2fr);gap:9px;}
+        .goose-compact .goose-bottom-grid > div {min-width:0;grid-column:auto!important;}
+        .goose-compact .goose-bottom-grid > div > section {height:100%;padding:10px!important;}
+        @media(max-width:1250px){.goose-compact .goose-mid-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+        @media(max-width:900px){.goose-compact .goose-mid-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.goose-compact .goose-bottom-grid{grid-template-columns:1fr 1fr}.goose-compact .goose-equipment-grid{grid-template-columns:1fr!important}.goose-compact .goose-equipment-grid>div{height:auto;min-height:225px}}
+        @media(max-width:650px){.goose-compact .goose-mid-grid,.goose-compact .goose-bottom-grid{grid-template-columns:1fr}}
+        .goose-compact .goose-mid-grid .goose-mid-row .goose-detail-row {grid-template-columns:90px minmax(0,1fr)!important;}
+        .goose-compact .goose-flow-track {height:5px; flex:1; position:relative; border-radius:12px; background:linear-gradient(90deg,#005d6b,#00f4cb,#005d6b); box-shadow:0 0 11px #00e9c6; overflow:visible;}
+        .goose-compact .goose-flow-track::before {content:'';position:absolute;inset:-8px 0;background:repeating-linear-gradient(90deg,transparent 0 20px,#7affcf 21px 27px,transparent 28px 42px);clip-path:polygon(0 36%,100% 36%,100% 65%,0 65%);animation:goose-packets 1.25s linear infinite;filter:drop-shadow(0 0 5px #54ffbb);}
+        .goose-compact .goose-flow-track::after {content:'➤  ➤  ➤';position:absolute;left:0;right:0;top:-11px;color:#7affbf;font-size:19px;letter-spacing:10px;white-space:nowrap;overflow:hidden;animation:goose-packets 1.25s linear infinite;}
+        .goose-compact .goose-flow-track.goose-flow-fault {background:linear-gradient(90deg,#bd3b42,#ff5666);box-shadow:0 0 9px #f43f5e;}
+        .goose-compact .goose-flow-track.goose-flow-fault::before,.goose-compact .goose-flow-track.goose-flow-fault::after {animation-play-state:paused;color:#ff6576;filter:none;opacity:.4;}
+        .goose-compact .goose-flow-track.goose-flow-timeout::before,.goose-compact .goose-flow-track.goose-flow-timeout::after {display:none;}
+        .goose-compact .goose-flow-tag {padding:5px 7px;border:1px solid #00d9da;border-radius:7px;background:#002c3b;color:#90fff3;font:700 10px/1.5 monospace;text-align:left;}
+        @keyframes goose-packets {from{background-position:0 0;transform:translateX(-8px)}to{background-position:42px 0;transform:translateX(8px)}}
+        
+        @media(max-width:680px){.goose-compact .goose-mid-grid{grid-template-columns:1fr}.goose-compact .goose-equipment-grid{grid-template-columns:1fr!important}}
+        
+        @media(prefers-reduced-motion:reduce){.goose-compact .goose-flow-track::before,.goose-compact .goose-flow-track::after{animation:none}}
+      `}</style>
       {/* 1. TOP HEADER BAR Matching Image 1 */}
       <div
         style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }}
@@ -218,16 +264,14 @@ export const GooseLabPage: React.FC = () => {
           borderColor: '#1B4B72',
           boxShadow: '0 6px 22px rgba(0, 0, 0, 0.45)',
         }}
-        className="rounded-xl border p-3"
+        className="rounded-xl border p-2"
       >
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: '1.15fr 0.85fr 1.15fr',
-            gap: '12px',
+            gap: '9px',
             alignItems: 'stretch',
           }}
-          className="min-w-[860px] overflow-x-auto"
+          className="goose-equipment-grid"
         >
           {/* PANEL A: Publisher IED */}
           <div
@@ -236,7 +280,7 @@ export const GooseLabPage: React.FC = () => {
               borderColor: '#00CFFF',
               boxShadow: 'inset 0 0 16px rgba(0, 207, 255, 0.08)',
             }}
-            className="rounded-xl border p-3.5 flex flex-col justify-between"
+            className="rounded-xl border p-2.5 flex flex-col justify-between min-w-0 overflow-hidden"
           >
             <div className="mb-2.5 flex items-center gap-2 text-sm font-extrabold text-white">
               <Radio className="w-4 h-4 text-[#00CFFF]" />
@@ -248,8 +292,8 @@ export const GooseLabPage: React.FC = () => {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: '46% 54%',
-                gap: '12px',
+                gridTemplateColumns: 'minmax(0,43%) minmax(0,1fr)',
+                gap: '8px',
                 alignItems: 'center',
               }}
             >
@@ -259,16 +303,16 @@ export const GooseLabPage: React.FC = () => {
                   borderColor: '#173C5E',
                   boxShadow: '0 0 14px rgba(0, 207, 255, 0.12)',
                 }}
-                className="rounded-lg border p-2 flex items-center justify-center h-[196px]"
+                className="goose-device-image rounded-lg border p-2 flex items-center justify-center"
               >
                 <img
                   src={publisherImg}
                   alt={`Publisher IED ${gocb.publisherIedName}`}
-                  style={{ maxHeight: '180px', width: '100%', objectFit: 'contain' }}
+                  style={{ width: '100%', height: 128, maxHeight: 128, maxWidth: '100%', objectFit: 'contain' }}
                 />
               </div>
 
-              <div className="pr-1">
+              <div className="pr-1 min-w-0">
                 <div
                   style={{ color: gocb.mismatchFault === 'TIMEOUT' ? '#FF5C65' : '#4ADE80' }}
                   className="font-extrabold text-xs mb-1.5"
@@ -285,77 +329,24 @@ export const GooseLabPage: React.FC = () => {
             </div>
           </div>
 
-          {/* PANEL B: GOOSE Communication Flow (Industrial Ethernet Station-Bus Switch) */}
-          <div
-            style={{
-              backgroundColor: '#071B2F',
-              borderColor: isHealthy ? '#00CFFF' : '#FF5C65',
-              boxShadow: 'inset 0 0 16px rgba(0, 207, 255, 0.08)',
-            }}
-            className="rounded-xl border p-3.5 flex flex-col items-center justify-between text-center"
-          >
-            <div>
-              <div className="flex items-center justify-center gap-1.5 text-sm font-extrabold text-white">
-                <Layers className="w-4 h-4 text-[#00CFFF]" />
-                <span>GOOSE Communication Flow</span>
+          {/* PANEL B: animated real simulation-driven Publisher -> Switch -> Subscriber */}
+          <div className="rounded-xl border border-[#00CFFF] bg-[#071B2F] p-2.5 flex flex-col items-center justify-between text-center min-w-0 overflow-hidden">
+            <div className="text-sm font-extrabold text-white flex items-center gap-2"><Layers className="h-4 w-4 text-cyan-400"/>GOOSE Communication Flow</div>
+            <div className="text-[10px] text-[#9BC0DF]">IEC 61850-8-1 · L2 Ethernet Multicast · 0x88B8</div>
+            <div className="flex items-start justify-between gap-2 w-full my-2">
+              <div className="goose-flow-tag">GOOSE (L2)<br/>APPID: {gocb.appId}<br/>VLAN: {gocb.vlanId}<br/>stNum: {gocb.stNum} · sqNum: {gocb.sqNum}</div>
+              <div className="goose-flow-tag">{isHealthy ? '✓ SUBSCRIBED' : '⚠ FAULT'}<br/>confRev: {gocb.confRev}<br/>ExtRef: {boundExtRefCount}/{gocb.extRefs.length}</div>
+            </div>
+            <div className="flex items-center w-full gap-1.5 min-w-0">
+              <div className={`goose-flow-track ${gocb.mismatchFault === 'TIMEOUT' ? 'goose-flow-timeout' : ''}`} aria-label="GOOSE frames from publisher to switch"/>
+              <div className="shrink-0 w-[92px] sm:w-[112px] flex flex-col items-center min-w-0 overflow-hidden">
+                <img src={LAB_HW_ASSETS.INDUSTRIAL_SWITCH} alt="Industrial Ethernet station-bus switch" className="goose-switch-image"/>
+                <span className="text-[10px] font-bold text-white">Station-Bus Switch</span>
+                <span className="text-[10px] text-cyan-300">VLAN {gocb.vlanId}</span>
               </div>
-              <div className="text-xs text-[#DCEAF5] font-semibold mt-1">
-                IEC 61850 GOOSE — Ethernet Multicast — EtherType 0x88B8 · VLAN {gocb.vlanId}
-              </div>
+              <div className={`goose-flow-track ${isHealthy ? '' : 'goose-flow-fault'} ${gocb.mismatchFault === 'TIMEOUT' ? 'goose-flow-timeout' : ''}`} aria-label="GOOSE frames from switch to subscriber"/>
             </div>
-
-            <div className="w-full flex items-center justify-center gap-2.5 my-2">
-              <span
-                style={{
-                  color: gocb.mismatchFault === 'TIMEOUT' ? '#FF5C65' : '#22C55E',
-                  textShadow: '0 0 8px rgba(34, 197, 94, 0.5)',
-                }}
-                className="text-lg font-black tracking-tighter shrink-0"
-              >
-                {gocb.mismatchFault === 'TIMEOUT' ? '✕✕' : '➜➜'}
-              </span>
-
-              <div
-                style={{
-                  backgroundColor: '#040E1A',
-                  borderColor: '#194368',
-                  boxShadow: '0 0 14px rgba(0, 207, 255, 0.14)',
-                }}
-                className="rounded-lg border px-2.5 py-2 flex-1 flex items-center justify-center"
-              >
-                <img
-                  src={LAB_HW_ASSETS.INDUSTRIAL_SWITCH}
-                  alt="Industrial Ethernet Station-Bus Switch"
-                  style={{ maxHeight: '72px', width: '100%', objectFit: 'contain' }}
-                />
-              </div>
-
-              <span
-                style={{
-                  color: isHealthy ? '#22C55E' : '#FF5C65',
-                  textShadow: isHealthy ? '0 0 8px rgba(34, 197, 94, 0.5)' : 'none',
-                }}
-                className="text-lg font-black tracking-tighter shrink-0"
-              >
-                {isHealthy ? '➜➜' : '✕✕'}
-              </span>
-            </div>
-
-            <div className="space-y-0.5">
-              <div className="text-xs font-extrabold text-white">Industrial Ethernet</div>
-              <div className="text-xs font-extrabold text-white">Station-Bus Switch</div>
-            </div>
-
-            <div
-              style={{
-                backgroundColor: isHealthy ? '#06291E' : '#3B0D15',
-                borderColor: isHealthy ? '#22C55E' : '#FF5C65',
-                color: isHealthy ? '#4ADE80' : '#FDA4AF',
-              }}
-              className="w-full rounded-lg border px-2.5 py-1.5 text-[11.5px] font-bold mt-1"
-            >
-              {commFlowStatusText}
-            </div>
+            <div className={`w-full mt-2 rounded-lg border px-2 py-1.5 text-[10px] font-bold ${isHealthy ? 'border-green-600 bg-green-950 text-green-300' : 'border-red-600 bg-red-950 text-red-300'}`} role="status">{commFlowStatusText}</div>
           </div>
 
           {/* PANEL C: Subscriber IED */}
@@ -365,7 +356,7 @@ export const GooseLabPage: React.FC = () => {
               borderColor: isHealthy ? '#00CFFF' : '#FF5C65',
               boxShadow: 'inset 0 0 16px rgba(0, 207, 255, 0.08)',
             }}
-            className="rounded-xl border p-3.5 flex flex-col justify-between"
+            className="rounded-xl border p-2.5 flex flex-col justify-between min-w-0 overflow-hidden"
           >
             <div className="mb-2.5 flex items-center gap-2 text-sm font-extrabold text-white">
               <Radio className="w-4 h-4 text-[#00CFFF]" />
@@ -377,8 +368,8 @@ export const GooseLabPage: React.FC = () => {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: '46% 54%',
-                gap: '12px',
+                gridTemplateColumns: 'minmax(0,43%) minmax(0,1fr)',
+                gap: '8px',
                 alignItems: 'center',
               }}
             >
@@ -388,16 +379,16 @@ export const GooseLabPage: React.FC = () => {
                   borderColor: '#173C5E',
                   boxShadow: '0 0 14px rgba(0, 207, 255, 0.12)',
                 }}
-                className="rounded-lg border p-2 flex items-center justify-center h-[196px]"
+                className="goose-device-image rounded-lg border p-2 flex items-center justify-center"
               >
                 <img
                   src={subscriberImg}
                   alt={`Subscriber IED ${subscriberId} ABB Relion REF615`}
-                  style={{ maxHeight: '180px', width: '100%', objectFit: 'contain' }}
+                  style={{ width: '100%', height: 128, maxHeight: 128, maxWidth: '100%', objectFit: 'contain' }}
                 />
               </div>
 
-              <div className="pr-1">
+              <div className="pr-1 min-w-0">
                 <div
                   style={{ color: isHealthy ? '#4ADE80' : '#FF5C65' }}
                   className="font-extrabold text-xs mb-1.5"
@@ -432,8 +423,9 @@ export const GooseLabPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 4. THREE CONFIGURATION & BINDING PANELS ROW Matching Image 1 */}
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+      {/* Five compact simulation/configuration panels */}
+      <div className="goose-mid-grid">
+      <div className="goose-mid-row grid grid-cols-1 gap-3 xl:grid-cols-12">
         <div className="xl:col-span-4">
           <Panel
             title="GOOSE Control Block (Publisher) Configuration"
@@ -515,41 +507,24 @@ export const GooseLabPage: React.FC = () => {
                 <span className="text-[#9BC0DF] font-semibold">Published DataSet: </span>
                 <span className="break-all font-mono font-bold text-[#38BDF8]">{gocb.datSet}</span>
               </div>
-            </div>
-          </Panel>
-        </div>
-
-        <div className="xl:col-span-4">
-          <Panel
-            title="Subscriber Binding Status"
-            icon={<CheckCircle2 className="w-4 h-4 text-[#00CFFF]" />}
-            className="h-full"
-          >
-            <div className="space-y-1">
-              <DetailRow label="Subscriber IEDs" value={gocb.subscriberIedIds.join(', ')} />
-              <DetailRow label="Source MAC" value={gocb.multicastMac} />
-              <DetailRow label="APPID / VLAN" value={`${gocb.appId} / ${gocb.vlanId}`} />
-              <DetailRow label="ConfRev" value={gocb.confRev} />
-              <DetailRow label="Bound ExtRefs" value={`${boundExtRefCount} / ${gocb.extRefs.length}`} />
-              <DetailRow label="Last Tx" value={gocb.lastTxTimestamp} />
-
-              <div
-                style={{
-                  backgroundColor: isHealthy ? '#06291E' : '#3B0D15',
-                  borderColor: isHealthy ? '#22C55E' : '#FF5C65',
-                  color: isHealthy ? '#4ADE80' : '#FDA4AF',
-                }}
-                className="mt-3 rounded-lg border py-2.5 px-3 text-center text-xs sm:text-sm font-extrabold tracking-wide"
-              >
-                {isHealthy ? 'BOUND (VALID)' : `UNBOUND / FAULT (${gocb.mismatchFault})`}
+            <details className="mt-2 rounded-md border border-[#1B4B72] bg-[#04101E] px-2 py-1.5 text-[10px]">
+              <summary className="cursor-pointer font-bold text-cyan-300">Subscriber Binding Status · {isHealthy ? 'BOUND (VALID)' : 'FAULT'} · {boundExtRefCount}/{gocb.extRefs.length} ExtRefs</summary>
+              <div className="mt-2 space-y-1">
+                <DetailRow label="Subscriber IEDs" value={gocb.subscriberIedIds.join(', ')} />
+                <DetailRow label="Source MAC" value={gocb.multicastMac} />
+                <DetailRow label="APPID / VLAN" value={`${gocb.appId} / ${gocb.vlanId}`} />
+                <DetailRow label="ConfRev" value={gocb.confRev} />
+                <DetailRow label="Last Tx" value={gocb.lastTxTimestamp} />
               </div>
+            </details>
             </div>
           </Panel>
         </div>
+
       </div>
 
       {/* 5. LOWER INTERACTIVE SIMULATION, RETRANSMISSION, FAULT INJECTION & WIRESHARK PANELS */}
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+      <div className="goose-mid-row grid grid-cols-1 gap-3 xl:grid-cols-12">
         <div id="State-Change---Retransmission" className="xl:col-span-4">
           <Panel title="▶ State Change Simulation" className="h-full">
             <div className="grid grid-cols-2 gap-2">
@@ -642,7 +617,8 @@ export const GooseLabPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+      </div>
+      <div className="goose-bottom-grid">
         <div id="GOOSE-Packet-Viewer" className="xl:col-span-4">
           <Panel title="⌁ GOOSE Live Monitoring" className="h-full">
             <div className="mb-3 grid grid-cols-3 gap-2">

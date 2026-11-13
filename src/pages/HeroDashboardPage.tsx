@@ -1,3 +1,4 @@
+import { MultifunctionMeter } from '../components/MultifunctionMeter';
 import React, { useState } from 'react';
 import { Zap, Layers3, Activity, Network, CircuitBoard, Cpu, Bell } from 'lucide-react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
@@ -52,6 +53,7 @@ export const HeroDashboardPage: React.FC = () => {
         <div><span className="sas-eyebrow">SUBSTATION AUTOMATION / WORKSPACE</span><h1>132 / 33 / 11 kV Substation</h1><p>Digital Twin · SCADA / HMI · Protection & Control</p></div>
         <div className="sas-heading-actions"><span className={`sas-sim-state ${simulationRunning ? 'is-running' : ''}`}>● {simulationRunning ? 'Simulation Running' : 'Simulation Paused'}</span><button onClick={() => setActiveTab('SLD')}>Open SLD</button><button className="sas-action-primary" onClick={() => setActiveTab('SCADA')}>SCADA / HMI</button></div>
       </header>
+      <MultifunctionMeter context="Substation Dashboard – 33 kV Incomer" />
       <section className="sas-kpi-strip" aria-label="Substation telemetry">
         {[
           ['Active Power', `${totalMw.toFixed(1)} MW`, 'Live import'],

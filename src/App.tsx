@@ -1,3 +1,6 @@
+import { ScadaAlarmAudio } from './components/ScadaAlarmAudio';
+import { AlarmsEventsPage } from './pages/AlarmsEventsPage';
+import { WiresharkAnalyzerPage } from './pages/WiresharkAnalyzerPage';
 import React, { useEffect, useRef, useState } from 'react';
 import { useSubstationStore, ActiveWorkspaceTab } from './simulation/useSubstationStore';
 import { useAuthStore, computeUserInitials, ProfileSectionTab } from './auth/useAuthStore';
@@ -90,9 +93,14 @@ export default function App() {
 
   const [testingGuidanceOpen, setTestingGuidanceOpen] = useState(() => window.location.hash === '#/workspace/TESTING_GUIDANCE');
   const [showLanding, setShowLanding] = useState(false);
+  const [specialPage, setSpecialPage] = useState<'ALARMS_EVENTS' | 'WIRESHARK' | null>(null);
+  const openSpecialPage = (page: 'ALARMS_EVENTS' | 'WIRESHARK') => { setSpecialPage(page); setTestingGuidanceOpen(false); setShowLanding(false); setTopMenuOpen(null); window.history.pushState(null, '', `#/workspace/${page}`); window.scrollTo(0, 0); };
   // Deep-link the active workspace: refreshing /workspace/GOOSE stays in GOOSE Lab.
   useEffect(() => {
     const restoreLocation = () => {
+      const special = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK)$/);
+      if (special) { setSpecialPage(special[1] as 'ALARMS_EVENTS' | 'WIRESHARK'); setTestingGuidanceOpen(false); setShowLanding(false); return; }
+      setSpecialPage(null);
       if (window.location.hash === '#/workspace/TESTING_GUIDANCE') {
         setTestingGuidanceOpen(true);
         setShowLanding(false);
@@ -269,6 +277,7 @@ export default function App() {
   const filteredNavItems = navItems.filter(item => item.label.toLowerCase().includes(navSearch.trim().toLowerCase()));
 
   const navigate = (tab: ActiveWorkspaceTab) => {
+    setSpecialPage(null);
     if (tab === ('TESTING_GUIDANCE' as ActiveWorkspaceTab)) {
       window.history.pushState(null, '', '#/workspace/TESTING_GUIDANCE');
       setTestingGuidanceOpen(true);
@@ -305,6 +314,8 @@ export default function App() {
   };
 
   const activeBreadcrumbLabel = () => {
+    if (specialPage === 'ALARMS_EVENTS') return 'Alarms / Events';
+    if (specialPage === 'WIRESHARK') return 'Wireshark';
     if (testingGuidanceOpen) return 'Testing Guidance';
     if (activeTab === 'HERO') return t('Substation Workspace');
     if (activeTab === 'ADMIN_DASHBOARD') return t('Admin Dashboard');
@@ -363,6 +374,7 @@ export default function App() {
   return (
     <div className="sas-app-shell min-h-screen bg-[#030D1B] text-[#DCEAF5] font-sans overflow-x-hidden">
       {languageBubble}
+      <ScadaAlarmAudio />
       <style>{`
         html, body { max-width: 100vw; overflow-x: hidden; }
         @keyframes sasLightningStrike {
@@ -447,12 +459,16 @@ export default function App() {
                   </div>
                 );
               })}
+              <button type="button" className={`sas-top-group-trigger ${specialPage === 'ALARMS_EVENTS' ? 'is-active' : ''}`} onClick={() => openSpecialPage('ALARMS_EVENTS')}><Bell className="h-4 w-4" /><span>Alarms / Events</span></button>
+              <button type="button" className={`sas-top-group-trigger ${specialPage === 'WIRESHARK' ? 'is-active' : ''}`} onClick={() => openSpecialPage('WIRESHARK')}><Network className="h-4 w-4" /><span>Wireshark</span></button>
             </div>
             <div className="sas-top-search">
               <input ref={navSearchRef} aria-label="Search navigation" placeholder="Search menu..."
                 value={navSearch} onChange={e => {setNavSearch(e.target.value); setTopMenuOpen(null);}} />
               <kbd>Ctrl + K</kbd>
               {navSearch.trim() && <div className="sas-top-search-results" role="menu">
+                {navSearch.toLowerCase().includes('alarm') && <button type="button" onClick={() => { openSpecialPage('ALARMS_EVENTS'); setNavSearch(''); }}><Bell className="w-4 h-4"/> Alarms / Events</button>}
+                {'wireshark'.includes(navSearch.toLowerCase()) && <button type="button" onClick={() => { openSpecialPage('WIRESHARK'); setNavSearch(''); }}><Network className="w-4 h-4"/> Wireshark</button>}
                 {filteredNavItems.length ? filteredNavItems.map(item =>
                   <button key={item.id} role="menuitem" type="button" onClick={() => navigate(item.id)}>
                     {item.icon}<span>{item.label}</span>
@@ -697,7 +713,7 @@ export default function App() {
 
         {/* Main Workspace Container */}
         <main className="sas-workspace-main flex-1 p-2.5 sm:p-5 xl:p-6 w-full min-w-0">
-          {testingGuidanceOpen ? <TestingGuidancePage /> : <>
+          {specialPage === 'ALARMS_EVENTS' ? <AlarmsEventsPage /> : specialPage === 'WIRESHARK' ? <WiresharkAnalyzerPage /> : testingGuidanceOpen ? <TestingGuidancePage /> : <>
           {activeTab === 'HERO' && <HeroDashboardPage />}
           {activeTab === 'IEC61850_ACADEMY' && <Iec61850AcademyPage />}
           {activeTab === 'INTERVIEW_PREP' && <InterviewPrepPage />}

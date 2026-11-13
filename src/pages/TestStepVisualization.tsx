@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { RealisticSiprotec5, RealisticGatewayOrSwitch } from '../components/RealisticDevices';
 import {
   Activity,
   AlertTriangle,
@@ -1076,8 +1077,8 @@ export function TestStepVisualization({
                 const isChecked = done[idx];
                 const isCurrent = activeStep === idx;
                 return (
+                  <React.Fragment key={idx}>
                   <div
-                    key={idx}
                     onClick={() => handleToggleStep(idx)}
                     role="checkbox"
                     aria-checked={isChecked}
@@ -1144,6 +1145,19 @@ export function TestStepVisualization({
                       {stepText}
                     </span>
                   </div>
+                  {isCurrent && (
+                    <div style={{ margin: '2px 2px 8px 7px', padding: '10px', border: '1px solid #00CFFF', borderRadius: 7, background: '#04182B', fontSize: 11.5, lineHeight: 1.55 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: '#00E5FF', fontWeight: 800 }}>
+                        <span>Step {idx + 1}: {stepDetail.focusArea} — Verification details</span>
+                        <span style={{ color: '#91B9CF' }}>Active</span>
+                      </div>
+                      <p style={{ marginTop: 5, color: '#E9F3FF' }}>{stepDetail.explanation}</p>
+                      <ul style={{ marginTop: 6, paddingLeft: 14, color: '#A9EFD6' }}>
+                        {stepDetail.verifyItems.map((item, i) => <li key={i} style={{ marginBottom: 3 }}>✓ {item}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </React.Fragment>
                 );
               })}
             </div>
@@ -1476,47 +1490,31 @@ export function TestStepVisualization({
                   </circle>
                 )}
 
-                {/* Node 2: IED / Server */}
-                <g transform="translate(264, 24)">
-                  <rect
-                    x="0"
-                    y="0"
-                    width="165"
-                    height="126"
-                    rx="9"
-                    fill="#16283B"
-                    stroke={
-                      stepDetail.focusArea === 'IED' || stepDetail.focusArea === 'ALL'
-                        ? '#00EAFF'
-                        : '#689AB8'
-                    }
-                    strokeWidth={stepDetail.focusArea === 'IED' ? '2.6' : '1.6'}
-                    filter={stepDetail.focusArea === 'IED' ? 'url(#tsGlowCyan)' : undefined}
-                  />
-                  <rect x="12" y="14" width="141" height="44" rx="4" fill="#071525" stroke="#2C698A" />
-                  <text x="82" y="33" textAnchor="middle" fill="#F2F8FF" fontSize="11" fontWeight="900">
-                    {profile.iedLabel}
-                  </text>
-                  <text x="82" y="49" textAnchor="middle" fill="#00FF4C" fontSize="9.5" fontWeight="700">
-                    {profile.iedSub}
-                  </text>
-                  {[0, 1, 2, 3, 4].map((i) => (
-                    <circle
-                      key={i}
-                      cx={32 + i * 24}
-                      cy="82"
-                      r="4"
-                      fill={faultInjected && i === 4 ? '#FF2525' : i < 4 ? '#00FF4C' : '#00EAFF'}
-                    />
-                  ))}
-                  <text x="82" y="109" textAnchor="middle" fill="#A8CBE0" fontSize="10" fontWeight="700">
-                    Step {activeStep + 1} Processing
-                  </text>
-                </g>
+                {/* Node 2: Realistic Siemens SIPROTEC 5 IED */}
+                <RealisticSiprotec5
+                  x={268}
+                  y={10}
+                  width={154}
+                  height={142}
+                  borderColor={
+                    faultInjected
+                      ? '#FF2525'
+                      : stepDetail.focusArea === 'IED' || stepDetail.focusArea === 'ALL'
+                      ? '#00EAFF'
+                      : '#00CFFF'
+                  }
+                  lcdLines={[
+                    { text: profile.iedLabel, color: '#A8CBE0' },
+                    { text: profile.iedSub, color: '#00FF4C', bold: true },
+                    { text: `Step ${activeStep + 1} Active`, color: '#00EAFF' },
+                    { text: faultInjected ? 'STATUS: FAULT' : 'STATUS: HEALTHY', color: faultInjected ? '#FF354F' : '#00FF4C', bold: true },
+                  ]}
+                  label={profile.iedLabel}
+                />
 
                 {/* Link 2 */}
                 <line
-                  x1="431"
+                  x1="426"
                   y1="87"
                   x2="508"
                   y2="87"
@@ -1528,7 +1526,7 @@ export function TestStepVisualization({
                   points="503,81 515,87 503,93"
                   fill={faultInjected ? '#FF2525' : '#00EAFF'}
                 />
-                <text x="470" y="72" textAnchor="middle" fill="#D8F3FF" fontSize="10.5" fontWeight="700">
+                <text x="467" y="72" textAnchor="middle" fill="#D8F3FF" fontSize="10.5" fontWeight="700">
                   {profile.link2Label}
                 </text>
                 {!faultInjected && (
@@ -1536,47 +1534,22 @@ export function TestStepVisualization({
                     <animateMotion
                       dur={pulseActive ? '0.45s' : '1.15s'}
                       repeatCount="indefinite"
-                      path="M 433 87 L 508 87"
+                      path="M 428 87 L 508 87"
                     />
                   </circle>
                 )}
 
-                {/* Node 3: Gateway / Logic */}
-                <g transform="translate(517, 42)">
-                  <rect
-                    x="0"
-                    y="0"
-                    width="130"
-                    height="90"
-                    rx="8"
-                    fill="#112538"
-                    stroke={
-                      stepDetail.focusArea === 'GATEWAY' || stepDetail.focusArea === 'ALL'
-                        ? '#00EAFF'
-                        : '#5E85A3'
-                    }
-                    strokeWidth={stepDetail.focusArea === 'GATEWAY' ? '2.6' : '1.6'}
-                    filter={stepDetail.focusArea === 'GATEWAY' ? 'url(#tsGlowCyan)' : undefined}
-                  />
-                  <text x="65" y="34" textAnchor="middle" fill="#F2F8FF" fontSize="11.5" fontWeight="800">
-                    {profile.gatewayLabel}
-                  </text>
-                  <text x="65" y="52" textAnchor="middle" fill="#00EAFF" fontSize="9.5">
-                    {profile.gatewaySub}
-                  </text>
-                  {[0, 1, 2, 3].map((p) => (
-                    <rect
-                      key={p}
-                      x={24 + p * 22}
-                      y="64"
-                      width="14"
-                      height="11"
-                      rx="2"
-                      fill="#071828"
-                      stroke={faultInjected ? '#FF2525' : '#00FF4C'}
-                    />
-                  ))}
-                </g>
+                {/* Node 3: Realistic Industrial Switch / Station Gateway */}
+                <RealisticGatewayOrSwitch
+                  x={517}
+                  y={24}
+                  width={128}
+                  height={114}
+                  variant={testIndex === 8 || testIndex === 9 ? 'SWITCH' : 'GATEWAY'}
+                  healthy={!faultInjected}
+                  label={profile.gatewayLabel}
+                  subLabel={profile.gatewaySub}
+                />
 
                 {/* Link 3 */}
                 <line

@@ -89,7 +89,9 @@ export const ScadaHmiPage: React.FC = () => {
   const [baySearch, setBaySearch] = useState<string>('');
   const [isOperatorFullScreen, setIsOperatorFullScreen] = useState<boolean>(false);
   const [leftDirectoryCollapsed, setLeftDirectoryCollapsed] = useState<boolean>(false);
-  const [rightInspectorCollapsed, setRightInspectorCollapsed] = useState<boolean>(false);
+  const [rightInspectorCollapsed, setRightInspectorCollapsed] = useState<boolean>(true);
+  // Selection is local to the workstation; the shared store may have a bay selected by another module.
+  const [operatorSelectedBayId, setOperatorSelectedBayId] = useState<string | null>(null);
   const [bottomDrawerCollapsed, setBottomDrawerCollapsed] = useState<boolean>(false);
 
   // SLD Zoom & Pan State (1.0 = Fit to Screen without horizontal scroll)
@@ -304,9 +306,15 @@ export const ScadaHmiPage: React.FC = () => {
 
   const selectBayInScada = (bayId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    setSelectedBayId(bayId);
+    if (operatorSelectedBayId === bayId) {
+      setOperatorSelectedBayId(null);
+      setRightInspectorCollapsed(true);
+    } else {
+      setOperatorSelectedBayId(bayId);
+      setSelectedBayId(bayId);
+      setRightInspectorCollapsed(false);
+    }
     setPendingSboCommand(null);
-    if (rightInspectorCollapsed) setRightInspectorCollapsed(false);
   };
 
   /**
@@ -462,7 +470,7 @@ export const ScadaHmiPage: React.FC = () => {
       dashedHighlight?: boolean;
     }
   ) => {
-    const isSelected = selectedBay.id === bay.id;
+    const isSelected = operatorSelectedBayId === bay.id;
     const isFilteredOut = voltageFilter !== 'ALL' && bay.voltageKv !== voltageFilter;
     const opacity = isFilteredOut ? 0.22 : 1.0;
     const isBadQuality = bay.quality !== 'GOOD';
@@ -490,7 +498,7 @@ export const ScadaHmiPage: React.FC = () => {
         onClick={(e) => selectBayInScada(bay.id, e)}
         className="cursor-pointer"
       >
-        {(isSelected || options?.dashedHighlight) && (
+        {isSelected && (
           <rect
             x={x - 36}
             y={topY - 8}
@@ -1041,7 +1049,10 @@ export const ScadaHmiPage: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setRightInspectorCollapsed((c) => !c)}
+            onClick={() => {
+              if (!operatorSelectedBayId) return;
+              setRightInspectorCollapsed((c) => !c);
+            }}
             className={`px-2 py-1 rounded border font-semibold flex items-center gap-1 ${
               !rightInspectorCollapsed
                 ? 'bg-[#142A3C] text-[#00CFFF] border-[#00CFFF]/40'
@@ -1301,14 +1312,13 @@ export const ScadaHmiPage: React.FC = () => {
 
               <div className="max-h-[350px] xl:max-h-[480px] overflow-y-auto space-y-1 pr-0.5">
                 {filteredDirectoryBays.map((b) => {
-                  const isSel = selectedBay.id === b.id;
+                  const isSel = operatorSelectedBayId === b.id;
                   return (
                     <button
                       key={b.id}
                       type="button"
                       onClick={() => {
-                        setSelectedBayId(b.id);
-                        setPendingSboCommand(null);
+                        selectBayInScada(b.id);
                       }}
                       className={`w-full text-left p-1.5 rounded border text-[11px] flex items-center justify-between transition ${
                         isSel
@@ -1800,12 +1810,12 @@ export const ScadaHmiPage: React.FC = () => {
 
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                 {filteredDirectoryBays.map((bay) => {
-                  const isSel = selectedBay.id === bay.id;
+                  const isSel = operatorSelectedBayId === bay.id;
                   return (
                     <button
                       key={bay.id}
                       type="button"
-                      onClick={() => setSelectedBayId(bay.id)}
+                      onClick={() => selectBayInScada(bay.id)}
                       className={`p-2.5 rounded border text-left transition ${
                         isSel
                           ? 'bg-[#142A3C] border-[#00CFFF] ring-1 ring-[#00CFFF]'

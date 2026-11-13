@@ -1,4 +1,6 @@
+import { GuidanceStepDetail } from './GuidanceStepDetail';
 import React, { useEffect, useRef, useState } from 'react';
+import { RealisticSiprotec5, RealisticGatewayOrSwitch } from '../components/RealisticDevices';
 import {
   Activity,
   ArrowLeft,
@@ -752,6 +754,7 @@ export function Test2SboVisualization({
                 const isChecked = done[idx];
                 const isSelected = activeStep === idx;
                 return (
+                  <React.Fragment key={idx}>
                   <div
                     key={idx}
                     role="checkbox"
@@ -810,6 +813,8 @@ export function Test2SboVisualization({
                       {text}
                     </span>
                   </div>
+                  {activeStep === idx && <GuidanceStepDetail number={idx + 1} step={text} testTitle="Local / Remote and SBO Command" />}
+                  </React.Fragment>
                 );
               })}
             </div>
@@ -1054,57 +1059,21 @@ export function Test2SboVisualization({
                 </g>
 
                 {/* C. Realistic Siemens SIPROTEC 5 IED */}
-                <g transform="translate(405, 8)">
-                  <rect
-                    x="0"
-                    y="0"
-                    width="130"
-                    height="145"
-                    rx="7"
-                    fill="#263646"
-                    stroke={stepMeta.focus === 'IED' ? '#00DFFF' : '#7A97B0'}
-                    strokeWidth={stepMeta.focus === 'IED' ? '2.5' : '1.6'}
-                    filter="url(#t2GlowCyan)"
-                  />
-                  <rect x="6" y="6" width="118" height="133" rx="4" fill="#101B27" stroke="#38546E" />
-                  <rect x="10" y="9" width="38" height="10" rx="1.5" fill="#00878F" />
-                  <text x="29" y="16.5" textAnchor="middle" fill="#FFF" fontSize="6.5" fontWeight="900">
-                    SIEMENS
-                  </text>
-                  <text x="118" y="16.5" textAnchor="end" fill="#D5E8F7" fontSize="6.5" fontWeight="800">
-                    SIPROTEC 5
-                  </text>
-                  {/* Live LCD */}
-                  <rect x="22" y="23" width="88" height="58" rx="3" fill="#07192C" stroke="#00DFFF" strokeWidth="1.2" />
-                  <text x="27" y="34" fill="#A8CBE0" fontSize="7.2" fontWeight="700">
-                    Bay 52  CB-33-F03
-                  </text>
-                  <text x="27" y="46" fill={breakerColor} fontSize="7.5" fontWeight="800">
-                    XCBR.Pos: {breakerClosed ? 'CLOSED' : 'OPEN'}
-                  </text>
-                  <text x="27" y="58" fill="#FFD23F" fontSize="7.5" fontWeight="800">
-                    CSWI.Pos: {sboStage === 'SELECTED' ? 'Selected' : 'NoSelect'}
-                  </text>
-                  <text x="27" y="70" fill="#00DFFF" fontSize="7.2" fontWeight="700">
-                    Ctrl Auth: {authority}
-                  </text>
-                  {/* Keypad & I/O buttons */}
-                  <polygon points="66,88 60,95 72,95" fill="#82A0B8" />
-                  <polygon points="66,118 60,111 72,111" fill="#82A0B8" />
-                  <polygon points="50,103 57,97 57,109" fill="#82A0B8" />
-                  <polygon points="82,103 75,97 75,109" fill="#82A0B8" />
-                  <circle cx="66" cy="103" r="4" fill="#00DFFF" />
-                  <rect x="96" y="92" width="11" height="10" rx="1.5" fill="#108548" />
-                  <rect x="96" y="106" width="11" height="10" rx="1.5" fill="#C82028" />
-                  <rect x="14" y="92" width="11" height="10" rx="1.5" fill="#00FF65" />
-                  <rect x="14" y="106" width="11" height="10" rx="1.5" fill="#00DFFF" />
-                  <text x="65" y="162" textAnchor="middle" fill="#F2F8FF" fontSize="10.5" fontWeight="700">
-                    IED – Siemens SIPROTEC 5
-                  </text>
-                  <text x="65" y="176" textAnchor="middle" fill="#A8CBE0" fontSize="9.5">
-                    (CSWI / XCBR)
-                  </text>
-                </g>
+                <RealisticSiprotec5
+                  x={402}
+                  y={8}
+                  width={136}
+                  height={140}
+                  borderColor={stepMeta.focus === 'IED' ? '#00DFFF' : '#00CFFF'}
+                  lcdLines={[
+                    { text: 'Bay 52 CB-33-F03', color: '#A8CBE0' },
+                    { text: `XCBR: ${breakerClosed ? 'CLOSED' : 'OPEN'}`, color: breakerColor, bold: true },
+                    { text: `CSWI: ${sboStage === 'SELECTED' ? 'Selected' : 'NoSelect'}`, color: '#FFD23F', bold: true },
+                    { text: `Auth: ${authority}`, color: '#00DFFF', bold: true },
+                  ]}
+                  label="IED – Siemens SIPROTEC 5"
+                  subLabel="(CSWI / XCBR)"
+                />
 
                 {/* Animated Link 1: IED <-> Gateway */}
                 <text x="598" y="64" textAnchor="middle" fill="#F2F8FF" fontSize="10.5" fontWeight="700">
@@ -1124,36 +1093,17 @@ export function Test2SboVisualization({
                   />
                 </circle>
 
-                {/* D. Realistic Industrial Station Gateway (RSP35 style) */}
-                <g transform="translate(664, 24)">
-                  <rect x="0" y="0" width="76" height="114" rx="5" fill="#182C40" stroke="#7A97B0" strokeWidth="1.6" />
-                  <rect x="6" y="6" width="64" height="18" rx="2" fill="#091B2C" stroke="#00DFFF" />
-                  <text x="38" y="18" textAnchor="middle" fill="#00DFFF" fontSize="8" fontWeight="800">
-                    RSP35 GTW
-                  </text>
-                  {[0, 1, 2, 3].map((r) =>
-                    [0, 1].map((c) => (
-                      <rect
-                        key={`${r}-${c}`}
-                        x={14 + c * 26}
-                        y={32 + r * 18}
-                        width="20"
-                        height="13"
-                        rx="2"
-                        fill="#0A1622"
-                        stroke="#4C7492"
-                      />
-                    ))
-                  )}
-                  <circle cx="18" cy="35" r="1.5" fill="#00FF65" />
-                  <circle cx="44" cy="35" r="1.5" fill="#00DFFF" />
-                  <text x="38" y="140" textAnchor="middle" fill="#F2F8FF" fontSize="10.5" fontWeight="700">
-                    Station Gateway
-                  </text>
-                  <text x="38" y="154" textAnchor="middle" fill="#A8CBE0" fontSize="9.5">
-                    (IEC 61850)
-                  </text>
-                </g>
+                {/* D. Realistic Industrial Station Gateway */}
+                <RealisticGatewayOrSwitch
+                  x={658}
+                  y={22}
+                  width={92}
+                  height={108}
+                  variant="GATEWAY"
+                  healthy={packetDir !== 'CMD_REJECT'}
+                  label="Station Gateway"
+                  subLabel="(IEC 61850)"
+                />
 
                 {/* Link 2: Gateway <-> SCADA/HMI */}
                 <line x1="742" y1="90" x2="778" y2="90" stroke={linkColor} strokeWidth="3" />

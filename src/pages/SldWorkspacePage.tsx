@@ -1,3 +1,4 @@
+import { MultifunctionMeter } from '../components/MultifunctionMeter';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { getBayProtocolBreakdown } from '../data/protocolRegistry';
@@ -50,6 +51,18 @@ export const SldWorkspacePage: React.FC = () => {
     setBayLocalRemote,
   } = useSubstationStore();
 
+  // SLD-only selection: no default highlight and no forced bay on initial render.
+  const [inspectedBayId, setInspectedBayId] = useState<string | null>(null);
+  const [deviceDetailsTab, setDeviceDetailsTab] = useState<'Overview' | 'Signals' | 'Interlock' | 'Control'>('Overview');
+  const inspectedBay = bays.find(b => b.id === inspectedBayId);
+  const inspectSldBay = (id: string) => {
+    if (inspectedBayId === id) { setInspectedBayId(null); return; }
+    setInspectedBayId(id);
+    setDeviceDetailsTab('Overview');
+    setSelectedBayId(id);
+  };
+  const [workspaceTab, setWorkspaceTab] = useState<'SLD' | 'MFM' | 'TRANSFER' | 'FAT' | 'ENGINEERING' | 'PROTOCOLS'>('SLD');
+  const selectWorkspaceTab = (tab: typeof workspaceTab) => { setWorkspaceTab(tab); };
   const [zoom, setZoom] = useState<number>(1.0);
   const [expandedSld, setExpandedSld] = useState(false);
   const [show3DModel, setShow3DModel] = useState(false);
@@ -549,7 +562,7 @@ export const SldWorkspacePage: React.FC = () => {
     return (
       <g
         className="cursor-pointer"
-        onClick={(e) => { e.stopPropagation(); setSelectedBayId(bay.id); }}
+        onClick={(e) => { e.stopPropagation(); inspectSldBay(bay.id); }}
       >
         <title>{`${bay.breakerId} (${bay.bayCode}): ${bay.breakerState} — Click to select bay`}</title>
         {/* Outer soft state glow */}
@@ -627,7 +640,7 @@ export const SldWorkspacePage: React.FC = () => {
     return (
       <g
         className="cursor-pointer"
-        onClick={(e) => { e.stopPropagation(); setSelectedBayId(bay.id); }}
+        onClick={(e) => { e.stopPropagation(); inspectSldBay(bay.id); }}
       >
         <title>{`Isolator ${bay.bayCode}-Q1: ${bay.busDisconnectorState} — Click to select bay`}</title>
         {/* Two-dot hinge isolator */}
@@ -677,7 +690,7 @@ export const SldWorkspacePage: React.FC = () => {
       customLabel?: string;
     }
   ) => {
-    const isSelected = selectedBayId === bay.id;
+    const isSelected = inspectedBayId === bay.id;
     const isHighlighted = matchesSearch(bay);
     const opacity = isHighlighted ? 1 : 0.25;
     const isEnergized =
@@ -703,11 +716,11 @@ export const SldWorkspacePage: React.FC = () => {
       <g
         key={bay.id}
         opacity={opacity}
-        onClick={() => setSelectedBayId(bay.id)}
+        onClick={() => inspectSldBay(bay.id)}
         className="cursor-pointer"
       >
         {/* Dashed selection or supervision box (e.g. around 11-INC1 as in reference image) */}
-        {(isSelected || options?.dashedHighlight) && (
+        {isSelected && (
           <rect
             x={x - 36}
             y={topY - 8}
@@ -783,7 +796,7 @@ export const SldWorkspacePage: React.FC = () => {
           <g
             onClick={(e) => {
               e.stopPropagation();
-              setSelectedBayId(bay.id);
+              inspectSldBay(bay.id);
             }}
           >
             <line x1={x} y1={ctY + 8} x2={x + 14} y2={ctY + 8} stroke="#FFAB00" strokeWidth={1.6} />
@@ -894,7 +907,7 @@ export const SldWorkspacePage: React.FC = () => {
             <g
               className="cursor-pointer"
               transform={`translate(${cx - 128}, ${cy - 24})`}
-              onClick={(e) => { e.stopPropagation(); setSelectedBayId(bay.id); }}
+              onClick={(e) => { e.stopPropagation(); inspectSldBay(bay.id); }}
             >
               <rect width={72} height={17} rx={3.5} fill="#091728" stroke="#1E496D" strokeWidth={1} />
               <rect
@@ -919,7 +932,7 @@ export const SldWorkspacePage: React.FC = () => {
             <g
               className="cursor-pointer"
               transform={`translate(${cx + 56}, ${cy - 24})`}
-              onClick={(e) => { e.stopPropagation(); setSelectedBayId(bay.id); }}
+              onClick={(e) => { e.stopPropagation(); inspectSldBay(bay.id); }}
             >
               <rect width={72} height={17} rx={3.5} fill="#091728" stroke="#1E496D" strokeWidth={1} />
               <rect
@@ -1260,6 +1273,48 @@ export const SldWorkspacePage: React.FC = () => {
         document.body
       )}
 
+      {/* Compact operator workspace: existing simulation components remain mounted across tabs. */}
+      <div className="sticky top-0 z-20 rounded-xl border border-cyan-700/60 bg-[#06192c]/95 p-2 shadow-lg backdrop-blur-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-2">
+          <h2 className="text-sm font-extrabold tracking-wide text-cyan-100">132 / 33 / 11 kV — SCADA / HMI Workspace</h2>
+          <div className="flex gap-2 text-[11px]"><span className="rounded border border-green-700 bg-green-950/40 px-2 py-1 text-green-400">System Online</span><span className="rounded border border-amber-700 bg-amber-950/40 px-2 py-1 text-amber-300">Alarms: {alarms.length}</span></div>
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="SLD workspace modules">
+          {([['SLD','Main SLD'],['MFM','MFM Metering'],['TRANSFER','Bus Transfer'],['FAT','FAT / SAT Tests'],['ENGINEERING','Engineering & Control'],['PROTOCOLS','Communication Profile']] as const).map(([tab,label]) => (
+            <button key={tab} type="button" role="tab" aria-selected={workspaceTab === tab} onClick={() => selectWorkspaceTab(tab)} className={`shrink-0 rounded-lg border px-3 py-2 text-xs font-bold transition ${workspaceTab === tab ? 'border-cyan-300 bg-cyan-400 text-[#031321]' : 'border-cyan-800 bg-[#0b263e] text-cyan-100 hover:border-cyan-400'}`}>{label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-cyan-500/70 bg-gradient-to-r from-[#062440] to-[#061326] px-3 py-2 shadow-[0_0_16px_rgba(0,207,255,0.12)]">
+        <div className="flex items-center gap-2 font-bold text-cyan-100"><Zap className="text-cyan-400" size={20}/>132 / 33 / 11 kV Substation — SCADA / HMI</div>
+        <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold">
+          <span className="rounded-md border border-green-600 bg-green-950/70 px-2 py-1 text-green-400"><ShieldCheck className="mr-1 inline" size={13}/>{busbars.every(bus => bus.energized) ? 'System Healthy' : 'Check Bus Status'}</span>
+          <span className="rounded-md border border-red-700 bg-red-950/60 px-2 py-1 text-red-300"><AlertTriangle className="mr-1 inline" size={13}/>Active Alarms: {alarms.length}</span>
+          <span className="text-cyan-300">Bus Transfer:</span>
+          {(['AUTO','MANUAL'] as const).map(mode => <button type="button" key={mode} onClick={() => { ([132,33,11] as const).forEach(level => setVoltageBusTransferMode(level, mode)); }} className={`rounded border px-2 py-1 ${busTransferModes[132] === mode ? 'border-cyan-400 bg-cyan-500 text-slate-950' : 'border-cyan-800 bg-[#0b2038] text-cyan-200'}`}>{mode}</button>)}
+          <button type="button" onClick={() => setWorkspaceTab('TRANSFER')} className="rounded border border-cyan-400 bg-[#0a3655] px-2 py-1 text-cyan-100">Request Transfer</button>
+        </div>
+      </div>
+      <div className="grid min-w-0 grid-cols-1 items-start gap-3 xl:grid-cols-[210px_minmax(0,1fr)_255px] 2xl:grid-cols-[235px_minmax(0,1fr)_280px]">
+        <aside className="space-y-3 xl:sticky xl:top-28" aria-label="SCADA navigation and substation summary">
+          <section className="rounded-xl border border-cyan-500/70 bg-[#061a30] p-2.5 shadow-[0_0_12px_rgba(0,207,255,.10)]">
+            <h3 className="mb-2 border-b border-cyan-800 pb-2 text-sm font-bold text-white">Navigation</h3>
+            {([['SLD','Main SLD'],['ENGINEERING','Bay Status & Control'],['MFM','Transformer / MFM Monitoring'],['FAT','Alarm & Test Console'],['PROTOCOLS','Reports & Communication']] as const).map(([tab,label],i) => <button key={tab} type="button" onClick={() => setWorkspaceTab(tab)} className={`mb-1 block w-full rounded-md px-2 py-2 text-left text-xs font-semibold ${workspaceTab === tab ? 'bg-cyan-400 text-[#031321]' : 'text-cyan-100 hover:bg-[#10334c]'}`}>{i+1}. {label}</button>)}
+          </section>
+          <section className="rounded-xl border border-cyan-500/70 bg-[#061a30] p-2.5">
+            <h3 className="mb-2 border-b border-cyan-800 pb-2 text-sm font-bold text-white">Substation Summary</h3>
+            {([['132 kV Bus A',bus132A],['132 kV Bus B',bus132B],['33 kV Bus A',bus33A],['33 kV Bus B',bus33B],['11 kV Bus A',bus11A],['11 kV Bus B',bus11B]] as const).map(([name,bus]) => <div key={name} className="flex justify-between gap-1 border-b border-cyan-950 py-1.5 text-[11px]"><span className="text-slate-200">{name}</span><strong className={bus.energized ? 'text-green-400' : 'text-red-400'}>{bus.voltageKvLive.toFixed(2)} kV</strong></div>)}
+          </section>
+          <section className="rounded-xl border border-cyan-500/70 bg-[#061a30] p-2.5">
+            <h3 className="mb-2 border-b border-cyan-800 pb-2 text-sm font-bold text-white">Key Status</h3>
+            {([['In Service',bays.filter(b => b.quality === 'GOOD').length,'text-green-400'],['Closed CB',bays.filter(b => b.breakerState === 'CLOSED').length,'text-red-400'],['Open CB',bays.filter(b => b.breakerState === 'OPEN').length,'text-green-400'],['Active Alarms',alarms.length,'text-amber-400']] as const).map(([name,count,color]) => <div key={name} className="flex justify-between border-b border-cyan-950 py-1.5 text-xs"><span className="text-slate-200">{name}</span><strong className={color}>{count}</strong></div>)}
+          </section>
+        </aside>
+        <main className="min-w-0 space-y-3" aria-label="Interactive SLD workspace">
+      <div style={{display:workspaceTab === 'MFM' ? 'block' : 'none'}}>
+        <MultifunctionMeter context="33 kV Incomer – SLD metering" />
+      </div>
+      <div style={{display:workspaceTab === 'SLD' ? 'block' : 'none'}} className="space-y-3">
       {/* SLD Engineering Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-[#081629] border border-[#1E3A5F]">
         <div className="flex flex-wrap items-center gap-2">
@@ -1468,6 +1523,8 @@ export const SldWorkspacePage: React.FC = () => {
         </div>
       )}
 
+      </div>
+      <div style={{display:workspaceTab === 'TRANSFER' ? 'block' : 'none'}} className="space-y-3">
       {/* Dead-bus bus-coupler transfer training panel: 132 / 33 / 11 kV */}
       <div className="rounded-2xl border border-cyan-700/50 bg-gradient-to-br from-[#071b30] via-[#081629] to-[#061322] p-4 space-y-3 shadow-[0_0_22px_rgba(0,207,255,0.05)]">
         <div className="flex flex-wrap justify-between items-center gap-2">
@@ -1556,6 +1613,9 @@ export const SldWorkspacePage: React.FC = () => {
       </div>
 
 
+      </div>
+      <div style={{display:workspaceTab === 'FAT' ? 'block' : 'none'}} className="space-y-3">
+      <div className="rounded-lg border border-cyan-800 bg-[#0b2338] px-3 py-2 text-xs text-slate-300">For manual switching during a FAT/SAT test, open <button type="button" onClick={() => setWorkspaceTab('TRANSFER')} className="font-bold text-cyan-300 underline">Bus Transfer</button>. Test state and recorded evidence are retained when switching tabs.</div>
       {/* FAT/SAT bus transfer evidence recorder: explicit start/finish avoids false passes from historic events. */}
       <div className="rounded-2xl border border-cyan-700/50 bg-gradient-to-br from-[#071b30] via-[#081629] to-[#061322] p-4 space-y-3 shadow-[0_0_22px_rgba(0,207,255,0.05)]">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1654,6 +1714,8 @@ export const SldWorkspacePage: React.FC = () => {
       </div>
 
 
+      </div>
+      <div style={{display:workspaceTab === 'SLD' ? 'block' : 'none'}} className="space-y-3">
       {/* ==================== HERO 132 / 33 / 11 kV INTERACTIVE SINGLE-LINE DIAGRAM ==================== */}
       <div
         className="w-full min-w-0 rounded-2xl border-2 border-[#1E3B5E] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.85),inset_0_0_40px_rgba(0,210,255,0.05)] relative"
@@ -1721,14 +1783,15 @@ export const SldWorkspacePage: React.FC = () => {
         </div>
 
         {/* 2. INTERACTIVE THREE-TIER SVG SINGLE-LINE DIAGRAM CANVAS */}
+        <div className="flex w-full min-w-0 items-stretch">
         <div
-          className={`w-full overflow-x-auto overscroll-contain ${
+          className={`w-full min-w-0 overflow-x-auto overscroll-contain ${
             compactView ? 'max-h-[520px] overflow-y-auto' : ''
           }`}
         >
           <svg
             viewBox="0 0 1200 646"
-            className="block w-full min-w-[960px] h-auto select-none"
+            className="block w-full min-w-0 h-auto select-none"
             style={{
               transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`,
               transformOrigin: 'center top',
@@ -2127,7 +2190,7 @@ export const SldWorkspacePage: React.FC = () => {
             })}
           </svg>
         </div>
-
+        </div>
 
         {/* 3. SLD FOOTER & TRANSFORMER OLTC QUICK BAR */}
         <div className="px-4 py-2.5 bg-[#07111F] border-t border-[#18324E] flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -2169,6 +2232,8 @@ export const SldWorkspacePage: React.FC = () => {
         </div>
       </div>
 
+      </div>
+      <div style={{display:workspaceTab === 'ENGINEERING' ? 'block' : 'none'}} className="space-y-3">
       {/* Compact full-width bay control area immediately below the SLD */}
       <section className="w-full min-w-0 rounded-xl border-2 border-cyan-400/80 bg-[#041627] p-2 sm:p-3 shadow-[0_0_18px_rgba(0,217,255,0.12)]">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-cyan-900/70 pb-2">
@@ -2193,6 +2258,8 @@ export const SldWorkspacePage: React.FC = () => {
         </div>
       </section>
 
+      </div>
+      <div style={{display:workspaceTab === 'PROTOCOLS' ? 'block' : 'none'}} className="space-y-3">
       {/* SECTION 2: SLD EQUIPMENT & BAY MULTI-PROTOCOL COMMUNICATION INSPECTOR */}
       {(() => {
         const selectedBay = bays.find((b) => b.id === selectedBayId) || bays[0];
@@ -2283,7 +2350,71 @@ export const SldWorkspacePage: React.FC = () => {
           </div>
         );
       })()}
+      </div>
+        </main>
+        <aside className="min-w-0 rounded-xl border border-cyan-500/70 bg-[#061a30] p-3 shadow-[0_0_14px_rgba(0,207,255,.12)] xl:sticky xl:top-28" aria-label="Device details inspector">
+          <div className="mb-3 flex items-center justify-between border-b border-cyan-800 pb-2"><h3 className="font-bold text-cyan-100">Device Details</h3>{inspectedBay && <button type="button" onClick={() => setInspectedBayId(null)} aria-label="Clear selected breaker"><X size={17}/></button>}</div>
+        {inspectedBay ? (
+          <aside className="space-y-2 text-xs text-slate-100" aria-label="Selected breaker device details">
 
+            <div className="my-3 rounded-lg border border-cyan-900 bg-[#0a253a] p-3">
+              <div className="flex justify-between gap-2"><div><strong className="text-base">{inspectedBay.bayCode}</strong><div className="mt-1 text-slate-400">{inspectedBay.name}</div><div className="text-cyan-300">{inspectedBay.voltageKv} kV • Bus {inspectedBay.busSection}</div></div><span className="h-fit rounded border border-green-700 bg-green-950 px-2 py-1 text-green-400">{inspectedBay.quality}</span></div>
+            </div>
+            <div className="grid grid-cols-4 gap-1 mb-3">
+              {(['Overview','Signals','Interlock','Control'] as const).map(tab => <button key={tab} type="button" onClick={() => setDeviceDetailsTab(tab)} className={`rounded border px-1 py-2 text-[10px] ${deviceDetailsTab === tab ? 'border-cyan-400 bg-cyan-500 text-slate-950 font-bold' : 'border-cyan-900 text-cyan-200'}`}>{tab}</button>)}
+            </div>
+            <div className="rounded-lg border border-cyan-800 bg-[#071728] p-3 space-y-2">
+              {deviceDetailsTab === 'Overview' && <>
+                <h4 className="font-bold text-cyan-300">Breaker Overview</h4>
+                <div>Status: <strong>{inspectedBay.breakerState}</strong></div>
+                <div>Control Mode: {inspectedBay.localRemote}</div>
+                <div>Voltage: {inspectedBay.voltageAbKv.toFixed(2)} kV</div>
+                <div>Current: {inspectedBay.currentA.toFixed(1)} A</div>
+                <div>Power: {inspectedBay.activePowerMw.toFixed(2)} MW</div>
+                <div>Quality: {inspectedBay.quality}</div>
+              </>}
+              {deviceDetailsTab === 'Signals' && <>
+                <h4 className="font-bold text-cyan-300">IED / IEC 61850 Signals</h4>
+                <div>IED: {inspectedBay.iedId}</div>
+                <div>XCBR.Pos.stVal: {inspectedBay.breakerState}</div>
+                <div>MMXU.A.phsA: {inspectedBay.currentA.toFixed(1)} A</div>
+                <div>MMXU.PPV.phsAB: {inspectedBay.voltageAbKv.toFixed(2)} kV</div>
+                <div>Quality: {inspectedBay.quality}</div>
+              </>}
+              {deviceDetailsTab === 'Interlock' && <>
+                <h4 className="font-bold text-cyan-300">Interlock Status</h4>
+                <div className={inspectedBay.interlockPermissive ? 'text-green-400' : 'text-amber-400'}>{inspectedBay.interlockPermissive ? 'PERMISSIVE' : 'BLOCKED'}</div>
+                <p>{inspectedBay.interlockReason || 'No active blocking reason reported.'}</p>
+              </>}
+              {deviceDetailsTab === 'Control' && <>
+                <h4 className="font-bold text-cyan-300">Breaker Control (Training Simulation)</h4>
+                <div>Authority: {inspectedBay.localRemote}</div>
+                <div className="grid grid-cols-2 gap-2 pt-2">
+                  <button type="button" disabled={inspectedBay.localRemote !== 'REMOTE' || !inspectedBay.interlockPermissive} onClick={() => commandBreaker(inspectedBay.id, 'CLOSED')} className="rounded border border-green-500 bg-green-950 px-2 py-2 font-bold text-green-300 disabled:opacity-40">Close</button>
+                  <button type="button" disabled={inspectedBay.localRemote !== 'REMOTE'} onClick={() => commandBreaker(inspectedBay.id, 'OPEN')} className="rounded border border-red-500 bg-red-950 px-2 py-2 font-bold text-red-300 disabled:opacity-40">Open</button>
+                </div>
+                <p className="text-slate-400">Commands use the existing store interlock and SOE logic. For select-before-operate, use the full bay control below.</p>
+              </>}
+            </div>
+          </aside>
+        ) : (
+          <div className="rounded-lg border border-dashed border-cyan-800/80 bg-[#061727] p-4 text-center text-xs text-slate-400">
+            <Box className="mx-auto mb-2 text-cyan-500" size={30} />
+            No breaker selected. Click a CB or bay on the diagram to inspect its live signals, interlocks and controls.
+          </div>
+        )}
+
+          <div className="mt-3 rounded-lg border border-cyan-900 bg-[#071728] p-2.5 text-xs">
+            <h4 className="mb-2 font-bold text-cyan-300">IED Information</h4>
+            {inspectedBay ? <><div>IED: <strong>{inspectedBay.iedId}</strong></div><div>Protocol: IEC 61850</div><div>Bay: {inspectedBay.bayCode}</div><button type="button" onClick={() => setWorkspaceTab('ENGINEERING')} className="mt-2 w-full rounded border border-cyan-700 px-2 py-1 text-cyan-200 hover:bg-cyan-950">Advanced SBO / Engineering</button></> : <div className="text-slate-400">Select a breaker to view its assigned IED and control details.</div>}
+          </div>
+        </aside>
+      </div>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+        <button type="button" onClick={() => setWorkspaceTab('MFM')} className="rounded-xl border border-cyan-600 bg-[#08233a] p-3 text-left text-xs text-cyan-200 hover:bg-[#0c3451]"><strong className="block text-sm text-cyan-300">MFM Metering</strong>Voltage · Current · Power · Energy</button>
+        <button type="button" onClick={() => setWorkspaceTab('TRANSFER')} className="rounded-xl border border-green-700 bg-[#092b28] p-3 text-left text-xs text-green-200 hover:bg-[#104338]"><strong className="block text-sm text-green-300">Bus Transfer</strong>132 / 33 / 11 kV · AUTO / MANUAL</button>
+        <button type="button" onClick={() => setWorkspaceTab('FAT')} className="rounded-xl border border-amber-700 bg-[#292219] p-3 text-left text-xs text-amber-200 hover:bg-[#3d2b1b]"><strong className="block text-sm text-amber-300">FAT / SAT Tests</strong>SOE · Negative tests · PDF / CSV</button>
+      </div>
     </div>
   );
 };

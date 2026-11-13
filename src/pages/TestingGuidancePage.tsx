@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ClipboardCheck,
   Search,
@@ -10,6 +10,16 @@ import {
 } from 'lucide-react';
 import { BreakerStatusVisualization } from './BreakerStatusVisualization';
 import { Test2SboVisualization } from './Test2SboVisualization';
+import { Test3InterlockingVisualization } from './Test3InterlockingVisualization';
+import { Test4IedCommVisualization } from './Test4IedCommVisualization';
+import { Test5SignalMappingVisualization } from './Test5SignalMappingVisualization';
+import { Test6AnalogScalingVisualization } from './Test6AnalogScalingVisualization';
+import { Test11Iec104Visualization } from './Test11Iec104Visualization';
+import { Test12ModbusOpcUaVisualization } from './Test12ModbusOpcUaVisualization';
+import { Test13TimeSyncVisualization } from './Test13TimeSyncVisualization';
+import { Test14AlarmSoeVisualization } from './Test14AlarmSoeVisualization';
+import { Test15FatSatVisualization } from './Test15FatSatVisualization';
+import { Test10PrpHsrVisualization } from './Test10PrpHsrVisualization';
 import { TestStepVisualization, TestingGuidanceTestDef } from './TestStepVisualization';
 
 const tests: TestingGuidanceTestDef[] = [
@@ -286,7 +296,22 @@ export function TestingGuidancePage() {
   const [selectedVizTestIndex, setSelectedVizTestIndex] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState('All Tests');
-  const [expanded, setExpanded] = useState<number[]>([0]);
+  const [expanded, setExpanded] = useState<number[]>([]);
+  const savedScrollY = useRef(0);
+  const shouldRestoreScroll = useRef(false);
+
+  const openVisualization = (index: number) => {
+    savedScrollY.current = window.scrollY;
+    shouldRestoreScroll.current = true;
+    setSelectedVizTestIndex(index);
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  };
+
+  useLayoutEffect(() => {
+    if (selectedVizTestIndex !== null || !shouldRestoreScroll.current) return;
+    shouldRestoreScroll.current = false;
+    window.scrollTo({ top: savedScrollY.current, behavior: 'instant' });
+  }, [selectedVizTestIndex]);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
 
   const groups = ['All Tests', ...Array.from(new Set(tests.map((t) => t.group)))];
@@ -301,6 +326,129 @@ export function TestingGuidancePage() {
         ),
     [group, query]
   );
+
+  // If Test 10 (index 9) is selected, render Test10PrpHsrVisualization
+  if (selectedVizTestIndex === 9) {
+    return (
+      <div className="mx-auto max-w-[1600px] text-[#E9F3FF]">
+        <Test10PrpHsrVisualization
+          initialDone={tests[9].steps.map((_, i) => !!checked[`9-${i}`])}
+          onStepChange={(i, value) => setChecked((v) => ({ ...v, [`9-${i}`]: value }))}
+          onBackToAllTests={() => setSelectedVizTestIndex(null)}
+        />
+      </div>
+    );
+  }
+
+  if (selectedVizTestIndex === 14) {
+    return (
+      <div className="mx-auto max-w-[1600px] text-[#E9F3FF]">
+        <Test15FatSatVisualization
+          initialDone={tests[14].steps.map((_, i) => !!checked[`14-${i}`])}
+          allChecked={checked}
+          testSummaries={tests.slice(0, 14).map((t) => ({ title: t.title, stepCount: t.steps.length }))}
+          onStepChange={(i, value) => setChecked((v) => ({ ...v, [`14-${i}`]: value }))}
+          onBackToAllTests={() => setSelectedVizTestIndex(null)}
+        />
+      </div>
+    );
+  }
+  if (selectedVizTestIndex === 13) {
+    return (
+      <div className="mx-auto max-w-[1600px] text-[#E9F3FF]">
+        <Test14AlarmSoeVisualization
+          initialDone={tests[13].steps.map((_, i) => !!checked[`13-${i}`])}
+          onStepChange={(i, value) => setChecked((v) => ({ ...v, [`13-${i}`]: value }))}
+          onBackToAllTests={() => setSelectedVizTestIndex(null)}
+        />
+      </div>
+    );
+  }
+  if (selectedVizTestIndex === 12) {
+    return (
+      <div className="mx-auto max-w-[1600px] text-[#E9F3FF]">
+        <Test13TimeSyncVisualization
+          initialDone={tests[12].steps.map((_, i) => !!checked[`12-${i}`])}
+          onStepChange={(i, value) => setChecked((v) => ({ ...v, [`12-${i}`]: value }))}
+          onBackToAllTests={() => setSelectedVizTestIndex(null)}
+        />
+      </div>
+    );
+  }
+  if (selectedVizTestIndex === 11) {
+    return (
+      <div className="mx-auto max-w-[1600px] text-[#E9F3FF]">
+        <Test12ModbusOpcUaVisualization
+          initialDone={tests[11].steps.map((_, i) => !!checked[`11-${i}`])}
+          onStepChange={(i, value) => setChecked((v) => ({ ...v, [`11-${i}`]: value }))}
+          onBackToAllTests={() => setSelectedVizTestIndex(null)}
+        />
+      </div>
+    );
+  }
+  if (selectedVizTestIndex === 10) {
+    return (
+      <div className="mx-auto max-w-[1600px] text-[#E9F3FF]">
+        <Test11Iec104Visualization
+          initialDone={tests[10].steps.map((_, i) => !!checked[`10-${i}`])}
+          onStepChange={(i, value) => setChecked((v) => ({ ...v, [`10-${i}`]: value }))}
+          onBackToAllTests={() => setSelectedVizTestIndex(null)}
+        />
+      </div>
+    );
+  }
+
+  // If Test 6 (index 5) is selected, render Test6AnalogScalingVisualization
+  if (selectedVizTestIndex === 5) {
+    return (
+      <div className="mx-auto max-w-[1600px] text-[#E9F3FF]">
+        <Test6AnalogScalingVisualization
+          initialDone={tests[5].steps.map((_, i) => !!checked[`5-${i}`])}
+          onStepChange={(i, value) => setChecked((v) => ({ ...v, [`5-${i}`]: value }))}
+          onBackToAllTests={() => setSelectedVizTestIndex(null)}
+        />
+      </div>
+    );
+  }
+
+  // If Test 5 (index 4) is selected, render Test5SignalMappingVisualization
+  if (selectedVizTestIndex === 4) {
+    return (
+      <div className="mx-auto max-w-[1600px] text-[#E9F3FF]">
+        <Test5SignalMappingVisualization
+          initialDone={tests[4].steps.map((_, i) => !!checked[`4-${i}`])}
+          onStepChange={(i, value) => setChecked((v) => ({ ...v, [`4-${i}`]: value }))}
+          onBackToAllTests={() => setSelectedVizTestIndex(null)}
+        />
+      </div>
+    );
+  }
+
+  // If Test 4 (index 3) is selected, render Test4IedCommVisualization
+  if (selectedVizTestIndex === 3) {
+    return (
+      <div className="mx-auto max-w-[1600px] text-[#E9F3FF]">
+        <Test4IedCommVisualization
+          initialDone={tests[3].steps.map((_, i) => !!checked[`3-${i}`])}
+          onStepChange={(i, value) => setChecked((v) => ({ ...v, [`3-${i}`]: value }))}
+          onBackToAllTests={() => setSelectedVizTestIndex(null)}
+        />
+      </div>
+    );
+  }
+
+  // If Test 3 (index 2) is selected, render Test3InterlockingVisualization
+  if (selectedVizTestIndex === 2) {
+    return (
+      <div className="mx-auto max-w-[1600px] text-[#E9F3FF]">
+        <Test3InterlockingVisualization
+          initialDone={tests[2].steps.map((_, i) => !!checked[`2-${i}`])}
+          onStepChange={(i, value) => setChecked((v) => ({ ...v, [`2-${i}`]: value }))}
+          onBackToAllTests={() => setSelectedVizTestIndex(null)}
+        />
+      </div>
+    );
+  }
 
   // If Test 2 (index 1) is selected, render the dedicated Test2SboVisualization
   if (selectedVizTestIndex === 1) {
@@ -432,7 +580,7 @@ export function TestingGuidancePage() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setSelectedVizTestIndex(test.index)}
+                  onClick={() => openVisualization(test.index)}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-[#00EAFF] bg-gradient-to-b from-[#0E3F60] to-[#072238] px-3 py-1.5 text-xs font-bold text-[#00EAFF] shadow-[0_0_10px_rgba(0,234,255,0.22)] hover:brightness-110"
                 >
                   <Monitor className="h-3.5 w-3.5" />
@@ -536,3 +684,5 @@ export function TestingGuidancePage() {
     </div>
   );
 }
+
+export default TestingGuidancePage;

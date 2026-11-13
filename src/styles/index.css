@@ -861,3 +861,72 @@ html{scroll-behavior:auto}.sas-app-shell{background:var(--sas-bg);color:var(--sa
 .sas-protocol-live-monitor{display:flex;align-items:center;gap:7px;border:1px solid #00cc7e;border-radius:7px;padding:5px 9px;color:#7dffd2;font-weight:800;white-space:nowrap}
 @media(max-width:1200px){.sas-protocol-neon-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:740px){.sas-protocol-neon-grid{grid-template-columns:1fr}.sas-protocol-visualization{padding:10px}.sas-protocol-visualization-title{min-width:0}.sas-protocol-neon-card{min-height:0}.sas-protocol-visualization-footer{flex-wrap:wrap}}
+
+/* Keep Wireshark and Search Menu in distinct, non-overlapping header rows. */
+@media (max-width: 2400px) {
+  .sas-app-header .sas-top-navigation { flex-wrap: wrap; align-content: center; row-gap: 8px; }
+  .sas-app-header .sas-top-groups { flex: 0 0 100%; width: 100%; min-width: 0; }
+  .sas-app-header .sas-top-search { flex: 0 0 100%; width: 100%; max-width: 340px; min-width: 0; margin-left: 0; }
+}
+@media (max-width: 1750px) {
+  .sas-app-header .sas-top-groups { flex-wrap: wrap; }
+}
+
+
+/* Single-line SCADA header — final override. No second navigation row. */
+.sas-app-header .sas-header-single-row {
+  display:flex; flex-wrap:nowrap !important; align-items:center;
+  min-height:72px; gap:clamp(5px,.55vw,12px); padding-top:8px; padding-bottom:8px;
+}
+.sas-app-header .sas-top-brand { flex:0 0 auto; min-width:0; }
+.sas-app-header .sas-top-navigation {
+  display:flex; flex:1 1 auto; flex-wrap:nowrap !important;
+  align-items:center; min-width:0; width:auto; order:initial;
+  gap:clamp(5px,.55vw,11px); padding:0 0 0 clamp(5px,.6vw,12px);
+  border-left:1px solid #147a9c; border-top:0;
+}
+.sas-app-header .sas-top-groups {
+  display:flex; flex:1 1 auto !important; flex-wrap:nowrap !important;
+  width:auto !important; min-width:0; gap:clamp(3px,.35vw,8px);
+  overflow-x:auto; overflow-y:hidden; scrollbar-width:thin;
+}
+.sas-app-header .sas-top-group-trigger {
+  flex:0 0 auto; white-space:nowrap; min-width:0;
+  padding:8px clamp(5px,.55vw,11px);
+  font-size:clamp(10px,.67vw,13px); gap:clamp(3px,.3vw,6px);
+}
+.sas-app-header .sas-top-search {
+  position:relative; flex:0 0 clamp(130px,10.2vw,205px) !important;
+  width:clamp(130px,10.2vw,205px) !important;
+  min-width:0 !important; max-width:205px !important;
+  margin-left:0 !important;
+}
+.sas-app-header .sas-top-search input { min-width:0; width:100%; padding-right:55px; }
+.sas-app-header .sas-header-actions { flex:0 0 auto; margin-left:0; }
+@media (max-width: 1050px) {
+  .sas-app-header .sas-header-single-row { flex-wrap:nowrap !important; }
+  .sas-app-header .sas-top-navigation { order:initial; flex:1 1 auto; border-left:1px solid #147a9c; padding:0 0 0 6px; }
+  .sas-app-header .sas-top-groups { flex-wrap:nowrap !important; }
+  .sas-app-header .sas-top-search { flex-basis:115px !important; width:115px !important; }
+}
+@media (max-width: 750px) {
+  .sas-app-header .sas-top-brand .sas-shared-brand-title { font-size:15px; }
+  .sas-app-header .sas-top-navigation { gap:4px; }
+  .sas-app-header .sas-top-search { flex-basis:100px !important; width:100px !important; }
+  .sas-app-header .sas-top-search kbd { display:none; }
+  .sas-app-header .sas-top-search input { padding-right:8px; }
+}
+
+/* Dropdown repair: scrollable navigation clipped absolutely positioned menus.
+   Keep the one-row layout, but allow menu popovers to escape the header. */
+.sas-app-shell .sas-app-header,
+.sas-app-header .sas-header-single-row,
+.sas-app-header .sas-top-navigation,
+.sas-app-header .sas-top-groups {
+  overflow: visible !important;
+}
+.sas-app-header .sas-top-groups { scrollbar-width: none; }
+.sas-app-header .sas-top-group { position: relative; z-index: 1; }
+.sas-app-header .sas-top-group:has(.sas-top-dropdown) { z-index: 1000; }
+.sas-app-header .sas-top-dropdown { z-index: 1100; pointer-events: auto; }
+.sas-app-header .sas-top-search:focus-within { z-index: 1001; }
