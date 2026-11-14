@@ -1,0 +1,319 @@
+[
+  {
+    "title": "Introduction to Wireshark",
+    "paragraphs": [
+      "Wireshark decodes captured network traffic so engineers can inspect addresses, protocol exchanges and timing observations. It is an observation tool, not proof that a protection application or physical output behaved correctly.",
+      "The capture point determines what can be seen. A laptop connected to an ordinary switch port may receive broadcasts and selected multicast but not another device's unicast MMS conversation. Use approved mirror or TAP arrangements and preserve original captures."
+    ],
+    "workflow": [
+      "Define the diagnostic question",
+      "Choose a capture point that sees the relevant path",
+      "Decode and correlate traffic with endpoint logs"
+    ],
+    "example": "For 33-F01 reporting, capture the gateway-to-IED path and inject one known isolated status transition. Compare the report with the HMI event.",
+    "check": "Label synthetic field examples as illustrative; never present a constructed packet worksheet as a measured station capture."
+  },
+  {
+    "title": "Packet Capture Fundamentals",
+    "paragraphs": [
+      "Packet capture requires suitable interfaces, placement and storage. Port mirroring copies selected traffic, while a TAP provides an observation path according to its design. Both can have limitations that affect conclusions.",
+      "Check capture drops, link capacity, timestamp method and VLAN offload behavior. A saturated mirror port can omit packets even when the operational network delivers them correctly. Capture filters discard traffic at collection time; display filters only change what is shown afterward."
+    ],
+    "workflow": [
+      "Confirm authorized capture access",
+      "Capture enough context before and after the event",
+      "Record interface statistics and preserve the unfiltered file"
+    ],
+    "example": "The 33-F01 exercise records association startup and a breaker transition, avoiding an overly narrow filter that would hide connection negotiation or a competing publisher.",
+    "check": "Do not connect an active test publisher to the station merely to obtain traffic; passive observation and active injection are different activities.",
+    "code": "# Capture filter example (libpcap syntax):\nhost 192.168.100.31 and tcp port 102\n\n# Display filters (Wireshark syntax; do not paste into capture-filter box):\ntcp.port == 102\ngoose\nsv\nptp || ntp\n# Capture broadly enough to preserve the diagnostic context."
+  },
+  {
+    "title": "Ethernet Frame Analysis",
+    "paragraphs": [
+      "Ethernet analysis begins with source/destination MAC addresses, tagging and EtherType. These fields show how a frame should be delivered and which upper-layer decoder is relevant.",
+      "GOOSE and SV use their own Ethernet mappings, while MMS normally appears inside IP/TCP. A VLAN tag absent from a capture may have been removed by NIC offload or mirror behavior. Validate capture visibility before concluding that the sender is untagged."
+    ],
+    "workflow": [
+      "Inspect MAC addresses and EtherType",
+      "Check VLAN ID and priority where visible",
+      "Compare the observed path with the switch configuration"
+    ],
+    "example": "GOOSE EtherType 0x88B8 and SV EtherType 0x88BA distinguish the two conventional Layer-2 services. The station's IP traffic uses its appropriate IP EtherType instead.",
+    "check": "Do not interpret every multicast destination as GOOSE; identify the actual service and payload."
+  },
+  {
+    "title": "IP and TCP Analysis",
+    "paragraphs": [
+      "IP analysis checks endpoint addresses, subnet/routing assumptions and packet delivery. TCP analysis adds connection setup, sequencing, acknowledgments, retransmission and stream behavior for connection-oriented services such as the conventional MMS mapping.",
+      "TCP retransmissions can result from loss or delayed acknowledgments, while apparent errors may come from incomplete capture. Reassemble the stream before judging higher-layer data. One TCP segment is not necessarily one MMS message."
+    ],
+    "workflow": [
+      "Select the relevant endpoint pair",
+      "Inspect handshake and transport diagnostics",
+      "Follow the reassembled stream and compare application responses"
+    ],
+    "example": "For 33-F01, filter ip.addr == 192.168.100.31 and inspect the connection to Gateway A. A rejected application association is distinguished from an unanswered TCP SYN.",
+    "check": "Record capture completeness and endpoint logs before attributing every retransmission to a faulty switch."
+  },
+  {
+    "title": "MMS Packet Identification",
+    "paragraphs": [
+      "MMS identification starts with the conventional TCP 102 path and the decoded protocol. The mms display filter selects decoded MMS content, while tcp.port == 102 also shows transport and related setup traffic.",
+      "If MMS does not decode, check whether the capture includes the necessary stream data and whether reassembly is enabled. A nonstandard or security-enabled configuration requires its documented analysis method rather than forcing an incorrect decoder."
+    ],
+    "workflow": [
+      "Locate the client/server TCP stream",
+      "Confirm TPKT/COTP and association context",
+      "Expand decoded MMS services and identify their purpose"
+    ],
+    "example": "The 33-F01 gateway stream contains reads and reports after association. The engineer labels each operation rather than treating all TCP 102 payloads as identical measurement updates.",
+    "check": "An open TCP 102 connection proves transport establishment only, not successful reporting or control."
+  },
+  {
+    "title": "MMS Association Analysis",
+    "paragraphs": [
+      "Association analysis finds the stage at which the client-server relationship succeeds or fails. The conventional sequence includes TCP setup, COTP connection and application association/MMS initiation.",
+      "A rejection carries different meaning from silence or a reset. Compare selectors, application context, access policy and resource availability according to the actual device implementation. Preserve the first failed response instead of repeatedly restarting both endpoints."
+    ],
+    "workflow": [
+      "Capture from before client connection",
+      "Mark each successful setup stage",
+      "Compare the rejection or missing response with client and server diagnostics"
+    ],
+    "example": "Gateway A reaches 33-F01's TCP listener but receives an association rejection. Investigation focuses on application parameters and policy rather than changing an already working VLAN path.",
+    "check": "Do not infer exact rejection semantics from a generic HMI 'offline' label; inspect the decoded response and device log."
+  },
+  {
+    "title": "MMS Read and Reporting Analysis",
+    "paragraphs": [
+      "Read analysis links a confirmed request to its response and verifies the returned type and value. Reporting analysis examines unsolicited information reports, selected members and relevant optional fields.",
+      "The decoded payload must be interpreted against the configured DataSet and model. An inclusion bitstring means an event report may omit unchanged members. Source event time, report time and capture time serve different purposes and should not be merged."
+    ],
+    "workflow": [
+      "Identify the requested reference or report identity",
+      "Compare types, inclusion and values with the configuration",
+      "Trace the result into the gateway tag and HMI"
+    ],
+    "example": "After an isolated 33-F01 position change, inspect the actual included members and quality/time structures. A scalar stVal update does not imply separate q and t members were retransmitted.",
+    "check": "If packets are correct but the display is wrong, move the investigation to mapping and client processing."
+  },
+  {
+    "title": "GOOSE Packet Identification",
+    "paragraphs": [
+      "GOOSE identification uses EtherType and the goose decoder, followed by stream identity and payload inspection. Conventional GOOSE is Layer-2 multicast and has no TCP session to follow.",
+      "Several streams may share a capture point. Filter by the approved APPID or destination MAC, then verify the control-block reference, DataSet and configuration revision. A matching address alone is insufficient to prove the right application stream."
+    ],
+    "workflow": [
+      "Apply the goose display filter",
+      "Narrow to the allocated stream",
+      "Compare identity and data types with the approved SCD"
+    ],
+    "example": "For 33-F01, goose.appid == 0x1001 selects the illustrative allocation. The engineer still checks gocbRef and ordered members before interpreting the trip Boolean.",
+    "check": "Remember that routed GOOSE is a different architecture; this lesson's Ethernet fields describe conventional station-LAN GOOSE."
+  },
+  {
+    "title": "GOOSE APPID and VLAN Analysis",
+    "paragraphs": [
+      "APPID and VLAN analysis compares the transmitted stream with the engineering allocation and switch path. Numeric bases must be explicit because SCL and tools can display the same value differently.",
+      "VLAN 200 decimal corresponds to hexadecimal 0C8, while an APPID displayed as 1001 hex equals a different decimal value. Misreading the base can produce a valid-looking but wrong configuration. Also verify PCP separately from VLAN membership."
+    ],
+    "workflow": [
+      "Record each field with its numeric base",
+      "Compare publisher export and live frame",
+      "Inspect every intermediate port's VLAN treatment"
+    ],
+    "example": "The 33-F01 stream uses APPID 0x1001 and VLAN 200. If the receiver expects decimal 1001 as the APPID, the mismatch is corrected through the coordinated configuration.",
+    "check": "If a tag is missing in capture, verify offload/mirror behavior before editing the publisher.",
+    "code": "# Display filters for the illustrative allocation\ngoose.appid == 0x1001\nvlan.id == 200\neth.dst == 01:0c:cd:01:00:01\ngoose && vlan.id == 200\n# VLAN visibility depends on NIC offload and mirror/TAP behavior."
+  },
+  {
+    "title": "GOOSE stNum and sqNum Analysis",
+    "paragraphs": [
+      "stNum and sqNum help distinguish GOOSE state changes from retransmission of the same state. Inspect them alongside payload, timestamp and configuration revision rather than using a counter alone as an event record.",
+      "Restarts, wraparound and redundancy duplicates complicate interpretation. Two copies seen on a PRP observation path can share application counters without representing two physical events. The subscriber should process the intended state according to its supported behavior."
+    ],
+    "workflow": [
+      "Capture a stable state",
+      "Apply one known transition",
+      "Compare counters and payload across the first event frame and later repeats"
+    ],
+    "example": "An illustrative sequence changes from 17/6 to 18/0, followed by 18/1 and 18/2. The unchanged trip payload in the latter frames is expected retransmission.",
+    "check": "Do not count every GOOSE packet as another trip operation or alarm occurrence."
+  },
+  {
+    "title": "GOOSE Retransmission Analysis",
+    "paragraphs": [
+      "GOOSE timing analysis examines the rapid post-change retransmissions and the later steady heartbeat. The exact schedule belongs to the implementation and configuration, so measured intervals should be compared with the approved expectations.",
+      "timeAllowedtoLive supports receiver supervision of freshness. It is not a direct measurement of complete protection transfer time. Capture timestamps also include the observation method's uncertainty and may not represent the exact wire departure time."
+    ],
+    "workflow": [
+      "Measure intervals within one identified stream",
+      "Compare stable and post-event behavior",
+      "Test subscriber expiry under controlled stream loss"
+    ],
+    "example": "The 33-F01 capture shows a burst after the trip member changes and increasing spacing afterward. The receiver's timeout alarm is checked separately from the packet timeline.",
+    "check": "Use suitable synchronized measurement equipment when the acceptance requirement concerns end-to-end protection timing."
+  },
+  {
+    "title": "Sampled Values Packet Analysis",
+    "paragraphs": [
+      "SV analysis checks stream identity, ASDU structure, sample counters, rate and quality according to the selected profile. Use the sv decoder and inspect fields supported by the installed Wireshark version.",
+      "Sample rate and frame rate differ when several ASDUs are packed into one frame. Counter gaps can arise from capture loss, so compare receiver statistics and mirror-port capacity. Correct packet structure does not prove correct analogue scaling or phase mapping."
+    ],
+    "workflow": [
+      "Filter the assigned APPID or svID",
+      "Inspect all ASDUs and counter progression",
+      "Correlate anomalies with receiver health and waveform injection results"
+    ],
+    "example": "For MU_132_L01, record sv.smpCnt progression and the agreed frame packing. A phase-current test verifies the semantic channel mapping beyond the packet decoder.",
+    "check": "Do not infer primary amperes directly from an encoded sample integer without the profile's scaling and channel definition."
+  },
+  {
+    "title": "PTP and SNTP Packet Analysis",
+    "paragraphs": [
+      "Timing-packet analysis verifies that expected PTP or NTP/SNTP exchanges reach the endpoint. PTP inspection includes profile-relevant message types, domain and source identity; SNTP uses its configured IP service path.",
+      "Packet visibility cannot establish endpoint clock accuracy by itself. Wrong profile, asymmetry or clock handling can produce poor synchronization with apparently normal traffic. Correlate packet observations with clock offset, quality and application measurements."
+    ],
+    "workflow": [
+      "Capture the timing path",
+      "Inspect source identity and expected exchanges",
+      "Compare endpoint status and measured timing against requirements"
+    ],
+    "example": "The station exercise uses ptp or ntp display filters as appropriate. MU_132_L01's PTP health is compared with its sample synchronization indication during a reference interruption.",
+    "check": "Keep protocol decoding and accuracy measurement as separate tests; one cannot substitute for the other."
+  },
+  {
+    "title": "VLAN and Multicast Troubleshooting",
+    "paragraphs": [
+      "VLAN and multicast troubleshooting locates where a required stream is filtered, flooded or misclassified. Compare the publisher port, trunks and subscriber port using both configuration and observed traffic.",
+      "Ordinary IP multicast snooping does not automatically manage conventional GOOSE/SV groups. Static or other supported industrial filtering must match the intended subscriptions. A mirror configuration can also hide traffic, so verify the observation path."
+    ],
+    "workflow": [
+      "Confirm source frame identity and tag",
+      "Inspect each forwarding boundary",
+      "Capture near the subscriber and compare with its receive diagnostic"
+    ],
+    "example": "If VLAN 200 GOOSE leaves 33-F01 but an uplink admits only VLAN 100, the path fails while MMS remains available. The corrected rule is then tested at every required subscriber.",
+    "check": "Avoid permanently enabling unrestricted flooding as a workaround without reviewing network capacity and the original policy."
+  },
+  {
+    "title": "TCP Connection Troubleshooting",
+    "paragraphs": [
+      "TCP connection troubleshooting separates reachability, listener availability, handshake completion and application setup. SYN retries, resets and established streams suggest different next checks but require context.",
+      "A reset can come from an endpoint or another network device; silence can reflect filtering, routing or an unavailable server. Compare both directions and use endpoint logs. Once transport succeeds, investigate association and service behavior separately."
+    ],
+    "workflow": [
+      "Identify source/destination addresses and ports",
+      "Inspect handshake and reset/retransmission context",
+      "Correlate with server availability and network policy"
+    ],
+    "example": "Gateway A's SYN to 33-F01 receives no reply. Check address ownership, route and permitted TCP 102 path before editing report triggers that have not yet been reached.",
+    "check": "Do not diagnose an application-specific access failure from TCP flags alone; inspect the higher-layer response when available.",
+    "code": "# Display filters for transport investigation\nip.addr == 192.168.100.31 && tcp.port == 102\ntcp.flags.syn == 1\ntcp.flags.reset == 1\ntcp.analysis.retransmission\n# Follow the observed TCP stream; confirm capture completeness first."
+  },
+  {
+    "title": "IED-to-SCADA Communication Failure",
+    "paragraphs": [
+      "An IED-to-SCADA failure can occur at the source model, network, association, acquisition resource or point database. The same offline icon can hide several distinct causes.",
+      "Use a controlled read or known source transition to locate the last correct boundary. If reads succeed but reports do not, inspect RCB allocation and triggers. If reports decode correctly but the display is wrong, inspect mapping and quality policy."
+    ],
+    "workflow": [
+      "Confirm local source state",
+      "Compare network/service exchange",
+      "Trace the acquired value through driver, tag and display"
+    ],
+    "example": "For 33-F01, a correctly decoded breaker report reaches Gateway A but the HMI remains unchanged. The investigation checks the bound tag and state conversion before changing network settings.",
+    "check": "Save the failing capture and configuration revision so the corrective action can be verified against the original symptom."
+  },
+  {
+    "title": "GOOSE Subscription Failure",
+    "paragraphs": [
+      "GOOSE subscription failure may reflect absent publication, wrong delivery, configuration mismatch or unbound application input. A receiving NIC can see traffic that the IEC 61850 application correctly rejects.",
+      "Compare APPID, MAC, VLAN, control-block identity, ConfRev and ordered data types, then inspect internal binding. Test and simulation indications may also influence acceptance according to the device's supported mode. Avoid disabling supervision just to make the alarm disappear."
+    ],
+    "workflow": [
+      "Verify publication at source",
+      "Compare traffic at the receiver with its configuration",
+      "Inspect acceptance diagnostics and internal logic transition"
+    ],
+    "example": "33-F01's new DataSet revision reaches the receiving IED, but the old subscriber configuration rejects it. Update the coordinated engineering files and retest rather than forcing acceptance of an unknown layout.",
+    "check": "After repair, repeat timeout and invalid-data tests as well as the successful signal transition."
+  },
+  {
+    "title": "Practical Packet Capture — 33 kV Feeder",
+    "paragraphs": [
+      "The practical capture exercise observes one 33 kV feeder in a controlled test arrangement. It records MMS association, a known breaker-state event and the assigned GOOSE transition where configured.",
+      "Begin before the event and retain context afterward. Record stimulus time, test mode, device revisions and capture placement. The illustrative field worksheet is a guide to inspection; actual acceptance evidence comes from the saved measured capture and endpoint observations."
+    ],
+    "workflow": [
+      "Set the approved mirror/TAP and start capture",
+      "Apply one known isolated 33-F01 transition",
+      "Save pcapng and correlate MMS, GOOSE and HMI results"
+    ],
+    "example": "The worksheet expects the assigned IP endpoint, APPID 0x1001 and VLAN 200. A stable GOOSE repeat is distinguished from the first state-change frame and from an MMS report.",
+    "check": "Record dropped-packet statistics and avoid claiming a missing frame proves operational network loss without corroboration.",
+    "table": {
+      "headers": [
+        "Illustrative event",
+        "Observable fields",
+        "Interpretation"
+      ],
+      "rows": [
+        [
+          "MMS setup",
+          "Client .10 → server .31, destination TCP 102",
+          "Transport and association precede services"
+        ],
+        [
+          "GOOSE before change",
+          "APPID 0x1001; VLAN 200; stNum 17; sqNum 6",
+          "Stable earlier state"
+        ],
+        [
+          "GOOSE new state",
+          "stNum 18; sqNum 0; trip=true",
+          "New application state"
+        ],
+        [
+          "GOOSE repeat",
+          "stNum 18; sqNum 1; trip=true",
+          "Repeat, not another physical trip"
+        ],
+        [
+          "HMI evidence",
+          "Source event time and quality",
+          "Compare actual point mapping"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Advanced IEC 61850 Troubleshooting Workflow",
+    "paragraphs": [
+      "Advanced troubleshooting uses hypotheses and boundary evidence rather than random configuration changes. Define the symptom, expected behavior, last known good revision and a test that can distinguish competing causes.",
+      "Work from the simplest failed layer toward the application, while preserving evidence. Compare a working path or device only when its relevant settings and role are understood. A difference is a clue, not automatically the root cause."
+    ],
+    "workflow": [
+      "Create a bounded hypothesis",
+      "Collect source, network and destination evidence",
+      "Change one cause, repeat the test and document the conclusion"
+    ],
+    "example": "For intermittent 33-F01 reporting, correlate TCP recovery, RCB state and gateway logs with switch counters. A coincident packet gap at an overloaded mirror is not enough to blame the station link.",
+    "check": "End with a reproducible cause-and-effect result and the tested final revision, including any remaining uncertainty."
+  },
+  {
+    "title": "Wireshark Interview and Practical Questions",
+    "paragraphs": [
+      "Practical interview questions should test reasoning from evidence. Ask why ping can succeed while GOOSE fails, why TCP 102 can connect while MMS association fails, and why correct packets can coexist with an incorrect HMI indication.",
+      "Good answers distinguish protocol layers and application semantics: ping tests an IP path, association adds application negotiation, and mapping still governs presentation. Counter and timestamp questions should consider retransmission, capture placement and source-time quality rather than memorize one screenshot."
+    ],
+    "workflow": [
+      "Explain the hypothesis for each symptom",
+      "Name the next observation that would distinguish causes",
+      "State what the evidence cannot prove"
+    ],
+    "example": "Exercise: stNum stays 18 while sqNum increases and payload stays true. Answer: this is consistent with repeated transmission of one GOOSE state, not proof of repeated physical trips. Confirm identity and restart context.",
+    "check": "Exercise: an SV counter gap appears only in a saturated mirror capture. Check capture drops and subscriber statistics before concluding the protection IED lost samples."
+  }
+]

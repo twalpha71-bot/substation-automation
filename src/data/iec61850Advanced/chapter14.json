@@ -1,0 +1,340 @@
+[
+  {
+    "title": "Introduction to Time Synchronization",
+    "paragraphs": [
+      "Time synchronization establishes a common time reference for events, measurements and distributed applications. Its required accuracy depends on what the station must correlate or control, not simply whether clocks display the same minute.",
+      "Source time, server processing time and message arrival time are different observations. A network delay can make an event arrive late without changing when it occurred. Conversely, a fast network cannot repair an incorrect source clock."
+    ],
+    "workflow": [
+      "Identify every timestamp-producing device",
+      "Define application accuracy and availability requirements",
+      "Select and test the complete timing chain"
+    ],
+    "example": "33-F01 timestamps a breaker transition locally. The HMI preserves that source time and separately records acquisition health, allowing an engineer to distinguish delayed delivery from incorrect event timing.",
+    "check": "Specify how unsynchronized time is indicated; hiding bad time quality can produce convincing but incorrect event sequences."
+  },
+  {
+    "title": "Importance of Accurate Time in SAS",
+    "paragraphs": [
+      "Accurate time supports sequence-of-events analysis, disturbance correlation and synchronized sampling where required. Different applications tolerate different uncertainty, so one timing method may not satisfy all station functions.",
+      "An SOE study needs enough accuracy to distinguish relevant events across IEDs. A protection function comparing samples from different merging units may require tighter alignment. Do not infer either requirement from the visible number of decimal places on a display."
+    ],
+    "workflow": [
+      "List the events and measurements to be correlated",
+      "Establish acceptable uncertainty",
+      "Allocate a timing method and verification method to each device class"
+    ],
+    "example": "The 132 kV process bay uses its specified precision timing profile, while a station monitoring application may use a separately justified SNTP arrangement.",
+    "check": "Record accuracy, resolution and synchronization status separately; millisecond formatting does not prove millisecond accuracy."
+  },
+  {
+    "title": "Sequence of Events and Timestamping",
+    "paragraphs": [
+      "Sequence of events relies on timestamps assigned at the appropriate source. The event list must retain the original time, state, quality and equipment identity rather than reorder everything solely by arrival at the gateway.",
+      "Buffered reports can deliver older events after reconnection. Equal or near-equal timestamps may not establish a unique physical order when uncertainty overlaps. Clock steps, invalid time quality and device restart must remain visible to investigators."
+    ],
+    "workflow": [
+      "Inject a known sequence at the source",
+      "Compare IED, gateway and HMI times",
+      "Repeat during communication delay and timing degradation"
+    ],
+    "example": "33-F01's protection operation precedes breaker-open feedback. A late buffered report should retain its source time instead of appearing as a new physical operation at the reconnection instant.",
+    "check": "Do not infer causation from timestamp order alone; consider measurement uncertainty, input filtering and application processing delays."
+  },
+  {
+    "title": "GPS and GNSS Time Sources",
+    "paragraphs": [
+      "GNSS receivers derive time from satellite systems and can discipline a station time server or grandmaster. Antenna placement, cable delay, receiver health and the selected equipment affect the quality delivered to the station.",
+      "Loss of satellite reception does not necessarily stop the clock immediately; the oscillator may enter holdover with growing uncertainty. The station must monitor that condition and know how long the selected equipment can meet the application's requirement under specified conditions."
+    ],
+    "workflow": [
+      "Verify antenna and receiver installation",
+      "Confirm reference lock and timing outputs",
+      "Test loss of reference and the resulting alarms/holdover behavior"
+    ],
+    "example": "The station time server distributes time to 33 kV IEDs and a compatible PTP domain. A GNSS alarm is mapped to SCADA so degradation is visible before event timing becomes unreliable.",
+    "check": "Use the manufacturer's holdover specification and test evidence; do not promise indefinite accuracy from a disconnected antenna."
+  },
+  {
+    "title": "SNTP Fundamentals",
+    "paragraphs": [
+      "SNTP provides a simplified means of obtaining time using the NTP message format, commonly through UDP port 123. An IED client exchanges timestamps with an approved server and adjusts its local clock according to its implementation.",
+      "Accuracy depends on clock behavior, network delay and asymmetry, polling and the device's timestamping method. SNTP is useful where its demonstrated performance meets the requirement, but it should not be assumed adequate for every process-bus application."
+    ],
+    "workflow": [
+      "Configure approved server addresses",
+      "Confirm successful exchanges and clock status",
+      "Measure offset and test server loss/recovery"
+    ],
+    "example": "33-F01 obtains station time from a designated server. During FAT, a known input event is compared against a suitable reference rather than judging synchronization from a ping response.",
+    "check": "Verify the IED's supported redundancy and polling behavior; specifying two servers does not prove automatic correct failover."
+  },
+  {
+    "title": "NTP vs SNTP",
+    "paragraphs": [
+      "NTP provides mechanisms for clock synchronization and source selection; SNTP uses a simpler subset of the approach for appropriate clients. Both are distinct from the precise hardware-assisted timing architectures often used with PTP.",
+      "Product behavior matters more than a generic label. Check supported versions, server selection, authentication where implemented, holdover and diagnostic visibility. A device called an NTP client may expose only limited configuration, while a time server can support several client types."
+    ],
+    "workflow": [
+      "Review the implemented protocol and features",
+      "Match them to the timing requirement",
+      "Test source change, offset and unhealthy-source behavior"
+    ],
+    "example": "The station server can serve multiple monitoring devices while the process-bus system uses a separate compatible PTP profile. The design documents how both relate to the same reference.",
+    "check": "Do not claim SNTP and NTP have a fixed universal accuracy difference; assess the complete implementation and network."
+  },
+  {
+    "title": "SNTP Client-Server Architecture",
+    "paragraphs": [
+      "An SNTP architecture consists of approved time servers and configured clients connected through permitted IP paths. The design includes source health, client reachability and monitoring of synchronization status.",
+      "Time traffic must traverse the intended VLANs and routing policy. A working MMS connection does not prove UDP timing traffic is permitted. Server redundancy also needs client support and a test of actual selection behavior."
+    ],
+    "workflow": [
+      "Map servers and client groups",
+      "Permit the required timing paths",
+      "Verify every client and test the loss of its preferred source"
+    ],
+    "example": "33-F01 uses the station time-server address in its configuration. The gateway records a time-synchronization alarm separately from the general IED communication alarm.",
+    "check": "Check both server health and client offset; a healthy server cannot guarantee a client is actually using it."
+  },
+  {
+    "title": "Precision Time Protocol (PTP)",
+    "paragraphs": [
+      "Precision Time Protocol synchronizes clocks through timestamped message exchanges and a defined clock hierarchy. Hardware timestamping and compatible network clock functions can reduce uncertainty compared with software-only timing paths.",
+      "PTP interoperability depends on the selected profile, transport, delay mechanism, domain and supported message behavior. Matching the word PTP in two datasheets is insufficient. Network asymmetry and incorrect profile combinations can produce persistent offset despite visible packets."
+    ],
+    "workflow": [
+      "Select the project profile",
+      "Verify grandmaster, switch and endpoint compatibility",
+      "Measure endpoint offset and behavior during reference/path changes"
+    ],
+    "example": "MU_132_L01 uses a supported power-utility PTP profile to align sample timing. The protection test checks synchronized measurement behavior as well as the merging unit's clock diagnostic.",
+    "check": "Do not equate a PTP link indicator with verified application accuracy; measure at the relevant endpoint."
+  },
+  {
+    "title": "IEEE 1588 and IEC/IEEE 61850-9-3",
+    "paragraphs": [
+      "IEEE 1588 defines the PTP framework, while profiles constrain choices for particular applications. IEC/IEEE 61850-9-3 defines a precision-time profile for power utility automation where selected by the project.",
+      "Profiles help interoperability but do not make unsupported hardware compatible. Edition, transport and peer-delay behavior must align. Avoid combining arbitrary settings from different telecom, industrial or power profiles simply because each device accepts them individually."
+    ],
+    "workflow": [
+      "Record the required profile and edition",
+      "Compare every timing device's support",
+      "Validate the selected configuration on the complete path"
+    ],
+    "example": "The process-bus specification names its power-utility profile explicitly. Switches and merging units are checked against that requirement rather than using a vendor's unspecified PTP default.",
+    "check": "Keep profile compliance, measured accuracy and application acceptance as separate evidence items."
+  },
+  {
+    "title": "PTP Grandmaster Clock",
+    "paragraphs": [
+      "A PTP grandmaster supplies the selected time reference to its domain. Selection mechanisms compare advertised clock properties according to the profile, and engineered priorities can influence which suitable source is preferred.",
+      "The best advertised clock is only useful if the time source and configured properties are trustworthy. Monitor reference lock, clock quality and changes in grandmaster identity. Redundant grandmasters need a controlled failover test, not merely duplicate hardware installation."
+    ],
+    "workflow": [
+      "Configure approved master priorities and domain",
+      "Verify the selected grandmaster identity",
+      "Remove the preferred source and measure transition/recovery"
+    ],
+    "example": "The 132 kV process-bus endpoints select the station's intended grandmaster. During a controlled loss, the test records any offset excursion and resulting sample synchronization indication.",
+    "check": "Do not hard-code an unsupported accuracy class or priority to force selection; use the documented profile and device behavior."
+  },
+  {
+    "title": "Boundary Clock and Transparent Clock",
+    "paragraphs": [
+      "A boundary clock synchronizes through one port and serves time through other ports, creating timing domains within the hierarchy. A transparent clock measures relevant transit behavior and contributes correction information rather than acting as a new master in the same way.",
+      "The supported delay mechanism and profile determine how these functions operate. An ordinary switch can carry PTP frames yet add variable delay without the required compensation. Verify the exact switch mode and endpoint compatibility."
+    ],
+    "workflow": [
+      "Identify each network device's clock role",
+      "Check profile and delay-mechanism agreement",
+      "Measure the complete path under load and after topology changes"
+    ],
+    "example": "The process network uses compatible transparent-clock switches or an approved boundary-clock design. These roles are drawn differently so maintenance staff do not confuse forwarding with clock regeneration.",
+    "check": "Do not enable unrelated PTP modes on adjacent switches and assume correction fields will remain meaningful."
+  },
+  {
+    "title": "PTP Synchronization Mechanism",
+    "paragraphs": [
+      "PTP estimates clock offset using timing exchanges and a model of path delay. Sync and, in two-step operation, Follow_Up convey timing information; the selected profile's delay mechanism supplies the needed path-delay observations.",
+      "End-to-end Delay_Req/Delay_Resp and peer-delay exchanges are different mechanisms. The power-utility profile must be implemented as specified rather than mixing these sequences. Asymmetric delay remains an important source of error even when message exchange succeeds."
+    ],
+    "workflow": [
+      "Inspect profile, domain and message sequence",
+      "Compare measured offset and path-delay diagnostics",
+      "Test loading and path changes against the accuracy requirement"
+    ],
+    "example": "For the power-utility example, verify the supported peer-delay behavior between adjacent devices and the expected Sync/Follow_Up handling at the endpoint.",
+    "check": "An educational sequence diagram simplifies message timing; it is not a substitute for the selected profile's exact state machines."
+  },
+  {
+    "title": "SNTP vs PTP Comparison",
+    "paragraphs": [
+      "SNTP and PTP serve different engineering needs and implementations. SNTP is commonly used for suitable station-event timing, while compatible PTP designs support tighter timing requirements such as synchronized process-bus measurements.",
+      "Selection depends on demonstrated accuracy, availability, device support and maintenance complexity. Neither protocol name guarantees a fixed result. PTP also requires correct profile and network-clock behavior; adding a grandmaster alone may not achieve the required accuracy."
+    ],
+    "workflow": [
+      "Compare application timing requirements",
+      "Check endpoint and network support",
+      "Select the method and prove it with an appropriate measurement"
+    ],
+    "example": "The station can use one GNSS reference to support an SNTP service and a compatible PTP system, while monitoring both independently.",
+    "check": "Keep actual test limits in the project specification; do not teach one universal accuracy number for every SNTP or PTP deployment.",
+    "table": {
+      "headers": [
+        "Aspect",
+        "SNTP example",
+        "PTP example"
+      ],
+      "rows": [
+        [
+          "Transport",
+          "UDP/IP timing service, typically port 123",
+          "Profile-selected transport and delay mechanism"
+        ],
+        [
+          "Typical role",
+          "Station event timing where verified sufficient",
+          "Precise endpoint/sample alignment where required"
+        ],
+        [
+          "Critical checks",
+          "Server selection, offset, holdover",
+          "Profile, domain, clocks, asymmetry, offset"
+        ],
+        [
+          "Acceptance",
+          "Measured against project requirement",
+          "Measured against project requirement"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Time Synchronization for Process Bus",
+    "paragraphs": [
+      "Process-bus synchronization aligns sample acquisition where protection algorithms require consistent timing across sources. The timing chain includes the reference, distribution network, merging-unit clock and sampling behavior.",
+      "Clock health must propagate into useful diagnostics and application supervision. A grandmaster failure may first cause holdover, then unacceptable uncertainty; the receiving protection response depends on the selected design and supported quality indications."
+    ],
+    "workflow": [
+      "Define allowable sample alignment error",
+      "Verify timing at each merging unit",
+      "Test reference loss, path change and restoration with the subscriber operating"
+    ],
+    "example": "Two measurement sources used by a 132 kV protection application are compared using suitable synchronized test equipment. A common source name in their configuration is not enough to prove alignment.",
+    "check": "Test the protection application's documented degraded-time response rather than assuming every device immediately stops publishing samples."
+  },
+  {
+    "title": "IED Time Configuration",
+    "paragraphs": [
+      "IED time configuration sets the supported timing source, related network parameters and display conventions. The device's internal timestamp basis should be distinguished from local time-zone formatting at an HMI or engineering workstation.",
+      "UTC-based event handling avoids ambiguous daylight-saving transitions, while operator displays can convert time according to the site policy. Incorrect time-zone configuration can produce a fixed offset even when the underlying clock is synchronized."
+    ],
+    "workflow": [
+      "Select the approved source and profile/server",
+      "Verify source time and time quality",
+      "Check display conversion, restart and loss-of-reference behavior"
+    ],
+    "example": "33-F01 event timestamps are preserved through the gateway, with local display conversion applied consistently for the station. A 5:30 difference is investigated as a possible display-zone issue before altering the clock.",
+    "check": "Do not compensate a display conversion error by deliberately offsetting the IED's reference time."
+  },
+  {
+    "title": "SCADA and Gateway Time Synchronization",
+    "paragraphs": [
+      "Gateways and SCADA servers need their own synchronized clocks for logs, communication diagnostics and locally generated events. They must also preserve source timestamps from IEDs instead of replacing every event with gateway arrival time.",
+      "Redundant servers can disagree if their clock sources or time-zone settings differ. During failover, check event ordering and duplicate handling as well as data continuity. Distinguish source-time quality from the health of the gateway's own clock."
+    ],
+    "workflow": [
+      "Synchronize each station computer",
+      "Configure timestamp preservation and display policy",
+      "Test delayed reports and server failover"
+    ],
+    "example": "A buffered 33-F01 event arrives after reconnection. The SOE shows its original source time and the system can still record when it was received for diagnostics.",
+    "check": "Verify exported logs retain enough timezone/UTC context to compare records from different devices without guesswork."
+  },
+  {
+    "title": "Time Quality and Clock Failure",
+    "paragraphs": [
+      "Time quality communicates whether a timestamp can be trusted to the degree required by the application. Relevant flags and accuracy indications depend on the service, edition and device implementation.",
+      "Clock failure, loss of synchronization and uncertain accuracy are not identical conditions. Holdover may preserve useful time temporarily while uncertainty grows. The HMI should make degraded time visible without confusing it with invalid process value quality."
+    ],
+    "workflow": [
+      "Identify supported time-quality indications",
+      "Map them to alarms and investigation rules",
+      "Test reference failure and recovery at source and consumer"
+    ],
+    "example": "33-F01 continues reporting breaker state during a time-source outage, but its event timing is marked according to the device's supported status. The operator can distinguish a valid position from uncertain event time.",
+    "check": "Do not silently sort uncertain events into a definitive causal sequence; preserve the quality evidence.",
+    "table": {
+      "headers": [
+        "Observation",
+        "Meaning to investigate",
+        "Do not assume"
+      ],
+      "rows": [
+        [
+          "Clock not synchronized",
+          "Lost/unused reference or incompatible timing",
+          "Process value is necessarily invalid"
+        ],
+        [
+          "Fixed displayed offset",
+          "Timezone/UTC conversion or clock configuration",
+          "Network congestion is the cause"
+        ],
+        [
+          "Changing offset",
+          "Delay, asymmetry, source or clock behavior",
+          "Packet receipt proves accuracy"
+        ],
+        [
+          "Holdover",
+          "Clock running without current reference",
+          "Unlimited accuracy after source loss"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Practical Example — 132/33 kV Substation",
+    "paragraphs": [
+      "The practical timing design serves a 132/33 kV station with monitored reference equipment, configured clients and compatible process-bus timing where used. It documents every source and the applications that depend on it.",
+      "Redundancy is assessed across antenna, receiver, power and network paths. The design also states what happens during holdover and how operators recognize degradation. A second server sharing all the same failure points may provide less resilience than expected."
+    ],
+    "workflow": [
+      "Prepare the timing dependency diagram",
+      "Configure station-event and process-bus clients",
+      "Test source/path failures and compare application outcomes"
+    ],
+    "example": "33-F01 event timing and MU_132_L01 sample timing are tested separately against their specified requirements. Both contribute health indications to station monitoring.",
+    "check": "Maintain one consistent time-zone/display policy and retain reference-quality evidence with the acceptance records."
+  },
+  {
+    "title": "Time Synchronization FAT/SAT Testing",
+    "paragraphs": [
+      "Timing FAT verifies compatible profiles, source selection, endpoint accuracy and failure behavior in a controlled arrangement. SAT adds installed antenna, cable, switch and network-path verification.",
+      "Use suitable reference equipment and a defined measurement method. Comparing two unsynchronized laptop clocks cannot establish microsecond performance. Record uncertainty, loading conditions and the exact device configuration used for every result."
+    ],
+    "workflow": [
+      "Verify normal synchronization and source identity",
+      "Measure endpoint timing against the required limit",
+      "Test reference loss, holdover, failover and restoration"
+    ],
+    "example": "For the process bay, observe sample alignment and subscriber health during a grandmaster transition. For SOE, inject known events and compare source timestamps and quality through the HMI.",
+    "check": "State the measurement method and uncertainty with the pass result; precision in a screenshot is not accuracy evidence."
+  },
+  {
+    "title": "Time Synchronization Troubleshooting",
+    "paragraphs": [
+      "Time troubleshooting distinguishes source failure, network transport failure, profile mismatch, offset error and display conversion. Begin by checking which source the endpoint actually uses and whether its quality is acceptable.",
+      "Stable fixed offsets often suggest time-zone, UTC-offset or configuration issues; variable offsets may indicate delay, load or synchronization problems. These are diagnostic hypotheses, not proofs. Confirm them with source, network and endpoint evidence."
+    ],
+    "workflow": [
+      "Compare reference and endpoint status",
+      "Inspect timing messages and selected profile",
+      "Correct one cause and repeat normal/failure measurements"
+    ],
+    "example": "If 33-F01 events are consistently shifted only in the HMI, inspect gateway/display conversion. If the IED itself reports unsynchronized time, trace its configured server or PTP path.",
+    "check": "Do not hide a timing fault by increasing alarm thresholds without proving the application still meets its requirement."
+  }
+]

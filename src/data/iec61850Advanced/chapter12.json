@@ -1,0 +1,340 @@
+[
+  {
+    "title": "Introduction to IED Engineering",
+    "paragraphs": [
+      "IED engineering translates protection, control and communication requirements into a verified device configuration. It includes hardware allocation, application settings, information models and integration with the station system.",
+      "A relay that communicates successfully can still have incorrect protection settings or physical I/O mapping. Treat each domain as a controlled configuration with linked tests. The device's hardware, firmware and licensed functions determine what can actually be implemented."
+    ],
+    "workflow": [
+      "Review the protection and control requirements",
+      "Confirm device capability and hardware",
+      "Configure, test and archive the integrated result"
+    ],
+    "example": "33-F01 requires feeder protection, breaker feedback, approved control and station reporting. These functions are allocated before network addresses or DataSets are finalized.",
+    "check": "Keep the protection settings file, vendor application project and IEC 61850 export together; none alone necessarily restores the complete IED."
+  },
+  {
+    "title": "Protection IED Hardware Architecture",
+    "paragraphs": [
+      "A protection IED typically combines measurement inputs, processing, binary I/O, communication interfaces, auxiliary supply and a local operator interface. The exact module arrangement and isolation ratings are product-specific.",
+      "Hardware allocation affects software engineering. An optional Ethernet module or binary output card cannot be assumed present from the product family name. Check terminal schedules and module identification before assigning a signal to a nonexistent channel."
+    ],
+    "workflow": [
+      "Record the installed module inventory",
+      "Match input/output ratings to drawings",
+      "Verify physical interfaces during inspection and testing"
+    ],
+    "example": "For 33-F01, the approved output assigned to the trip circuit is identified by its actual terminal and contact duty. The IEC 61850 trip indication is linked to that function but is not the physical contact itself.",
+    "check": "Confirm auxiliary power and contact ratings from the installed variant, not a generic catalogue photograph."
+  },
+  {
+    "title": "IED Configuration Software Overview",
+    "paragraphs": [
+      "Vendor engineering software configures supported protection settings, logic, hardware and communication. Tool versions, device connectivity packages and firmware compatibility influence what can be opened, edited and downloaded.",
+      "Use documented procedures without assuming common menu names across vendors. Opening an old project in a newer tool can trigger conversion, so preserve the original and review the conversion report. A tool-generated configuration still requires functional validation."
+    ],
+    "workflow": [
+      "Install the approved tool/device package combination",
+      "Open a controlled project copy",
+      "Review compatibility and export/download diagnostics"
+    ],
+    "example": "The 33-F01 configuration is edited using the package validated for its firmware. The engineer records the tool version with the final backup to support future maintenance.",
+    "check": "Do not overwrite the only working project during an automatic conversion; retain a recoverable baseline and compare changed settings."
+  },
+  {
+    "title": "IED Network Parameter Configuration",
+    "paragraphs": [
+      "Network configuration establishes device identity and reachability. Address, mask, gateway, interface role and redundancy mode must align with the station plan and supported hardware.",
+      "Two Ethernet ports do not necessarily mean PRP support; they may be switched, redundant, independent or dedicated to different services. Configuration must follow the device manual. Duplicate IP addresses can produce intermittent connections that look like random protocol faults."
+    ],
+    "workflow": [
+      "Assign a unique address and interface role",
+      "Verify subnet and redundancy settings",
+      "Test the intended client path and inspect address conflicts"
+    ],
+    "example": "33-F01 uses 192.168.100.31/24 in the illustrative station plan. Its protection GOOSE VLAN allocation is recorded separately because conventional GOOSE does not depend on that IP address.",
+    "check": "Confirm the active physical port and mode after download; a correct setting on an unused interface will not restore communication."
+  },
+  {
+    "title": "Logical Device and Logical Node Configuration",
+    "paragraphs": [
+      "Logical devices group application information, and logical nodes represent standardized functional concepts. The exposed model depends on configured functions, supported templates and vendor naming conventions.",
+      "Engineering must connect the model to real equipment. A logical node named XCBR1 may represent a specific breaker only within the device's defined application. Renaming nodes without coordinating consumers can invalidate reports, controls and subscriptions."
+    ],
+    "workflow": [
+      "Inspect the configured application model",
+      "Associate each logical node with equipment/function",
+      "Verify the online references against the approved signal list"
+    ],
+    "example": "The tutorial maps 33-F01 breaker feedback to IED_33_F01LD0/XCBR1.Pos. Actual prefixes, instances and logical-device naming must be read from the delivered configuration.",
+    "check": "Do not create unsupported logical nodes merely to make a generic training reference appear in a vendor tool."
+  },
+  {
+    "title": "DataSet Configuration",
+    "paragraphs": [
+      "DataSet engineering selects information for reports or multicast services. Member order, functional constraint and structure must match the intended consumer and fit the device's documented limits.",
+      "Group data by service purpose and update behavior. A protection GOOSE DataSet and an operator measurement report have different timing and semantic requirements. Oversized DataSets can waste bandwidth and complicate decoding without improving visibility."
+    ],
+    "workflow": [
+      "Build the point list for one service",
+      "Select supported members in a controlled order",
+      "Verify types, capacity and consumer interpretation"
+    ],
+    "example": "33-F01 uses a status-oriented DataSet for breaker and protection indications and a separate measurement acquisition arrangement. The exact grouping is chosen from the project's update and retention requirements.",
+    "check": "After any membership change, coordinate revisions and repeat client/subscriber tests; do not update the publisher alone."
+  },
+  {
+    "title": "Report Control Block Configuration",
+    "paragraphs": [
+      "RCB configuration determines how selected data reaches an MMS reporting client. Relevant settings include buffered behavior, DataSet association, triggers, optional fields and timing, subject to the IED's supported implementation.",
+      "Allocate report instances to clients deliberately. Ownership conflicts or an enabled block can prevent reconfiguration. Buffered reports have finite storage and require client recovery logic; enabling a BRCB does not guarantee unlimited historical coverage."
+    ],
+    "workflow": [
+      "Assign the client's report instance",
+      "Configure triggers and required fields",
+      "Test event, GI, integrity and reconnection behavior"
+    ],
+    "example": "Gateway A receives 33-F01 status through its allocated buffered report. Gateway B uses a documented independent resource or supported redundancy arrangement rather than repeatedly taking Gateway A's block.",
+    "check": "Record retention assumptions and overflow handling in the acceptance plan, including how the HMI indicates a possible event gap."
+  },
+  {
+    "title": "GOOSE Publisher Configuration",
+    "paragraphs": [
+      "GOOSE publisher engineering binds an application DataSet to a control block and network allocation. The published values must correspond to actual application signals, including the defined operating and test modes.",
+      "Correct APPID and MAC settings cannot compensate for a DataSet member bound to the wrong internal protection result. Validate the source condition first, then verify the transmitted payload and counters. Export the final publisher description for all consumers."
+    ],
+    "workflow": [
+      "Map the internal source signal to the exposed model",
+      "Configure DataSet/control block/addressing",
+      "Inject the source and compare the live stream"
+    ],
+    "example": "33-F01 publishes the approved trip member through gcbTrip using APPID 0x1001 and VLAN 200 in the illustrative exercise. Both the source Boolean and quality handling are verified.",
+    "check": "Distinguish a protection start indication from an operate/trip indication; publishing the wrong stage changes scheme behavior."
+  },
+  {
+    "title": "GOOSE Subscriber Configuration",
+    "paragraphs": [
+      "Subscriber engineering links an external GOOSE member to an internal application input. It requires agreement on stream identity, configuration revision, member order and data type, followed by a documented vendor-specific binding.",
+      "The subscriber must supervise stream freshness and handle invalid quality according to the protection or control design. A communication diagnostic showing received frames is only one stage; the internal signal and resulting application behavior must also be observed."
+    ],
+    "workflow": [
+      "Import the approved publisher definition",
+      "Resolve external references and bind inputs",
+      "Test valid, missing and mismatched streams"
+    ],
+    "example": "The receiving controller maps 33-F01's trip member into a designated isolated test input. A separate diagnostic supervises the stream so a communication failure is not silently interpreted as a valid false value.",
+    "check": "Retest the internal binding after every import or firmware change that modifies the receiving application."
+  },
+  {
+    "title": "Time Synchronization Configuration",
+    "paragraphs": [
+      "IED time configuration selects a supported source and defines how the device reports synchronization health. SNTP, PTP and other timing interfaces have different accuracy and network requirements.",
+      "Match the required time performance to the application. SOE timestamping and multi-source sampled-value alignment may need different designs. A displayed correct wall clock does not prove acceptable offset, holdover or timestamp quality."
+    ],
+    "workflow": [
+      "Select the approved timing method and source",
+      "Configure supported profile/domain or server parameters",
+      "Verify offset, quality and failure behavior"
+    ],
+    "example": "33-F01 uses the project's approved station time source for events. A merging unit requiring precise sample alignment uses its compatible PTP profile rather than assuming the feeder's SNTP settings are sufficient.",
+    "check": "Check source time and quality after restart and reference loss; do not assess timing only from the HMI's local clock display."
+  },
+  {
+    "title": "Binary Input and Output Mapping",
+    "paragraphs": [
+      "Binary-input mapping translates terminal states into application signals; binary-output mapping links logic to physical contacts. Debounce, inversion, contact type and supervision affect the resulting behavior.",
+      "The signal schedule must distinguish electrical contact state from process meaning. A normally closed alarm contact can require inversion, while breaker position commonly combines two auxiliary contacts to detect intermediate or inconsistent states. Do not force every status into one Boolean."
+    ],
+    "workflow": [
+      "Trace terminal and contact identity",
+      "Configure polarity/debounce and application binding",
+      "Test every state through the model and output indication"
+    ],
+    "example": "33-F01's 52a and 52b inputs produce XCBR1.Pos through the approved double-point logic. Test open, closed and abnormal combinations before accepting the HMI display.",
+    "check": "Use isolated approved test interfaces; a laptop network connection is not a substitute for correctly rated binary-input test equipment.",
+    "table": {
+      "headers": [
+        "Signal",
+        "Physical/application role",
+        "Verification"
+      ],
+      "rows": [
+        [
+          "52a",
+          "Closed-position auxiliary input",
+          "Verify contact polarity and terminal"
+        ],
+        [
+          "52b",
+          "Open-position auxiliary input",
+          "Verify complementary behavior"
+        ],
+        [
+          "XCBR1.Pos",
+          "Derived double-point position",
+          "Test open, closed and abnormal combinations"
+        ],
+        [
+          "Trip output",
+          "Approved physical output contact",
+          "Verify cause, destination and isolation"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Analog Measurement Mapping",
+    "paragraphs": [
+      "Analog measurement mapping connects physical or sampled inputs to engineering quantities and published objects. Ratios, nominal ratings, units, phase sequence and sign conventions determine whether the values have operational meaning.",
+      "Scaling can occur in the IED and again in the gateway. Applying a CT ratio twice can produce a plausible but grossly wrong display. Document where primary conversion occurs and verify multiple test points rather than a single nominal reading."
+    ],
+    "workflow": [
+      "Verify source channel and ratio",
+      "Confirm published units and scaling",
+      "Compare injected values, IED display and SCADA presentation"
+    ],
+    "example": "For 33-F01, inject known phase currents and check the corresponding MMXU1 quantities. The gateway displays primary amperes only after confirming whether the IED already supplies primary values.",
+    "check": "Include zero, representative load and a higher test value, plus phase-angle or direction checks where relevant."
+  },
+  {
+    "title": "Protection Trip Signal Mapping",
+    "paragraphs": [
+      "Protection trip mapping links the intended operate condition to trip conditioning, physical outputs and communication indications. Start, operate, general trip and breaker-open feedback represent different stages and must not be conflated.",
+      "Review the protection logic and cause-and-effect matrix before assigning an IEC 61850 point. Some functions combine phases or protection elements, while others expose individual indications. Exact available objects and internal signal names are device-specific."
+    ],
+    "workflow": [
+      "Identify the approved trip logic",
+      "Trace physical output and network indications",
+      "Inject the protection condition and verify every intended destination"
+    ],
+    "example": "An illustrative chain is PTOC operate to PTRC trip conditioning to the assigned breaker output. XCBR1.Pos then reports actual breaker feedback, which may remain closed if the mechanism fails.",
+    "check": "Test unwanted destinations remain inactive; correct operation of one contact does not prove the mapping has no unintended parallel output."
+  },
+  {
+    "title": "Control and Interlocking Configuration",
+    "paragraphs": [
+      "Control engineering combines command authority, the object's control model, permissives, interlocks and physical output logic. The operator request and protection trip path may have different conditions and priorities.",
+      "Configure the approved switching philosophy rather than a generic set of interlocks. Missing or invalid remote inputs require an explicit response. The operator should receive a meaningful rejection or failure indication without losing independent protection capability."
+    ],
+    "workflow": [
+      "Map the authorized control point",
+      "Implement the approved interlocking matrix",
+      "Test allowed, rejected, local-mode and timeout cases"
+    ],
+    "example": "33-F01 remote closing uses the supported CSWI control object and independently verifies breaker position. A stale remote earth-switch indication is handled according to the approved fail-safe policy.",
+    "check": "Do not use a maintenance override as the normal solution to a rejected close; identify and resolve the failed condition."
+  },
+  {
+    "title": "ICD/CID/SCD Import and Export",
+    "paragraphs": [
+      "ICD, IID, SCD and CID exchanges serve different stages of IED integration. The chosen workflow must preserve both standardized communication information and the vendor application's supported bindings.",
+      "File imports can alter names, control blocks or model options. Review diagnostic messages and compare the result with the system baseline before download. Keep the complete vendor project because SCL may not contain every protection or hardware setting."
+    ],
+    "workflow": [
+      "Archive the original project",
+      "Import the approved exchange file and resolve diagnostics",
+      "Export the resulting configuration and compare live behavior"
+    ],
+    "example": "After importing the station SCD for 33-F01, verify its reports, GOOSE subscriptions and time/network parameters in the deployed device. Do not rely solely on the tool's import-success dialog.",
+    "check": "Record the exact station and device revisions used for testing so another engineer can reproduce the result."
+  },
+  {
+    "title": "Multi-Vendor IED Integration",
+    "paragraphs": [
+      "Multi-vendor IED integration requires semantic agreement as well as transport compatibility. Device editions, optional attributes, control models, reporting limits and engineering-tool behavior can differ.",
+      "A representative pilot test should expose those differences before mass configuration. Use actual firmware and capability documents and avoid inventing a common proprietary workflow. Normalize engineering documentation while preserving the exact source references used by each device."
+    ],
+    "workflow": [
+      "Collect supported models and service limits",
+      "Build a compatibility matrix",
+      "Test one complete inter-vendor function before repeating it"
+    ],
+    "example": "One vendor's 33-F01 publisher sends a trip indication to another vendor's controller. The test verifies member type, quality, timeout and internal logic binding, not just multicast delivery.",
+    "check": "Treat any workaround as a documented design decision with repeatable tests; do not hide type conversion inside an unexplained gateway expression."
+  },
+  {
+    "title": "SCADA Client Integration",
+    "paragraphs": [
+      "SCADA client integration connects the IED's supported model to the station point database. Required work includes association settings, reference mapping, report allocation, quality handling, timestamps and control authorization.",
+      "Commission the points from a known physical or simulated stimulus. A green communication icon does not prove correct units, double-point states or event ordering. Test the client's behavior when the IED is unavailable or returns invalid data."
+    ],
+    "workflow": [
+      "Import and verify the model",
+      "Bind tags and assigned reports",
+      "Perform point-by-point value, quality, time and control tests"
+    ],
+    "example": "33-F01's breaker position, current, protection operation and device health appear on the feeder HMI. A communication outage must mark those values appropriately rather than leave them looking live indefinitely.",
+    "check": "Keep command and indication references separate in the mapping sheet and verify the correct bay identity at the operator interface."
+  },
+  {
+    "title": "Practical Example — 33 kV Feeder IED",
+    "paragraphs": [
+      "The practical feeder configuration begins with approved hardware, settings and a signal schedule for 33-F01. It combines physical I/O, measurements, protection indications, MMS reporting and any authorized GOOSE exchange.",
+      "Use one controlled revision through engineering and testing. Configure a representative feeder completely before cloning settings to other bays, because copied addresses, stream identifiers and equipment names can create duplicate identities."
+    ],
+    "workflow": [
+      "Configure the 33-F01 application and interfaces",
+      "Integrate reports, GOOSE and SCADA",
+      "Execute a full stimulus-to-display/output test and archive the result"
+    ],
+    "example": "The example uses address 192.168.100.31, illustrative LD0 references and gcbTrip APPID 0x1001. Another feeder receives its own approved names and allocations rather than an unchanged clone.",
+    "check": "Compare every copied bay's unique identifiers, ratios and protection settings before energization or release.",
+    "table": {
+      "headers": [
+        "Item",
+        "Illustrative allocation",
+        "Acceptance evidence"
+      ],
+      "rows": [
+        [
+          "IED/address",
+          "IED_33_F01 / 192.168.100.31",
+          "Online identity and network schedule"
+        ],
+        [
+          "Position",
+          "LD0/XCBR1.Pos",
+          "Known contact-state test"
+        ],
+        [
+          "Report",
+          "dsStatus / brcbStatus",
+          "Value, quality, time and recovery"
+        ],
+        [
+          "GOOSE",
+          "dsTrip / gcbTrip / 0x1001",
+          "Publisher and subscriber functional test"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "IED FAT/SAT Testing",
+    "paragraphs": [
+      "IED FAT verifies the configured device against the requirements in a controlled environment. SAT confirms the installed terminals, network paths, time source and station interfaces match the tested design.",
+      "Test scope includes protection and control functions as well as communication. Negative cases reveal incorrect authority, stale inputs and resource conflicts that normal operation can conceal. Record configuration checksums and the exact stimulus for each result."
+    ],
+    "workflow": [
+      "Review drawings and configuration versions",
+      "Test I/O, measurements, reports, GOOSE and approved controls",
+      "Exercise failure/recovery and reconcile site changes"
+    ],
+    "example": "For 33-F01, retain point-test sheets, protection test results, network evidence and the final exported project. Any site correction triggers the affected repeat tests.",
+    "check": "Do not present a passed communication test as proof of protection coordination or primary-equipment condition."
+  },
+  {
+    "title": "IED Troubleshooting",
+    "paragraphs": [
+      "IED troubleshooting separates hardware, application, communication and integration faults. Establish whether the local device sees the expected input before investigating how it publishes that information.",
+      "Use diagnostics at each boundary: terminal state, internal logic, exposed model, transmitted message and receiving application. A correct network packet with an incorrect source value points upstream, while a correct source and packet with a wrong display points downstream."
+    ],
+    "workflow": [
+      "Reproduce a specific symptom",
+      "Trace the signal through each boundary",
+      "Correct one cause and repeat the original test"
+    ],
+    "example": "If 33-F01's HMI says closed while the relay model says open, inspect gateway state mapping. If both say closed despite open test contacts, inspect input polarity and position logic first.",
+    "check": "Archive the cause, changed settings and verification evidence; an unexplained factory reset is not a controlled engineering resolution."
+  }
+]

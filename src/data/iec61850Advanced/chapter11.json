@@ -1,0 +1,319 @@
+[
+  {
+    "title": "Introduction to Substation Configuration Language",
+    "paragraphs": [
+      "Substation Configuration Language (SCL) is the XML-based engineering exchange language defined by IEC 61850-6. It describes relevant system structure, IED information models, communication configuration and relationships between equipment and functions.",
+      "SCL is not a universal executable program for all relay logic. Different file roles carry different engineering information, and vendor tools still manage supported application details. The value of SCL is a controlled, machine-readable exchange between engineering stages."
+    ],
+    "workflow": [
+      "Identify the engineering task and file role",
+      "Select the supported SCL edition",
+      "Validate structure and references before importing"
+    ],
+    "example": "The 33-F01 relay's model is incorporated into a station configuration so the gateway and GOOSE subscribers use coordinated references instead of independently typed names.",
+    "check": "Keep the original vendor export and the approved system revision; successful XML parsing alone does not prove deployability."
+  },
+  {
+    "title": "Purpose of SCL in IEC 61850 Engineering",
+    "paragraphs": [
+      "SCL reduces repeated manual entry by describing a shared engineering model. A system configurator can combine device capabilities, allocate communication and resolve relationships, then return relevant configurations to device tools.",
+      "This benefit depends on ownership and revision discipline. Uncontrolled imports can replace a newer configuration with an old capability description or lose unsupported extensions. Every exchange must state who owns the system model and which tool is authoritative for device application settings."
+    ],
+    "workflow": [
+      "Define engineering responsibilities",
+      "Establish import/export checkpoints",
+      "Compare returned files with the approved baseline"
+    ],
+    "example": "When 33-F01 adds a new GOOSE signal, update the system configuration and all affected consumers together. Do not treat a locally edited CID as the new station master by default.",
+    "check": "Document which information survives each tool round trip and verify that unsupported elements are not silently discarded."
+  },
+  {
+    "title": "SCL XML Structure",
+    "paragraphs": [
+      "XML represents information through nested elements, attributes and references. In SCL, the root namespace and version information identify the language context, while named types and instances connect the model's structure.",
+      "Well-formed XML requires valid nesting and quoting; schema validity adds rules about allowed elements and values. Semantic validity goes further by checking that references resolve and that the engineered meaning is consistent. These are three different validation stages."
+    ],
+    "workflow": [
+      "Parse the XML without external entity expansion",
+      "Validate against the selected IEC schema",
+      "Resolve type, device and communication references"
+    ],
+    "example": "An LN instance can name lnType=\"XCBR_Type\" while no matching LNodeType exists. The file may be well formed but cannot provide a complete type definition for that instance.",
+    "check": "Do not claim full schema validation from a generic XML parser; record the schema edition and validation tool used."
+  },
+  {
+    "title": "IEC 61850-6 Overview",
+    "paragraphs": [
+      "IEC 61850-6 defines the engineering configuration language and exchange framework. Its edition and amendments matter because supported elements, file roles and engineering features evolve over time.",
+      "The project must agree compatible editions across system and IED tools. Automatically upgrading a file's version text does not convert unsupported content correctly. Vendor extensions may be useful, but their meaning and portability require documented support."
+    ],
+    "workflow": [
+      "Record the required standard edition",
+      "Verify each tool's import/export capability",
+      "Test representative exchanges before configuring every bay"
+    ],
+    "example": "The station integrator exchanges one representative feeder configuration with each vendor tool. Any lost report, GOOSE binding or application reference is resolved before copying the pattern to remaining feeders.",
+    "check": "Use the applicable schema and device capability documentation; never infer compatibility from an .scd filename alone."
+  },
+  {
+    "title": "ICD File — IED Capability Description",
+    "paragraphs": [
+      "An ICD file describes an IED's capabilities for engineering use. It can include the available information model and supported communication services, providing a starting point for system integration.",
+      "An ICD is not necessarily the final instantiated station configuration. Optional functions, application selection and firmware can affect the exported model. Collect the file that matches the intended hardware, firmware and configured functional scope rather than reusing a generic library file without verification."
+    ],
+    "workflow": [
+      "Identify the exact IED variant",
+      "Export or obtain its supported capability description",
+      "Compare required functions and service limits with the project schedule"
+    ],
+    "example": "For 33-F01, confirm the required measurement and control objects exist in the selected ICD before assigning gateway tags or GOOSE DataSet members.",
+    "check": "Archive provenance, firmware and export date with the ICD; similar product names can expose different capabilities."
+  },
+  {
+    "title": "CID File — Configured IED Description",
+    "paragraphs": [
+      "A CID file describes a configured IED in its engineering context. It is commonly used to transfer the relevant finalized IEC 61850 configuration to a device or its engineering tool where that workflow is supported.",
+      "A CID should not be mistaken for the complete station configuration or all proprietary protection settings. Actual download packaging and accepted file types are vendor-dependent. Check that the deployed device and the approved SCD remain consistent after the tool applies its own validation."
+    ],
+    "workflow": [
+      "Generate the device configuration from the approved system revision",
+      "Validate it in the IED tool",
+      "Download through the supported procedure and verify the live model"
+    ],
+    "example": "After configuring 33-F01 reports and GOOSE, compare live stream identity and DataSet membership with the exported CID and station SCD.",
+    "check": "Retain the full vendor project when required; a CID alone may not restore protection settings, logic or hardware allocation."
+  },
+  {
+    "title": "SCD File — Substation Configuration Description",
+    "paragraphs": [
+      "An SCD file describes the configured substation system and relationships among participating IEDs. It coordinates models, communication parameters and engineered exchanges across the station.",
+      "The SCD is a controlled system artifact. It does not automatically replace switch configuration files, protection studies or vendor application projects. Changes to a publisher or address allocation may affect several devices, so revision review must consider all consumers."
+    ],
+    "workflow": [
+      "Establish the SCD baseline and owner",
+      "Integrate approved device changes",
+      "Validate dependencies and distribute affected device configurations"
+    ],
+    "example": "Adding a new trip member to 33-F01 requires checking every subscriber, not only exporting another file for the publisher. Gateway mappings may also depend on the changed model.",
+    "check": "Preserve an as-built SCD that matches tested device configurations rather than only the original design-stage file."
+  },
+  {
+    "title": "IID File — Instantiated IED Description",
+    "paragraphs": [
+      "An IID file supports exchange of an instantiated IED description in the system engineering process. It can convey changes associated with a particular device instance back into the coordinated system model.",
+      "This role helps iterative engineering, but tool support and merge behavior must be checked. Importing an IID should not silently overwrite unrelated station settings. Treat the exchange as a reviewed change with identifiable source and target revisions."
+    ],
+    "workflow": [
+      "Export the changed IED instance using the supported workflow",
+      "Review its differences",
+      "Merge into the system configuration and revalidate dependent exchanges"
+    ],
+    "example": "If 33-F01's application gains another available logical node, the integrator evaluates its IID update before assigning new DataSets or subscriber references.",
+    "check": "Confirm the tool preserves previously engineered addressing and bindings; file acceptance does not prove a correct merge."
+  },
+  {
+    "title": "SSD File — System Specification Description",
+    "paragraphs": [
+      "An SSD file expresses system specification information, including substation structure and intended functions as supported by the engineering process. It helps establish what the system should do before all concrete device instances are assigned.",
+      "Specification and implementation are different stages. A logical function in the specification must eventually be allocated to supported IED capabilities and connected to physical equipment. The SSD does not prove that those devices have been configured or commissioned."
+    ],
+    "workflow": [
+      "Define voltage levels, bays and functional requirements",
+      "Review the specification against the single-line diagram",
+      "Allocate functions during system engineering"
+    ],
+    "example": "The 132/33/11 kV project specifies line, transformer and feeder functions before assigning particular relay variants. The final SCD records the chosen instantiated solution.",
+    "check": "Maintain traceability from specification requirements to implemented functions and acceptance tests, not just file-to-file conversion history."
+  },
+  {
+    "title": "SCL File Types Comparison",
+    "paragraphs": [
+      "SCL file extensions indicate engineering roles, not arbitrary interchangeable formats. ICD describes capabilities, IID an instantiated device exchange, CID a configured device, SCD the configured system and SSD the system specification.",
+      "Renaming an extension does not create the missing content or validate the new role. Tools may accept subsets or proprietary packages, so confirm the documented workflow. The project should identify authoritative files and avoid distributing several conflicting versions as equally current."
+    ],
+    "workflow": [
+      "Match each engineering deliverable to its role",
+      "Record producer and consumer tools",
+      "Verify content and revision before exchange"
+    ],
+    "example": "The integrator uses an ICD to begin 33-F01 integration, an approved SCD to coordinate the station, and the supported device output for deployment. Those artifacts are retained for different purposes.",
+    "check": "Never replace the station master with a single-device export merely because both files contain an SCL root element.",
+    "table": {
+      "headers": [
+        "File",
+        "Engineering role",
+        "Not equivalent to"
+      ],
+      "rows": [
+        [
+          "ICD",
+          "IED capability description",
+          "Final station-wide design"
+        ],
+        [
+          "IID",
+          "Instantiated IED exchange",
+          "Unreviewed station master replacement"
+        ],
+        [
+          "CID",
+          "Configured IED description",
+          "All proprietary protection settings"
+        ],
+        [
+          "SCD",
+          "Configured substation system",
+          "Switch backup or protection study"
+        ],
+        [
+          "SSD",
+          "System specification",
+          "Proof of deployed configuration"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Header and Substation Sections",
+    "paragraphs": [
+      "The Header section carries identification and revision information relevant to engineering control. The Substation section describes the electrical structure and associations between primary equipment and logical functions where represented.",
+      "Equipment names and connectivity should align with approved drawings. A syntactically valid bay name that refers to the wrong feeder can create dangerous operational confusion. Revision metadata must also reflect controlled changes rather than remaining at an uninformative default forever."
+    ],
+    "workflow": [
+      "Compare substation, voltage-level and bay names with drawings",
+      "Check equipment/function associations",
+      "Update revision history through the agreed process"
+    ],
+    "example": "33-F01 belongs to the 33 kV voltage level, while 11-F01 belongs to the 11 kV system supplied through the defined 33/11 kV transformer in the practical project.",
+    "check": "Do not connect 11 kV feeders directly to a 33 kV bus in the specification merely to simplify the drawing."
+  },
+  {
+    "title": "IED and AccessPoint Sections",
+    "paragraphs": [
+      "The IED element identifies a device instance; AccessPoint describes an access arrangement through which relevant services are exposed. Within server content, logical devices contain logical nodes linked to type definitions.",
+      "Names, logical-device instances and optional explicit naming features influence the exposed references. Do not universally assume every domain name is a simple concatenation without checking the actual configuration. Multiple access points may have distinct roles or supported services."
+    ],
+    "workflow": [
+      "Locate the intended IED and AccessPoint",
+      "Trace Server, LDevice and LN instances",
+      "Compare the resulting references with the online model"
+    ],
+    "example": "The tutorial assumes IED_33_F01 and LDevice inst LD0 expose IED_33_F01LD0. This convention is stated explicitly and must be verified before importing real gateway tags.",
+    "check": "Check access-point references in Communication as well as the IED model; a correct device name with the wrong access point still fails integration."
+  },
+  {
+    "title": "Communication Section",
+    "paragraphs": [
+      "The Communication section describes network associations and addressing for connected access points and supported communication services. GSE and SMV entries associate Ethernet parameters with particular logical-device control blocks.",
+      "A network address is only useful if its IED, access point, logical device and control-block references resolve. Numeric representation also matters: tools may display decimal VLAN values while SCL uses the specified hexadecimal representation for an address parameter."
+    ],
+    "workflow": [
+      "Resolve each ConnectedAP to an IED/AccessPoint",
+      "Validate IP and service address allocations",
+      "Compare the exported values with live traffic"
+    ],
+    "example": "The illustrative gcbTrip stream uses VLAN decimal 200, represented as 0C8 in its SCL VLAN-ID field. Its APPID 1001 is explicitly hexadecimal in the address example.",
+    "check": "Check the station allocation register for duplicates and verify that switch VLAN configuration uses the intended numeric value.",
+    "code": "<!-- Fragment under Communication/SubNetwork/ConnectedAP; resolve IED/AP. -->\n<GSE ldInst=\"LD0\" cbName=\"gcbTrip\">\n  <Address>\n    <P type=\"MAC-Address\">01-0C-CD-01-00-01</P>\n    <P type=\"APPID\">1001</P>\n    <P type=\"VLAN-ID\">0C8</P>\n    <P type=\"VLAN-PRIORITY\">4</P>\n  </Address>\n</GSE>\n<!-- APPID and VLAN-ID shown in their SCL hexadecimal representation. -->"
+  },
+  {
+    "title": "DataTypeTemplates Section",
+    "paragraphs": [
+      "DataTypeTemplates defines reusable logical-node, data-object, data-attribute and enumeration types. Instances refer to these definitions rather than repeating every structural detail in the device tree.",
+      "Type references must resolve consistently. A correctly named data object with the wrong common data class or attribute type can break client decoding or subscriber mapping. Vendor namespaces and extensions require explicit handling instead of silently substituting a familiar standard type."
+    ],
+    "workflow": [
+      "Resolve each lnType to LNodeType",
+      "Follow DOType and DAType references",
+      "Verify functional constraints and enumeration meanings against the intended model"
+    ],
+    "example": "For an illustrative XCBR1.Pos, the position object's type must support the expected double-point semantics and relevant attributes. A generic Boolean substitute would lose intermediate and bad-state information.",
+    "check": "Validate structure and meaning together; identical object names do not guarantee identical supported attributes or control behavior."
+  },
+  {
+    "title": "DataSet and ReportControl Elements",
+    "paragraphs": [
+      "DataSet elements list selected functional-constrained data in a defined order. ReportControl binds a report configuration to its DataSet and specifies supported triggers, optional fields and timing parameters.",
+      "An FCDA element can identify an object-level selection when the attribute name is omitted appropriately; its name alone does not mean every entry is a scalar attribute. Fragment examples need the surrounding LN0, data model and type definitions before they can form a deployable file."
+    ],
+    "workflow": [
+      "Resolve every DataSet member",
+      "Check ReportControl datSet and configuration revision",
+      "Verify trigger behavior and actual client decoding"
+    ],
+    "example": "The example dsStatus selects XCBR1.Pos at ST and binds a buffered report. The client checks returned structure and inclusion rather than assuming separate stVal, q and t scalar entries.",
+    "check": "Use vendor-supported reporting limits and reserve instances deliberately; arbitrary XML does not create unsupported server resources.",
+    "code": "<!-- Illustrative sibling elements inside LN0; surrounding SCL omitted. -->\n<DataSet name=\"dsStatus\">\n  <FCDA ldInst=\"LD0\" lnClass=\"XCBR\" lnInst=\"1\" doName=\"Pos\" fc=\"ST\"/>\n</DataSet>\n<ReportControl name=\"brcbStatus\" rptID=\"33F01_Status\" datSet=\"dsStatus\"\n  confRev=\"1\" buffered=\"true\" indexed=\"true\" bufTime=\"50\" intgPd=\"60000\">\n  <TrgOps dchg=\"true\" qchg=\"true\" dupd=\"false\" period=\"true\" gi=\"true\"/>\n  <OptFields seqNum=\"true\" timeStamp=\"true\" dataSet=\"true\" reasonCode=\"true\"\n    dataRef=\"true\" entryID=\"true\" configRef=\"true\" bufOvfl=\"true\"/>\n  <RptEnabled max=\"2\"/>\n</ReportControl>\n<!-- Example timings in milliseconds; resource support is vendor-dependent. -->"
+  },
+  {
+    "title": "GSEControl and SampledValueControl",
+    "paragraphs": [
+      "GSEControl and SampledValueControl describe different communication services. GOOSE publishes application state with retransmission; SV publishes a measurement sample stream according to its selected profile.",
+      "Both require appropriate DataSets, communication entries and compatible consumers, but their rates, payload interpretation and supervision differ. Do not copy a GOOSE block and merely rename it to configure Sampled Values. Profile-specific SV fields require exact device support."
+    ],
+    "workflow": [
+      "Identify the service and publisher control block",
+      "Resolve its DataSet and Communication entry",
+      "Validate receiver compatibility and deployed stream fields"
+    ],
+    "example": "33-F01 gcbTrip is a GOOSE application stream, while MU_132_L01 publishes an SV measurement stream. Their identifiers and network allocations are managed separately.",
+    "check": "Check sample profile and channel mapping for SV; check ordered state data and application binding for GOOSE."
+  },
+  {
+    "title": "ExtRef and GOOSE Subscription Engineering",
+    "paragraphs": [
+      "ExtRef elements express dependencies on external data sources. In GOOSE engineering they identify the source information needed by a receiving logical function, with additional control-block context where supported and required by the edition.",
+      "A resolved external reference does not necessarily complete the proprietary internal logic binding. Tools may require an explicit association to an internal signal name. Verify that the received member reaches the correct function and that quality and communication supervision are handled."
+    ],
+    "workflow": [
+      "Resolve source IED, LD, LN and attribute",
+      "Verify service/control-block context",
+      "Confirm the internal receiving signal changes during an isolated functional test"
+    ],
+    "example": "The subscriber consumes the approved 33-F01 trip member. Its import report, online subscription diagnostic and application input are all compared with the system signal matrix.",
+    "check": "After a publisher rename or member-order change, revalidate every dependent ExtRef and application binding.",
+    "code": "<!-- Fragment inside the receiving LN Inputs; bind intAddr in its vendor tool. -->\n<Inputs>\n  <ExtRef iedName=\"IED_33_F01\" ldInst=\"LD0\" lnClass=\"PTRC\" lnInst=\"1\"\n    doName=\"Tr\" daName=\"general\" serviceType=\"GOOSE\"\n    srcLDInst=\"LD0\" srcLNClass=\"LLN0\" srcCBName=\"gcbTrip\"\n    intAddr=\"TripInput_33F01\"/>\n</Inputs>\n<!-- intAddr is an illustrative internal binding, not a universal device name. -->"
+  },
+  {
+    "title": "SCL Import and Export Workflow",
+    "paragraphs": [
+      "Reliable SCL exchange is a controlled round trip between system and device tools. Begin from known source revisions, import only supported content, review differences and export a traceable result.",
+      "Tool warnings can reveal dropped elements, unsupported editions or unresolved references. Ignoring them may produce files that look plausible but no longer represent the approved system. Keep a reversible baseline and compare meaningful model changes instead of relying only on file size."
+    ],
+    "workflow": [
+      "Archive the pre-import project",
+      "Import and review all diagnostics",
+      "Export, compare and functionally verify the affected services"
+    ],
+    "example": "After a 33-F01 update, compare DataSets, reports, GOOSE identities and subscriber references before distributing the new SCD-derived configurations.",
+    "check": "Do not merge concurrent station edits by replacing whole files blindly; resolve ownership and dependencies before accepting either revision."
+  },
+  {
+    "title": "Practical Multi-Vendor SCD Engineering",
+    "paragraphs": [
+      "Multi-vendor SCD engineering integrates supported device models into one coherent station configuration. The integrator coordinates names, addresses, reports and inter-IED exchanges while vendors retain responsibility for their device-specific application settings.",
+      "A pilot integration exposes edition differences, naming conventions and import limitations before repetition across many bays. Use representative devices and actual firmware, and retain an interoperability matrix covering both positive functions and failure behavior."
+    ],
+    "workflow": [
+      "Collect verified capability/instance files",
+      "Integrate one representative bay from each vendor",
+      "Resolve exchanges and repeat joint acceptance tests"
+    ],
+    "example": "The 33 kV pilot includes a protection publisher, another vendor's subscriber and a gateway MMS client. Every signal has a source reference, destination binding, expected type and test case.",
+    "check": "Conformance certificates support capability review but do not replace testing the delivered combination of tools, settings and applications."
+  },
+  {
+    "title": "SCL Validation and Troubleshooting",
+    "paragraphs": [
+      "SCL troubleshooting should distinguish malformed XML, schema violations, unresolved references, unsupported capabilities and inconsistent application meaning. Each class requires different evidence and a different correction.",
+      "Validate from the smallest failing relationship outward. A report referencing a nonexistent DataSet should be repaired before investigating the gateway network. A schema-valid GOOSE subscription that never changes internal logic requires checking binding and live stream identity."
+    ],
+    "workflow": [
+      "Capture the exact import/validation diagnostic",
+      "Resolve the referenced element and its dependencies",
+      "Revalidate the file and repeat the affected runtime test"
+    ],
+    "example": "If 33-F01's gcbTrip points to an obsolete DataSet name, correct the coordinated system revision and regenerate the endpoint configurations. Do not patch only the displayed name in the receiver.",
+    "check": "Archive the final validation report, exported files and device evidence so future engineers can reproduce the tested configuration."
+  }
+]

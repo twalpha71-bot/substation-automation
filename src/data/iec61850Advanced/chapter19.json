@@ -1,0 +1,345 @@
+[
+  {
+    "title": "Introduction to Multi-Vendor IEC 61850 Systems",
+    "paragraphs": [
+      "Multi-vendor IEC 61850 systems combine devices and tools from different suppliers within one engineered application. Standardized models and services provide a foundation, but supported options, firmware and application bindings still require verification.",
+      "Integration succeeds when both transport and meaning agree. A Boolean received successfully can still represent the wrong protection stage, while two similarly named objects can expose different optional attributes. Use a controlled compatibility and signal matrix."
+    ],
+    "workflow": [
+      "Collect exact device capabilities",
+      "Define shared functions and exchanges",
+      "Test representative combinations before station-wide rollout"
+    ],
+    "example": "The 33 kV pilot combines a feeder publisher, another supplier's controller and a gateway client. Each exchange has a documented source, type, destination and failure response.",
+    "check": "Avoid claiming universal interoperability from vendor logos or an IEC 61850 checkbox; verify the delivered combination."
+  },
+  {
+    "title": "Interoperability and Conformance",
+    "paragraphs": [
+      "Conformance testing assesses implementation behavior against specified standard tests. Interoperability testing checks whether implementations work together, while project acceptance checks the actual engineered application against requirements.",
+      "A conformance certificate has a scope, version and tested capability set. It does not certify every future firmware or custom station configuration. Read the certificate together with PICS, MICS, PIXIT and other applicable implementation statements."
+    ],
+    "workflow": [
+      "Verify certificate scope and firmware relevance",
+      "Compare claimed services with project needs",
+      "Run joint functional and negative tests"
+    ],
+    "example": "Two certified IEDs can still fail a GOOSE exchange because the configured member types or receiving application binding differ. The integration test resolves that specific combination.",
+    "check": "Keep compliance evidence and project test results linked but distinct; neither should be presented as a substitute for the other."
+  },
+  {
+    "title": "Siemens SIPROTEC IED Integration",
+    "paragraphs": [
+      "Siemens SIPROTEC integration begins with the exact product generation, hardware and firmware. DIGSI 5 serves SIPROTEC 5 engineering, while other generations can use different tools; the IEC 61850 System Configurator supports the system exchange workflow.",
+      "Do not infer optional service or process-bus capability from the family name. Collect the device's actual model and supported engineering packages, then review how system configuration and internal application settings are exchanged and retained."
+    ],
+    "workflow": [
+      "Identify the SIPROTEC variant and approved tool versions",
+      "Export supported capability/instance information",
+      "Integrate and verify reports, subscriptions and controls"
+    ],
+    "example": "In the pilot, a SIPROTEC-family feeder IED publishes a supported operation signal. The test verifies its actual reference and received type rather than assuming every SIPROTEC exposes the same LN instance.",
+    "check": "Archive both device and system engineering projects needed to reproduce the tested configuration; menu names depend on the installed versions."
+  },
+  {
+    "title": "Schneider MiCOM IED Integration",
+    "paragraphs": [
+      "Schneider MiCOM integration requires identifying the exact device lineage, model and firmware. Schneider documents Easergy Studio as the successor name to MiCOM S1 Studio; compatible data-model packages and device support must be checked for the selected relay.",
+      "The MiCOM name spans product histories, so do not assume every MiCOM device uses the same tool or capabilities. Configuration exchange, optional services and internal input mapping remain model-specific. Preserve the original project before tool conversion."
+    ],
+    "workflow": [
+      "Confirm manufacturer/model and supported software",
+      "Obtain the matching data model and SCL export",
+      "Test system exchange and application bindings"
+    ],
+    "example": "The pilot's Schneider-family device acts as a designated subscriber only after its supported GOOSE features and input types are verified. No proprietary menu path is invented by this course.",
+    "check": "Check official support for the installed variant; another supplier's MiCOM-branded tool description is not automatic evidence of compatibility."
+  },
+  {
+    "title": "ABB Relion IED Integration",
+    "paragraphs": [
+      "ABB/Relion-family integration starts from the exact installed product and its supported engineering package. PCM600 and matching connectivity packages are used for supported Relion devices; product ownership and support channels vary across the installed portfolio.",
+      "A common family name does not imply identical hardware, object models or SCL workflows. Verify the relevant vendor documentation for the specific relay and firmware. System engineering and device application binding must be checked together after import."
+    ],
+    "workflow": [
+      "Identify the installed Relion variant",
+      "Match PCM600/connectivity support where applicable",
+      "Integrate the exported model and verify internal signals"
+    ],
+    "example": "The pilot's Relion-family controller receives the agreed feeder state and exposes its own status to the gateway. Both subscription diagnostics and application logic are observed during testing.",
+    "check": "Do not assume a connectivity package for one series can safely configure another series or firmware revision."
+  },
+  {
+    "title": "GE Multilin IED Integration",
+    "paragraphs": [
+      "GE Multilin integration depends on the selected relay family and firmware. For supported UR-family devices, EnerVista UR Setup provides relevant configuration functions, but other Multilin families can use different packages and workflows.",
+      "Review the actual IEC 61850 model, service limits and engineering exchange behavior. Firmware changes can affect supported functions or mappings, so a previously working template must be revalidated rather than copied blindly."
+    ],
+    "workflow": [
+      "Identify the exact Multilin family and tool package",
+      "Export and review supported model information",
+      "Test MMS, GOOSE and control behavior required by the project"
+    ],
+    "example": "The pilot includes a Multilin-family IED as a station MMS server. The gateway maps its actual measurements and status objects instead of imposing another supplier's naming convention.",
+    "check": "Do not extrapolate a capability documented for one UR release to every GE relay; retain model-specific evidence."
+  },
+  {
+    "title": "Vendor Engineering Tools Overview",
+    "paragraphs": [
+      "Vendor tools configure device-specific applications, while system configurators coordinate shared SCL engineering. Both roles are needed when protection logic, hardware and communication relationships must remain consistent.",
+      "Tool compatibility includes software version, device package, firmware and supported SCL edition. Automatic conversion or import can change or discard information. A repeatable workflow records each exchange and validates the resulting online behavior."
+    ],
+    "workflow": [
+      "Build the tool/version matrix",
+      "Test representative import/export round trips",
+      "Preserve original and converted projects with comparison results"
+    ],
+    "example": "The multi-vendor pilot uses each supplier's supported device tool and one controlled system-engineering process. The SCD owner coordinates exchanges rather than allowing independent conflicting station masters.",
+    "check": "Avoid publishing a universal click-by-click menu sequence for all vendors; use the exact product manual for implementation details.",
+    "table": {
+      "headers": [
+        "Family/context",
+        "Documented tool example",
+        "Verify before use"
+      ],
+      "rows": [
+        [
+          "SIPROTEC 5",
+          "DIGSI 5; IEC 61850 System Configurator",
+          "Exact generation, firmware and project exchange"
+        ],
+        [
+          "Schneider MiCOM",
+          "Easergy Studio (formerly MiCOM S1 Studio)",
+          "Manufacturer lineage and matching data model"
+        ],
+        [
+          "Supported Relion devices",
+          "PCM600 plus matching connectivity package",
+          "Installed product/support channel and firmware"
+        ],
+        [
+          "Supported Multilin UR devices",
+          "EnerVista UR Setup",
+          "UR version; other families may use other tools"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "ICD File Collection and Validation",
+    "paragraphs": [
+      "ICD collection establishes the capability inputs for system engineering. Files should come from trusted project/vendor sources and match the intended hardware, firmware and application options.",
+      "Validate syntax, schema compatibility and required model content before import. A generic library ICD may omit configured functions or describe features unavailable on the installed device. Keep provenance and checksum information so later changes can be traced."
+    ],
+    "workflow": [
+      "Collect the approved file and implementation statements",
+      "Verify version and required services",
+      "Import into a pilot system and compare with the live device"
+    ],
+    "example": "For the 33 kV pilot, every feeder and controller file is checked for the actual report and GOOSE requirements before address allocation and signal binding.",
+    "check": "Reject silent substitution of a similar model's ICD; a matching product-family name does not prove model equivalence."
+  },
+  {
+    "title": "Multi-Vendor SCD Engineering",
+    "paragraphs": [
+      "Multi-vendor SCD engineering coordinates device names, model instances, communication addresses and signal exchanges. The system configurator must preserve supported vendor information while maintaining consistent standardized references.",
+      "Define who owns each change and how device updates return to the system baseline. Concurrent unreviewed edits can create incompatible publisher/subscriber revisions even when each individual file imports successfully."
+    ],
+    "workflow": [
+      "Integrate verified device descriptions",
+      "Allocate names, reports and multicast streams",
+      "Resolve dependencies and distribute controlled device outputs"
+    ],
+    "example": "The pilot SCD records 33-F01's gcbTrip and every subscribing input. A member-order change is reviewed across all consumers before any device is downloaded.",
+    "check": "Keep the final as-built SCD aligned with deployed vendor projects and gateway databases, not merely the last file exported by one tool."
+  },
+  {
+    "title": "Logical Node and Data Model Compatibility",
+    "paragraphs": [
+      "Data-model compatibility concerns names, common data classes, attributes, functional constraints and supported semantic meaning. Different vendors may use prefixes, instances or logical-device organization differently while representing comparable functions.",
+      "Do not normalize by renaming until references merely look alike. Build a mapping that preserves the actual source and explains equivalence. Optional attributes and extensions must be handled explicitly rather than assumed present everywhere."
+    ],
+    "workflow": [
+      "Browse and compare relevant model structures",
+      "Match engineering meaning and supported types",
+      "Verify each mapped value with a known stimulus"
+    ],
+    "example": "Two feeder relays expose phase current through their supported MMXU structures but use different logical-device names. The gateway maps each exact reference to a common engineering unit.",
+    "check": "Similar display labels are not sufficient; verify data type, quality association and whether the value is primary or secondary scaled."
+  },
+  {
+    "title": "DataSet and Report Compatibility",
+    "paragraphs": [
+      "Report compatibility includes DataSet structure, RCB features, trigger support and client interpretation. Differences in limits, reservation behavior or optional fields can affect redundant gateways and recovery.",
+      "Use the exact supported combination rather than enabling every optional field by habit. Test inclusion and timestamps for each DataSet structure, especially object-level selections versus separate scalar members. Buffered retention and restart behavior remain implementation-dependent."
+    ],
+    "workflow": [
+      "Compare server/client reporting capabilities",
+      "Allocate compatible instances and fields",
+      "Test events, GI, integrity, ownership and reconnect"
+    ],
+    "example": "Gateway A receives status reports from several vendors. The point database retains each DataSet's actual order and type structure rather than assuming all reports use the same template.",
+    "check": "Record unsupported recovery behavior and event-gap handling; a generic BRCB label does not guarantee identical retention across devices."
+  },
+  {
+    "title": "Multi-Vendor GOOSE Engineering",
+    "paragraphs": [
+      "Multi-vendor GOOSE requires agreement on stream identity, ordered payload types and application behavior. Network delivery is only the first stage; quality, test/simulation handling and timeout policy must also be compatible.",
+      "Run a pilot exchange using the exact delivered firmware and tool versions. Some optional data structures may require a different supported member selection. Any conversion must be documented and tested rather than guessed from encoded bytes."
+    ],
+    "workflow": [
+      "Compare publisher and subscriber capability statements",
+      "Engineer a compatible DataSet and binding",
+      "Test state changes, invalid data and stream loss"
+    ],
+    "example": "The feeder publisher sends an agreed operation Boolean and supported quality information to the controller. The controller proves both internal input acceptance and the intended isolated output response.",
+    "check": "Do not disable quality or revision checks simply to make dissimilar configurations communicate."
+  },
+  {
+    "title": "GOOSE Subscription Mapping",
+    "paragraphs": [
+      "Subscription mapping translates external standardized references into the receiver's internal application inputs. The SCL exchange may identify the source correctly while a vendor-specific binding still needs completion.",
+      "Review member order, type conversion and source identity after every import. An internal input with a familiar name can remain connected to an old stream. Use online application diagnostics and known test transitions to prove the binding."
+    ],
+    "workflow": [
+      "Resolve the external reference and control-block context",
+      "Bind the supported internal signal",
+      "Test positive transition, invalid quality and expiry"
+    ],
+    "example": "The pilot controller maps 33-F01's trip member to its designated input. A separate communication-health signal drives the approved supervision behavior rather than treating missing data as a valid false.",
+    "check": "Preserve the mapping report and vendor project; the SCD alone may not show every internal logic association."
+  },
+  {
+    "title": "MMS Client Integration",
+    "paragraphs": [
+      "MMS client integration across vendors requires model discovery, association compatibility, report allocation and data interpretation for each server. A single gateway driver can still need device-specific configuration.",
+      "Test client resource use under the intended number of simultaneous IEDs and redundant clients. A maintenance connection can expose limits hidden in a single-device demonstration. Quality, timestamps and control results must remain consistent at the engineering-tag layer."
+    ],
+    "workflow": [
+      "Create per-device connection and model records",
+      "Allocate supported reports and access rights",
+      "Test combined load, reconnect and control restrictions"
+    ],
+    "example": "Gateway A reads the pilot's Siemens-, Schneider-, Relion- and Multilin-family devices through their actual supported references. Operator tags use common naming without changing source semantics.",
+    "check": "Do not assume the gateway's import success means every optional service or control model is supported."
+  },
+  {
+    "title": "Time Synchronization Compatibility",
+    "paragraphs": [
+      "Time compatibility requires more than devices advertising SNTP or PTP. Check implemented versions, profiles, domain behavior, timestamp quality and the accuracy required by each application.",
+      "Mixed-vendor timing chains can fail because of incompatible delay mechanisms or clock roles. Event displays can also differ because of local time-zone formatting even when source time is correct. Test source loss and recovery across the full system."
+    ],
+    "workflow": [
+      "Build the timing capability matrix",
+      "Configure one compatible source/profile arrangement",
+      "Measure endpoint behavior and compare source timestamps through SCADA"
+    ],
+    "example": "The pilot's monitoring IEDs use an approved station-time method, while any process-bus equipment uses its specifically supported precision profile. Their acceptance criteria remain distinct.",
+    "check": "Do not claim a common GNSS source automatically makes every endpoint synchronized to the required accuracy."
+  },
+  {
+    "title": "Network and VLAN Compatibility",
+    "paragraphs": [
+      "Network compatibility covers physical interfaces, tagging, multicast, redundancy and management behavior. Devices may interpret port roles or VLAN settings differently through their engineering tools.",
+      "Verify numerical values and live frames, especially where one tool displays hexadecimal and another decimal. PRP/HSR support must match the actual interface mode. Two physical ports do not establish a compatible redundancy implementation."
+    ],
+    "workflow": [
+      "Compare port and network capabilities",
+      "Configure the agreed VLAN/stream allocation",
+      "Test normal and redundant paths at the application level"
+    ],
+    "example": "The pilot's GOOSE stream uses VLAN 200 and APPID 0x1001 consistently. Each vendor's exported configuration and the switch path are checked against those numerical allocations.",
+    "check": "Avoid bridging PRP LANs to accommodate a single-attached device; use the approved connection arrangement or supported RedBox."
+  },
+  {
+    "title": "Gateway and SCADA Integration",
+    "paragraphs": [
+      "Gateway and SCADA integration provides a consistent operator view over different source models. Consistency should come from explicit mapping, not from discarding source quality or forcing all data into one simplistic type.",
+      "Normalize units and tag names while retaining traceability to original references. Controls, alarms and timestamps need per-source verification. Protocol conversion to the remote master must preserve agreed semantics and document unavoidable limitations."
+    ],
+    "workflow": [
+      "Build the multi-vendor point schedule",
+      "Configure acquisition and transformations",
+      "Test every source through HMI and remote destinations"
+    ],
+    "example": "All pilot feeders display current in primary amperes, but the gateway conversion differs where source scaling differs. Double-point breaker states remain distinguishable from Boolean alarms.",
+    "check": "Test abnormal states and communication loss for every vendor; normal values alone do not reveal incompatible quality handling."
+  },
+  {
+    "title": "Practical Multi-Vendor 33 kV Feeder Example",
+    "paragraphs": [
+      "The practical multi-vendor feeder pilot uses one source protection IED, one receiving controller and the station gateway. Vendor families illustrate roles; the actual selected models and firmware determine supported functions.",
+      "Start with one complete function before expanding the station. The pilot includes model exchange, GOOSE binding, MMS reports, timing and operator presentation. Each interface has a positive test and at least one relevant failure test."
+    ],
+    "workflow": [
+      "Freeze the pilot device/tool matrix",
+      "Engineer 33-F01 source-to-consumer mappings",
+      "Execute joint tests and publish the approved integration pattern"
+    ],
+    "example": "Use the tutorial's 33-F01 address .31 and assigned GOOSE allocation consistently, while the receiving controller and gateway have their own identities. No device is assumed capable solely from its depicted appearance.",
+    "check": "Clone only the validated pattern; allocate new names, addresses and stream identities for every additional bay."
+  },
+  {
+    "title": "Multi-Vendor FAT/SAT Testing",
+    "paragraphs": [
+      "Multi-vendor FAT demonstrates the delivered combination under representative operation and failure conditions. SAT confirms installed paths, final firmware and as-built configurations still match that tested combination.",
+      "Include all responsible suppliers in issue resolution where needed. A failure should be described with source configuration, transmitted evidence and receiver behavior so ownership is based on facts rather than assumptions about another vendor."
+    ],
+    "workflow": [
+      "Execute the shared compatibility matrix",
+      "Record positive and negative results at both endpoints",
+      "Resolve deviations and repeat affected joint tests"
+    ],
+    "example": "The pilot test deliberately changes a source state, removes its stream and checks invalid quality. Gateway reports and control authority are tested alongside the inter-IED exchange.",
+    "check": "Do not close an interoperability issue from one supplier's isolated test alone when the failing behavior depends on the combined system.",
+    "table": {
+      "headers": [
+        "Interface",
+        "Positive case",
+        "Negative/recovery case"
+      ],
+      "rows": [
+        [
+          "GOOSE",
+          "Correct source reaches intended internal input",
+          "Wrong revision, invalid quality and stream loss"
+        ],
+        [
+          "Reports",
+          "Expected member/type decoded",
+          "Ownership conflict, reconnect and event gap"
+        ],
+        [
+          "Control",
+          "Supported model and authorized action",
+          "Local mode, expired selection, missing feedback"
+        ],
+        [
+          "Timing",
+          "Correct source/profile and measured performance",
+          "Reference loss and restoration"
+        ],
+        [
+          "SCL exchange",
+          "References resolve and application retained",
+          "Unsupported element/edition diagnostic review"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Interoperability Troubleshooting",
+    "paragraphs": [
+      "Interoperability troubleshooting identifies where standards-compatible capabilities or configured semantics diverge. Compare edition, service support, types, stream identity, binding and failure behavior systematically.",
+      "Preserve exact files and traces from both ends. A protocol decoder can confirm transmitted content, while vendor diagnostics reveal why a receiver rejected or ignored it. Avoid undocumented type reinterpretation or disabled supervision as permanent fixes."
+    ],
+    "workflow": [
+      "Reproduce the smallest failing exchange",
+      "Compare capability and live behavior at each boundary",
+      "Implement a supported correction and repeat the joint test"
+    ],
+    "example": "If 33-F01 publishes the correct Boolean but the controller expects a structured object at that member position, correct the coordinated DataSet/binding agreement rather than relabeling the packet.",
+    "check": "Archive the final compatibility decision, tested versions and known limitations for future firmware changes and device replacement."
+  }
+]

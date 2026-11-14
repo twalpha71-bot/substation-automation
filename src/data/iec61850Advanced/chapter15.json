@@ -1,0 +1,364 @@
+[
+  {
+    "title": "Introduction to Substation SCADA",
+    "paragraphs": [
+      "Substation SCADA acquires operational information, presents alarms and supports authorized control. It brings together equipment identity, current values, quality and time so operators can understand the station state.",
+      "SCADA is not the primary protection algorithm. A healthy screen does not prove protection is correctly configured, and a lost HMI should not be confused with loss of every local protection function. Define the monitoring and control scope clearly."
+    ],
+    "workflow": [
+      "Identify operator information and control requirements",
+      "Build the point and alarm schedules",
+      "Test each function from source to final presentation"
+    ],
+    "example": "The 132/33/11 kV station displays line, transformer and feeder status with measurements and alarms. Each displayed value is traceable to an actual source reference.",
+    "check": "Avoid creating attractive but unbound symbols; every operational indication needs a defined source, quality policy and test case."
+  },
+  {
+    "title": "Station Gateway Architecture",
+    "paragraphs": [
+      "A station gateway aggregates data from IEDs and exposes selected information to station or remote systems. It may translate protocols, manage point databases and provide redundancy functions according to its supported implementation.",
+      "Protocol conversion is semantic engineering, not just changing packet headers. Data types, quality, timestamps and command behavior must be mapped deliberately. Unsupported features must be identified rather than silently discarded."
+    ],
+    "workflow": [
+      "Define source and destination interfaces",
+      "Map data and service semantics",
+      "Test normal, invalid and communication-failure cases end to end"
+    ],
+    "example": "Gateway A acquires 33-F01 over MMS and sends selected points to the control centre using the approved IEC 60870-5-104 configuration.",
+    "check": "Document any loss of quality or timestamp detail during conversion so operators and engineers understand the resulting limitation."
+  },
+  {
+    "title": "SCADA Server and HMI Workstation",
+    "paragraphs": [
+      "SCADA servers manage acquisition, alarms, history and control services, while HMI workstations present operator views. The exact division depends on the product architecture and redundancy design.",
+      "Separate server health from process quality. A workstation can display cached values while the acquisition server is disconnected. Operator permissions, session state and control ownership also need testing across server changes."
+    ],
+    "workflow": [
+      "Map server and workstation roles",
+      "Configure data sources and access rights",
+      "Test workstation loss, server loss and reconnection"
+    ],
+    "example": "The station operator can inspect 33-F01 on a redundant HMI arrangement where specified. The display marks stale acquisition and does not retain an apparently live green status after its source is unavailable.",
+    "check": "Verify the actual failover behavior; installing two computers does not automatically create redundant acquisition or command arbitration."
+  },
+  {
+    "title": "IEC 61850 MMS Client Configuration",
+    "paragraphs": [
+      "An IEC 61850 MMS client needs the correct endpoint, supported association parameters, model references and service configuration. Reporting also requires assigned RCB resources and compatible DataSet interpretation.",
+      "Importing an SCD can accelerate engineering, but imported points still need review. Optional model objects, firmware changes and client limitations may require explicit selection. Keep control permissions separate from read/report access."
+    ],
+    "workflow": [
+      "Verify server identity and online model",
+      "Allocate reports and map required points",
+      "Test acquisition, reconnect and approved control behavior"
+    ],
+    "example": "Gateway A connects to 33-F01 at 192.168.100.31 and enables its assigned buffered status report. Its point database retains the actual reference and functional constraint.",
+    "check": "Do not treat an association-success message as proof that the client's report blocks, data types and alarm mappings are correct."
+  },
+  {
+    "title": "Gateway Data Acquisition",
+    "paragraphs": [
+      "Gateway acquisition can use reads, reports or other supported services according to the source protocol and application. The engineering choice affects update latency, network load and event retention.",
+      "Polling obtains snapshots; reporting can convey transitions and quality changes. Both need stale-data detection and recovery logic. Redundant acquisition must avoid conflicting resource ownership or duplicate operator events."
+    ],
+    "workflow": [
+      "Classify status, measurement and event requirements",
+      "Select suitable acquisition methods",
+      "Test changes, loss and restoration with realistic load"
+    ],
+    "example": "33-F01 breaker transitions use reporting, while appropriate measurement updates follow the configured deadband or acquisition strategy. The gateway records a data gap if recovery cannot restore all required events.",
+    "check": "Do not use a periodic current-state refresh as proof that no events were lost during an outage."
+  },
+  {
+    "title": "IEC 61850 Signal Mapping",
+    "paragraphs": [
+      "Signal mapping links a source reference to an engineering tag and destination representation. A useful mapping record includes equipment, logical device/node, object/attribute, functional constraint, type, unit, quality and timestamp policy.",
+      "Names alone are insufficient because different devices can expose similar labels for different functions. Preserve the original reference and document any conversion. Review mappings whenever the model or SCD revision changes."
+    ],
+    "workflow": [
+      "Create a controlled source-to-destination schedule",
+      "Validate types and transformations",
+      "Inject known values and verify the final tag"
+    ],
+    "example": "The tag 33_F01_CB_POS maps to the actual XCBR1.Pos source for that feeder. A separate control tag targets the approved controllable object.",
+    "check": "Never map a command acknowledgment into the breaker-position tag; physical feedback remains the authoritative indication of position.",
+    "table": {
+      "headers": [
+        "Engineering tag",
+        "Illustrative source",
+        "Handling"
+      ],
+      "rows": [
+        [
+          "33_F01_CB_POS",
+          "IED_33_F01LD0/XCBR1.Pos [ST]",
+          "Double-point state; retain q/t"
+        ],
+        [
+          "33_F01_IA",
+          "IED_33_F01LD0/MMXU1.A.phsA.cVal.mag.f [MX]",
+          "Check unit, primary scaling and associated quality"
+        ],
+        [
+          "33_F01_TRIP",
+          "IED_33_F01LD0/PTRC1.Tr.general [ST]",
+          "Verify supported protection operation source"
+        ],
+        [
+          "33_F01_CB_CMD",
+          "IED_33_F01LD0/CSWI1.Pos",
+          "Supported control services, not a write to stVal"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Digital Status Mapping",
+    "paragraphs": [
+      "Digital status mapping must preserve the source's state semantics. Single-point status is Boolean-like, while double-point position can represent intermediate and bad states in addition to open and closed.",
+      "Contact inversion and encoded values must be handled explicitly. Mapping every nonzero double-point value to closed loses important abnormal conditions. Quality and stale-data behavior should remain visible in the HMI symbol and alarm logic."
+    ],
+    "workflow": [
+      "Document source state values",
+      "Define destination labels and abnormal-state behavior",
+      "Test every supported state and invalid quality"
+    ],
+    "example": "For XCBR1.Pos.stVal, the illustrative double-point mapping uses 1=open/off, 2=closed/on, 0=intermediate and 3=bad-state according to the applicable model semantics.",
+    "check": "Confirm the device and destination protocol encoding; a Boolean control request is not encoded the same way as this double-point status."
+  },
+  {
+    "title": "Analog Measurement Mapping",
+    "paragraphs": [
+      "Analog mapping converts a source quantity into the intended engineering unit and range. The source may already represent primary values, so ratio conversion must be located explicitly in the chain.",
+      "Check units, multiplier, signedness, floating-point representation, phase identity and deadband. A single correct nominal value can hide an offset or scaling error. Alarm thresholds must use the same engineering basis as the displayed measurement."
+    ],
+    "workflow": [
+      "Record source units and conversion",
+      "Test zero and several representative values",
+      "Verify display, history and alarm thresholds"
+    ],
+    "example": "33-F01 phase current is displayed in primary amperes. If the relay already applies the CT ratio, the gateway uses that value without multiplying the ratio again.",
+    "check": "Test negative power or reverse flow where relevant; unsigned conversion can hide direction or produce an extreme positive value."
+  },
+  {
+    "title": "Alarm and Event Mapping",
+    "paragraphs": [
+      "Alarms identify conditions requiring attention, while events record changes for analysis. The same source may contribute to both, but priority, acknowledgment and return-to-normal behavior belong to the operator philosophy.",
+      "Alarm acknowledgment means the operator has recognized the alarm; it does not repair the condition. Preserve source time and quality, and avoid creating repeated alarms from every retransmission of the same state."
+    ],
+    "workflow": [
+      "Classify each condition and priority",
+      "Define active/clear/acknowledgment behavior",
+      "Test transitions, persistent conditions and communication failures"
+    ],
+    "example": "33-F01 protection operation appears in SOE and may generate a configured alarm. Breaker-open feedback is recorded separately so the operator can distinguish trip initiation from successful opening.",
+    "check": "Ensure an invalid source is not interpreted as a normal cleared alarm merely because the last received Boolean was false."
+  },
+  {
+    "title": "Circuit Breaker Control Mapping",
+    "paragraphs": [
+      "Breaker control mapping connects an authorized operator request to the correct IEC 61850 control object and model. It also binds independent feedback and command-result information to the operator workflow.",
+      "The command must respect selection, authority, interlocks and timeout behavior supported by the server. A positive service response does not prove the mechanism moved. Controls should be labeled unambiguously with equipment identity and intended action."
+    ],
+    "workflow": [
+      "Verify the control reference and ctlModel",
+      "Map command result and physical feedback separately",
+      "Test allowed, rejected and uncertain-result cases in isolation"
+    ],
+    "example": "The HMI issues an approved close request to 33-F01's supported CSWI1.Pos control object and watches XCBR1.Pos for actual position.",
+    "check": "After a timeout, reconcile state before retrying; never implement automatic repeated close requests based solely on missing acknowledgment."
+  },
+  {
+    "title": "IEC 61850 to IEC 60870-5-104 Mapping",
+    "paragraphs": [
+      "IEC 61850 to IEC 60870-5-104 mapping assigns source information to destination types, common addresses and information object addresses. Quality, timestamps and control semantics require deliberate conversion according to the selected interoperability profile.",
+      "There is no universal IOA derived automatically from a logical-node name. The project signal schedule defines stable addresses and types. Verify single/double-point selection, measurement format, cause of transmission and time-tag handling as supported."
+    ],
+    "workflow": [
+      "Allocate destination addresses and types",
+      "Define quality/time conversion",
+      "Test point values and controls through the remote master"
+    ],
+    "example": "33-F01 breaker position uses an agreed double-point indication type, such as a compatible time-tagged form where specified. Its IOA is a project allocation, not an IEC 61850 object number.",
+    "check": "Document unsupported source detail and verify command select/execute behavior at both protocol boundaries.",
+    "table": {
+      "headers": [
+        "Point",
+        "Illustrative destination",
+        "Mapping check"
+      ],
+      "rows": [
+        [
+          "Breaker position",
+          "CA 1 / IOA 1001; M_DP_TB_1 if agreed",
+          "Double-point + CP56Time2a source-time policy"
+        ],
+        [
+          "Phase-A current",
+          "CA 1 / IOA 1101; agreed measured-value type",
+          "Unit, scaling, quality and time support"
+        ],
+        [
+          "Breaker control",
+          "CA 1 / IOA 2001; agreed command type",
+          "Select/execute and IEC 61850 ctlModel coordination"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "IEC 61850 to Modbus Mapping",
+    "paragraphs": [
+      "Modbus exposes coils and registers rather than the full IEC 61850 object and service model. Mapping therefore requires explicit addresses, data representation, word order, scaling and separate handling for status or quality that does not fit the chosen register.",
+      "A 32-bit floating-point value spans two 16-bit registers, but word order varies by implementation. Register numbering conventions can also differ between documentation and protocol offsets. Control through registers needs an approved gateway implementation and cannot simply mimic IEC 61850 SBO semantics."
+    ],
+    "workflow": [
+      "Define address and encoding conventions",
+      "Allocate value and quality/status registers",
+      "Test boundary values and read/write permissions"
+    ],
+    "example": "33-F01 current can be exported as an agreed two-register float with a separate validity register. The worksheet states the exact word order and zero-based offset convention.",
+    "check": "Do not assume Modbus inherently preserves source timestamps, quality or IEC 61850 control security behavior.",
+    "table": {
+      "headers": [
+        "Item",
+        "Illustrative allocation",
+        "Required agreement"
+      ],
+      "rows": [
+        [
+          "Current float",
+          "Protocol offsets 100 and 101",
+          "IEEE 754 value; explicit register word order"
+        ],
+        [
+          "Validity",
+          "Protocol offset 102",
+          "Documented bit/enum meaning"
+        ],
+        [
+          "Timestamp",
+          "Separate agreed register block if required",
+          "Encoding and source-time policy"
+        ],
+        [
+          "Commands",
+          "Separate approved mapping only",
+          "No implicit Modbus equivalent of IEC 61850 SBO"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "SCADA Single-Line Diagram Engineering",
+    "paragraphs": [
+      "An HMI single-line diagram presents the station's electrical connectivity and equipment states. Its symbols must reflect the approved primary drawing and be bound to verified source tags.",
+      "Visual color is an operator convention, not a universal electrical meaning. Show intermediate, bad and unavailable states distinctly. Navigation and equipment labels should prevent a command intended for one bay from being applied to another."
+    ],
+    "workflow": [
+      "Build the SLD from the approved topology",
+      "Bind each symbol and measurement",
+      "Test state changes, invalid data and equipment selection"
+    ],
+    "example": "The practical station's 11 kV bus is supplied through its 33/11 kV transformer, not drawn directly off the 33 kV bus. Feeder labels remain identical to the signal schedule.",
+    "check": "Verify electrical connectivity independently of screen appearance; a polished graphic can still contain a wrong bus connection."
+  },
+  {
+    "title": "Alarm and SOE Configuration",
+    "paragraphs": [
+      "Alarm and SOE configuration defines priorities, timestamp policy, acknowledgment and event retention. These settings should help operators distinguish first causes, consequences and communication degradation.",
+      "Avoid event floods caused by unstable contacts, excessive measurement updates or duplicate acquisition. Deadbands and debounce must follow the application requirement and must not hide meaningful operations. Buffered replay should retain original event time and be distinguishable from a new occurrence."
+    ],
+    "workflow": [
+      "Define alarm classes and retention",
+      "Configure source-time and duplicate-handling rules",
+      "Test bursts, reconnect and acknowledgment behavior"
+    ],
+    "example": "During a feeder fault, the HMI records protection operation and breaker feedback separately. A subsequent communication alarm does not overwrite the original event chronology.",
+    "check": "Measure event handling under representative bursts, including recovery after an outage, rather than testing one slow transition at a time."
+  },
+  {
+    "title": "SCADA Database Engineering",
+    "paragraphs": [
+      "The SCADA database is an engineering deliverable containing point identities, acquisition, conversions, alarms, history and controls. Its structure should support traceability from physical equipment to source and destination references.",
+      "Bulk import is useful only when templates preserve unique identifiers and validated transformations. Duplicate tags or copied addresses can silently bind several symbols to one feeder. Use reviewable revisions and comparison reports for changes."
+    ],
+    "workflow": [
+      "Define required database fields",
+      "Import from the controlled signal schedule",
+      "Validate uniqueness and perform point-by-point tests"
+    ],
+    "example": "33_F01_CB_POS and 33_F02_CB_POS have distinct source references and destination addresses. A template creates consistent structure but never reuses the same source accidentally.",
+    "check": "Archive the tested database with the SCD and gateway configuration; a spreadsheet alone may not represent the deployed system."
+  },
+  {
+    "title": "Redundant SCADA and Gateway Architecture",
+    "paragraphs": [
+      "Redundant SCADA and gateways maintain service through selected component failures. The design must specify active/standby or other supported roles, data synchronization and command ownership.",
+      "Dual hardware can introduce duplicate alarms, competing RCB reservations or simultaneous control if coordination is incomplete. Test acquisition and command behavior separately during failover and restoration. Shared power, storage or network paths remain possible common failures."
+    ],
+    "workflow": [
+      "Define role selection and resource allocation",
+      "Configure supported redundancy behavior",
+      "Test failure, switchover, restart and split-connectivity cases"
+    ],
+    "example": "Gateway A and B acquire 33-F01 using their approved reporting strategy. Only the authorized control path issues a command, and failover does not replay an old pending close request.",
+    "check": "Verify recovery to the normal role as carefully as initial failover; unstable role switching can be worse than a clear single failure."
+  },
+  {
+    "title": "Remote Control Centre Communication",
+    "paragraphs": [
+      "Remote control-centre communication exposes selected station information and authorized operations through the approved telecontrol interface. The station gateway separates source models from the remote protocol and addressing scheme.",
+      "Network security, command authority and outage behavior belong to the system design. The control centre should see communication and data-quality changes, not just cached values. Remote operations still depend on local interlocks and the station's authority policy."
+    ],
+    "workflow": [
+      "Agree the remote point/type/address schedule",
+      "Configure the approved communication boundary",
+      "Test indications, controls and link failure with both ends participating"
+    ],
+    "example": "The control centre receives 33-F01 position and measurements through Gateway A. Local/remote authority and command rejection are tested at the station and visible remotely.",
+    "check": "Do not bypass station interlocks during protocol conversion; an accepted remote packet is not permission to ignore local operating conditions."
+  },
+  {
+    "title": "Practical Example — 132/33/11 kV Substation",
+    "paragraphs": [
+      "The practical mapping exercise follows the 132/33/11 kV project from IEDs through gateways to station HMI and remote control centre. It uses one controlled equipment and signal schedule throughout.",
+      "Separate source references, engineering tags and destination protocol addresses. A correction at one layer must be reviewed for effects on the others. Test measurements, states, alarms and controls with invalid and unavailable cases as well as normal values."
+    ],
+    "workflow": [
+      "Build the project point matrix",
+      "Configure acquisition and destination mappings",
+      "Execute witnessed point-to-point tests and archive the final database"
+    ],
+    "example": "33-F01 at 192.168.100.31 maps breaker position to tag 33_F01_CB_POS. The 11-F01 feeder uses its own IED and tag rather than a duplicated 33 kV reference.",
+    "check": "Verify that every displayed voltage level and bay identity matches the actual source, especially when reusing HMI templates."
+  },
+  {
+    "title": "SCADA FAT/SAT Testing",
+    "paragraphs": [
+      "SCADA FAT verifies configured acquisition, mapping, alarms, history and authorized control before site installation. SAT proves the installed field-to-screen and remote-control-centre paths.",
+      "Expected results must include quality, source time, scaling and failure behavior. A test that checks only the displayed number can miss invalid data, wrong event timing or unsafe command retry. Record the source stimulus and destination observation together."
+    ],
+    "workflow": [
+      "Test each point and state",
+      "Test approved controls and rejected requests",
+      "Interrupt IED, server and remote links and verify recovery"
+    ],
+    "example": "For 33-F01, the witness records injected current, local relay value, gateway value, HMI display and remote indication. Control tests include physical feedback and a deliberately rejected permissive case.",
+    "check": "Close database changes with repeat tests; a corrected tag invalidates the earlier result for that affected point."
+  },
+  {
+    "title": "SCADA and Gateway Troubleshooting",
+    "paragraphs": [
+      "SCADA troubleshooting follows the information chain from source to acquisition driver, database transformation and operator presentation. Confirm whether the source itself is correct before editing HMI graphics.",
+      "A correct driver value with a wrong display suggests mapping or visualization; a stale driver value with healthy association suggests reporting or polling; incorrect source data requires IED/application investigation. Use one known stimulus and compare timestamps across layers."
+    ],
+    "workflow": [
+      "Identify the failing point and expected state",
+      "Compare source, driver, tag and display",
+      "Correct the specific layer and repeat related failure tests"
+    ],
+    "example": "If 33-F01 current is ten times too high only after gateway conversion, inspect scaling and CT-ratio handling. If all layers agree incorrectly, inspect the measurement source first.",
+    "check": "Preserve logs and the previous database revision so the correction is explainable and reversible."
+  }
+]

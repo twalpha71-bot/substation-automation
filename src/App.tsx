@@ -1,6 +1,7 @@
 import { ScadaAlarmAudio } from './components/ScadaAlarmAudio';
 import { AlarmsEventsPage } from './pages/AlarmsEventsPage';
 import { WiresharkAnalyzerPage } from './pages/WiresharkAnalyzerPage';
+import { OsiModelPage } from './pages/OsiModelPage';
 import React, { useEffect, useRef, useState } from 'react';
 import { useSubstationStore, ActiveWorkspaceTab } from './simulation/useSubstationStore';
 import { useAuthStore, computeUserInitials, ProfileSectionTab } from './auth/useAuthStore';
@@ -110,7 +111,7 @@ export default function App() {
       const match = window.location.hash.match(/^#\/workspace\/([A-Z0-9_]+)$/);
       if (match) {
         const requested = match[1] as ActiveWorkspaceTab;
-        const valid = ['HERO','IEC61850_ACADEMY','INTERVIEW_PREP','CCNA_ACADEMY','SLD','SCADA','IED','IED_SIGNAL_CHAIN','NETWORK','GOOSE','MMS','MODBUS_LAB','IEC104_LAB','OPCUA_LAB','SIGNALS','FAULTS','FATSAT','LEARNING','USER_PROFILE','ADMIN_DASHBOARD'];
+        const valid = ['HERO','OSI_MODEL','IEC61850_ACADEMY','INTERVIEW_PREP','CCNA_ACADEMY','SLD','SCADA','IED','IED_SIGNAL_CHAIN','NETWORK','GOOSE','MMS','MODBUS_LAB','IEC104_LAB','OPCUA_LAB','SIGNALS','FAULTS','FATSAT','LEARNING','USER_PROFILE','ADMIN_DASHBOARD'];
         if (valid.includes(requested)) {
           setActiveTab(requested);
           setShowLanding(false);
@@ -142,6 +143,22 @@ export default function App() {
 
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
   const [topMenuOpen, setTopMenuOpen] = useState<string | null>(null);
+  // Dismiss the expanded top navigation menu when clicking anywhere outside it.
+  // Pointerdown handles mouse, touch and pen input before navigation actions run.
+  useEffect(() => {
+    if (!topMenuOpen) return;
+    const handleOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const element = target instanceof Element ? target : target.parentElement;
+      const clickedGroup = element?.closest('.sas-top-group');
+      const clickedActiveGroup = clickedGroup?.querySelector('.sas-top-group-trigger[aria-expanded="true"]');
+      if (!clickedActiveGroup) setTopMenuOpen(null);
+    };
+    document.addEventListener('pointerdown', handleOutsidePointer);
+    return () => document.removeEventListener('pointerdown', handleOutsidePointer);
+  }, [topMenuOpen]);
+
   const [navSearch, setNavSearch] = useState('');
   const navSearchRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
@@ -160,6 +177,8 @@ export default function App() {
   }, []);
 
   const [profileMenuOpen, setProfileMenuOpen] = useState<boolean>(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState<boolean>(false);
+  const settingsRef = useRef<HTMLDivElement | null>(null);
   const [notifMenuOpen, setNotifMenuOpen] = useState<boolean>(false);
   const [langMenuOpen, setLangMenuOpen] = useState<boolean>(false);
   const [displayLanguage, setDisplayLanguage] = useState<SupportedLanguageCode>(() => { try { return normalizeLanguageCode(localStorage.getItem('sas-display-language')); } catch { return 'EN'; } });
@@ -168,6 +187,17 @@ export default function App() {
   const profileRef = useRef<HTMLDivElement | null>(null);
   const notifRef = useRef<HTMLDivElement | null>(null);
   const langRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!settingsMenuOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) setSettingsMenuOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setSettingsMenuOpen(false); };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
+  }, [settingsMenuOpen]);
 
   const currentUser = users.find((u) => u.id === currentUserId) || null;
   const currentRole = currentUser ? currentUser.role : 'GUEST';
@@ -262,6 +292,7 @@ export default function App() {
     { id: 'FATSAT', label: t('FAT / SAT Laboratory'), icon: <CheckSquare className="w-4 h-4" /> },
     { id: 'IEC61850_ACADEMY', label: t('IEC 61850 Digital Substation'), icon: <GraduationCap className="w-4 h-4" /> },
     { id: 'TESTING_GUIDANCE' as ActiveWorkspaceTab, label: 'Testing Guidance', icon: <ClipboardCheck className="w-4 h-4" /> },
+    { id: 'OSI_MODEL', label: 'OSI Model', icon: <Network className="w-4 h-4" /> },
     { id: 'INTERVIEW_PREP', label: t('Interview Preparation'), icon: <Award className="w-4 h-4" /> },
     { id: 'CCNA_ACADEMY', label: t('CCNA Networking Academy'), icon: <Network className="w-4 h-4" /> },
     { id: 'LEARNING', label: t('Training (EN/TE)'), icon: <BookOpen className="w-4 h-4" /> },
@@ -272,7 +303,7 @@ export default function App() {
     { key: 'sld', title: 'SLD & Operation', icon: GitBranch, ids: ['SLD', 'SCADA'] },
     { key: 'ied', title: 'IED & Signals', icon: Cpu, ids: ['IED', 'IED_SIGNAL_CHAIN'] },
     { key: 'comms', title: 'Communication', icon: Radio, ids: ['NETWORK', 'GOOSE', 'MMS', 'MODBUS_LAB', 'IEC104_LAB', 'OPCUA_LAB'] },
-    { key: 'tools', title: 'Tools & Test', icon: Settings, ids: ['SIGNALS', 'FAULTS', 'FATSAT', 'IEC61850_ACADEMY', 'TESTING_GUIDANCE', 'INTERVIEW_PREP', 'CCNA_ACADEMY', 'LEARNING'] },
+    { key: 'tools', title: 'Tools & Test', icon: Settings, ids: ['SIGNALS', 'FAULTS', 'FATSAT', 'IEC61850_ACADEMY', 'TESTING_GUIDANCE', 'OSI_MODEL', 'INTERVIEW_PREP', 'CCNA_ACADEMY', 'LEARNING'] },
   ];
   const filteredNavItems = navItems.filter(item => item.label.toLowerCase().includes(navSearch.trim().toLowerCase()));
 
@@ -534,11 +565,31 @@ export default function App() {
                 )}
               </div>
 
-              <button type="button" title="Settings" aria-label="Account settings"
-                onClick={() => currentUser ? openProfileSection('EDIT_PROFILE') : (setAuthPopupMode('SIGN_IN'), setProfileMenuOpen(false))}
-                className="rounded-full p-2 text-[#DCEAF5] transition hover:bg-[#123B60] hover:text-[#00CFFF]">
-                <Settings className="h-5 w-5" />
-              </button>
+              <div ref={settingsRef} className="relative">
+                <button type="button" title="Settings" aria-label="Open settings" aria-expanded={settingsMenuOpen}
+                  onClick={() => { setSettingsMenuOpen(v => !v); setProfileMenuOpen(false); setNotifMenuOpen(false); }}
+                  className="rounded-full p-2 text-[#DCEAF5] transition hover:bg-[#123B60] hover:text-[#00CFFF]">
+                  <Settings className="h-5 w-5" />
+                </button>
+                {settingsMenuOpen && (
+                  <div role="dialog" aria-label="Settings" className="absolute right-0 top-full z-[9999] mt-2 w-[min(290px,calc(100vw-24px))] rounded-xl border border-[#00CFFF]/60 bg-[#06182B] p-4 text-[#E9F3FF] shadow-[0_20px_55px_rgba(0,0,0,0.65)]">
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className="flex items-center gap-2 text-sm font-bold"><Settings className="h-4 w-4 text-[#00CFFF]" /> Settings</span>
+                      <button type="button" aria-label="Close settings" onClick={() => setSettingsMenuOpen(false)} className="rounded px-2 py-1 text-[#B5CDDF] hover:bg-[#123B60]">✕</button>
+                    </div>
+                    <p className="mb-2 text-xs font-semibold text-[#A8C7DD]">Display language</p>
+                    <div className="flex gap-2">
+                      <button type="button" aria-pressed={displayLanguage === 'EN'} onClick={() => handleGlobalLangSwitch('EN')} className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${displayLanguage === 'EN' ? 'border-[#00CFFF] bg-[#104563] text-white' : 'border-[#35536C] text-[#B8D2E4]'}`}>English</button>
+                      <button type="button" aria-pressed={displayLanguage === 'TE'} onClick={() => handleGlobalLangSwitch('TE')} className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${displayLanguage === 'TE' ? 'border-[#00CFFF] bg-[#104563] text-white' : 'border-[#35536C] text-[#B8D2E4]'}`}>తెలుగు</button>
+                    </div>
+                    {currentUser ? (
+                      <button type="button" onClick={() => { setSettingsMenuOpen(false); openProfileSection('EDIT_PROFILE'); }} className="mt-3 w-full rounded-lg border border-[#35536C] px-3 py-2 text-left text-xs hover:bg-[#123B60]">Edit account profile</button>
+                    ) : (
+                      <p className="mt-3 text-xs text-[#91AFC5]">You can change display settings without signing in. Use the profile icon to sign in.</p>
+                    )}
+                  </div>
+                )}
+              </div>
               {/* Compact guest profile menu matching the approved visual design. */}
               {!currentUser ? (
                 <div ref={profileRef} className="relative">
@@ -715,6 +766,7 @@ export default function App() {
         <main className="sas-workspace-main flex-1 p-2.5 sm:p-5 xl:p-6 w-full min-w-0">
           {specialPage === 'ALARMS_EVENTS' ? <AlarmsEventsPage /> : specialPage === 'WIRESHARK' ? <WiresharkAnalyzerPage /> : testingGuidanceOpen ? <TestingGuidancePage /> : <>
           {activeTab === 'HERO' && <HeroDashboardPage />}
+          {activeTab === 'OSI_MODEL' && <OsiModelPage />}
           {activeTab === 'IEC61850_ACADEMY' && <Iec61850AcademyPage />}
           {activeTab === 'INTERVIEW_PREP' && <InterviewPrepPage />}
           {activeTab === 'CCNA_ACADEMY' && <CcnaAcademyPage />}

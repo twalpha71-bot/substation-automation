@@ -1,0 +1,412 @@
+{
+  "8.1": {
+    "file": "ch08-01.svg",
+    "alt": "MMS client\u2013server architecture. The client initiates the association; the IED sends enabled reports back through the established connection.",
+    "caption": "The client initiates the association; the IED sends enabled reports back through the established connection. Engineering schematic; illustrative configuration."
+  },
+  "8.4": {
+    "file": "ch08-04.svg",
+    "alt": "MMS protocol stack. Conceptual stack for the conventional IEC 61850-8-1 TCP mapping; GOOSE and SV have separate mappings.",
+    "caption": "Conceptual stack for the conventional IEC 61850-8-1 TCP mapping; GOOSE and SV have separate mappings. Engineering schematic; illustrative configuration."
+  },
+  "8.5": {
+    "file": "ch08-05.svg",
+    "alt": "Association establishment. Transport connectivity precedes application association; reject diagnosis depends on the last successful exchange.",
+    "caption": "Transport connectivity precedes application association; reject diagnosis depends on the last successful exchange. Engineering schematic; illustrative configuration."
+  },
+  "8.9": {
+    "file": "ch08-09.svg",
+    "alt": "MMS reporting path. The DataSet selects members; the RCB governs reporting. A changed scalar does not automatically repeat every related attribute.",
+    "caption": "The DataSet selects members; the RCB governs reporting. A changed scalar does not automatically repeat every related attribute. Engineering schematic; illustrative configuration."
+  },
+  "8.13": {
+    "file": "ch08-13.svg",
+    "alt": "SCADA acquisition chain. Test the complete indication chain. Correct packets can coexist with incorrect gateway scaling or HMI state mapping.",
+    "caption": "Test the complete indication chain. Correct packets can coexist with incorrect gateway scaling or HMI state mapping. Engineering schematic; illustrative configuration."
+  },
+  "8.18": {
+    "file": "ch08-18.svg",
+    "alt": "MMS packet inspection. Capture time is the observer timestamp; source event time is application data and may be carried separately.",
+    "caption": "Capture time is the observer timestamp; source event time is application data and may be carried separately. Engineering schematic; illustrative configuration."
+  },
+  "9.3": {
+    "file": "ch09-03.svg",
+    "alt": "GOOSE publisher and subscribers. One multicast stream can reach several consumers; observing a frame does not establish application acceptance.",
+    "caption": "One multicast stream can reach several consumers; observing a frame does not establish application acceptance. Engineering schematic; illustrative configuration."
+  },
+  "9.4": {
+    "file": "ch09-04.svg",
+    "alt": "GOOSE Ethernet frame. Conventional Layer-2 GOOSE has no IP or TCP header. APPID, MAC, VLAN and control-block identity have different roles.",
+    "caption": "Conventional Layer-2 GOOSE has no IP or TCP header. APPID, MAC, VLAN and control-block identity have different roles. Engineering schematic; illustrative configuration."
+  },
+  "9.9": {
+    "file": "ch09-09.svg",
+    "alt": "GOOSE event retransmission. Labels show illustrative stNum / sqNum pairs. Lifetime supervises reception; it is not a guaranteed total trip time.",
+    "caption": "Labels show illustrative stNum / sqNum pairs. Lifetime supervises reception; it is not a guaranteed total trip time. Engineering schematic; illustrative configuration."
+  },
+  "9.11": {
+    "file": "ch09-11.svg",
+    "alt": "GOOSE protection trip path. End-to-end protection time includes detection, communication, receiver processing, output and breaker operation.",
+    "caption": "End-to-end protection time includes detection, communication, receiver processing, output and breaker operation. Engineering schematic; illustrative configuration."
+  },
+  "9.12": {
+    "file": "ch09-12.svg",
+    "alt": "Interlocking information path. Invalid or stale remote information must follow the project-specific interlocking policy; this is not a universal closing circuit.",
+    "caption": "Invalid or stale remote information must follow the project-specific interlocking policy; this is not a universal closing circuit. Engineering schematic; illustrative configuration."
+  },
+  "9.14": {
+    "file": "ch09-14.svg",
+    "alt": "VLAN mismatch diagnosis. MMS on VLAN 100 can remain healthy while GOOSE VLAN 200 fails. Ping does not prove GOOSE delivery.",
+    "caption": "MMS on VLAN 100 can remain healthy while GOOSE VLAN 200 fails. Ping does not prove GOOSE delivery. Engineering schematic; illustrative configuration."
+  },
+  "9.19": {
+    "file": "ch09-19.svg",
+    "alt": "GOOSE packet inspection. Illustrative decoded fields, not an actual capture. Compare stream identity, ordered types and receiver diagnostics.",
+    "caption": "Illustrative decoded fields, not an actual capture. Compare stream identity, ordered types and receiver diagnostics. Engineering schematic; illustrative configuration."
+  },
+  "10.2": {
+    "file": "ch10-02.svg",
+    "alt": "Conventional and digital measurements. Both designs require correct ratios, polarity, isolation and protection philosophy; digital communication adds timing and network dependencies.",
+    "caption": "Both designs require correct ratios, polarity, isolation and protection philosophy; digital communication adds timing and network dependencies. Engineering schematic; illustrative configuration."
+  },
+  "10.4": {
+    "file": "ch10-04.svg",
+    "alt": "Merging-unit measurement chain. The merging unit is part of the measurement chain. A correct Ethernet address cannot repair analogue ratio or polarity errors.",
+    "caption": "The merging unit is part of the measurement chain. A correct Ethernet address cannot repair analogue ratio or polarity errors. Engineering schematic; illustrative configuration."
+  },
+  "10.5": {
+    "file": "ch10-05.svg",
+    "alt": "CT and VT input relationships. Functional relationships only, not live wiring instructions. Never open an energized CT secondary; use approved isolation procedures.",
+    "caption": "Functional relationships only, not live wiring instructions. Never open an energized CT secondary; use approved isolation procedures. Engineering schematic; illustrative configuration."
+  },
+  "10.11": {
+    "file": "ch10-11.svg",
+    "alt": "Process-bus distribution. Calculate every link load, multicast path and degraded topology; a mirror port may lose packets under aggregate SV traffic.",
+    "caption": "Calculate every link load, multicast path and degraded topology; a mirror port may lose packets under aggregate SV traffic. Engineering schematic; illustrative configuration."
+  },
+  "10.8": {
+    "file": "ch10-08.svg",
+    "alt": "SV publisher and subscriber. A decoded stream may still have incorrect phase mapping. Verify each analogue channel with a known test waveform.",
+    "caption": "A decoded stream may still have incorrect phase mapping. Verify each analogue channel with a known test waveform. Engineering schematic; illustrative configuration."
+  },
+  "10.12": {
+    "file": "ch10-12.svg",
+    "alt": "PTP and synchronized sampling. PTP packet reception alone does not prove sampling accuracy. Observe synchronization status, offset and receiver behavior during failure.",
+    "caption": "PTP packet reception alone does not prove sampling accuracy. Observe synchronization status, offset and receiver behavior during failure. Engineering schematic; illustrative configuration."
+  },
+  "11.1": {
+    "file": "ch11-01.svg",
+    "alt": "SCL engineering file roles. File roles differ; changing an extension does not convert the content. The arrows show a simplified engineering relationship.",
+    "caption": "File roles differ; changing an extension does not convert the content. The arrows show a simplified engineering relationship. Engineering schematic; illustrative configuration."
+  },
+  "11.3": {
+    "file": "ch11-03.svg",
+    "alt": "SCL XML structure. Validate XML syntax, the selected schema and semantic references separately; each catches different errors.",
+    "caption": "Validate XML syntax, the selected schema and semantic references separately; each catches different errors. Engineering schematic; illustrative configuration."
+  },
+  "11.7": {
+    "file": "ch11-07.svg",
+    "alt": "Capability to system configuration. The SCD coordinates the system; complete vendor projects may still be needed for protection logic and hardware settings.",
+    "caption": "The SCD coordinates the system; complete vendor projects may still be needed for protection logic and hardware settings. Engineering schematic; illustrative configuration."
+  },
+  "11.18": {
+    "file": "ch11-18.svg",
+    "alt": "SCL workstation workflow. Review every import diagnostic, preserve original files and compare the final online model with the approved engineering revision.",
+    "caption": "Review every import diagnostic, preserve original files and compare the final online model with the approved engineering revision. Engineering schematic; illustrative configuration."
+  },
+  "11.19": {
+    "file": "ch11-19.svg",
+    "alt": "Multi-vendor SCD coordination. A common SCD supports integration; it does not remove device-specific capability checks or joint functional testing.",
+    "caption": "A common SCD supports integration; it does not remove device-specific capability checks or joint functional testing. Engineering schematic; illustrative configuration."
+  },
+  "12.2": {
+    "file": "ch12-02.svg",
+    "alt": "Protection IED hardware functions. Module count, ratings and interface modes depend on the installed device variant; verify the actual hardware inventory.",
+    "caption": "Module count, ratings and interface modes depend on the installed device variant; verify the actual hardware inventory. Engineering schematic; illustrative configuration."
+  },
+  "12.3": {
+    "file": "ch12-03.svg",
+    "alt": "IED configuration workflow. Tool menus and supported functions are vendor-specific. Keep complete project backups with firmware and tool versions.",
+    "caption": "Tool menus and supported functions are vendor-specific. Keep complete project backups with firmware and tool versions. Engineering schematic; illustrative configuration."
+  },
+  "12.11": {
+    "file": "ch12-11.svg",
+    "alt": "Binary input and output mapping. Indication mapping is distinct from command-to-output mapping. Abnormal contact combinations must remain visible.",
+    "caption": "Indication mapping is distinct from command-to-output mapping. Abnormal contact combinations must remain visible. Engineering schematic; illustrative configuration."
+  },
+  "12.8": {
+    "file": "ch12-08.svg",
+    "alt": "GOOSE configuration layers. Verify the source value, transmitted payload and receiving application separately; an address match is not a functional test.",
+    "caption": "Verify the source value, transmitted payload and receiving application separately; an address match is not a functional test. Engineering schematic; illustrative configuration."
+  },
+  "12.7": {
+    "file": "ch12-07.svg",
+    "alt": "DataSet and report setup. Allocate report resources per the supported client strategy. Buffered reporting still has finite retention and recovery conditions.",
+    "caption": "Allocate report resources per the supported client strategy. Buffered reporting still has finite retention and recovery conditions. Engineering schematic; illustrative configuration."
+  },
+  "12.17": {
+    "file": "ch12-17.svg",
+    "alt": "IED to SCADA integration. Test from a known input to the operator display, including invalid data and communication loss, not only a healthy connection icon.",
+    "caption": "Test from a known input to the operator display, including invalid data and communication loss, not only a healthy connection icon. Engineering schematic; illustrative configuration."
+  },
+  "13.2": {
+    "file": "ch13-02.svg",
+    "alt": "Station-bus service topology. Logical service roles are shown here; the physical redundant topology and every permitted path require a separate port schedule.",
+    "caption": "Logical service roles are shown here; the physical redundant topology and every permitted path require a separate port schedule. Engineering schematic; illustrative configuration."
+  },
+  "13.6": {
+    "file": "ch13-06.svg",
+    "alt": "PRP: two independent LANs. Each compatible node sends a copy on A and B. No ordinary bridge joins the LANs; shared endpoint failures remain possible.",
+    "caption": "Each compatible node sends a copy on A and B. No ordinary bridge joins the LANs; shared endpoint failures remain possible. Engineering schematic; illustrative configuration."
+  },
+  "13.7": {
+    "file": "ch13-07.svg",
+    "alt": "HSR: compatible nodes in a ring. A typical HSR ring forwards copies in opposite directions. One ring break can leave a path; multiple faults may partition it.",
+    "caption": "A typical HSR ring forwards copies in opposite directions. One ring break can leave a path; multiple faults may partition it. Engineering schematic; illustrative configuration."
+  },
+  "13.9": {
+    "file": "ch13-09.svg",
+    "alt": "RedBox and ordinary endpoint. The endpoint-to-RedBox link and RedBox power remain dependencies. The exact connection must match the supported topology.",
+    "caption": "The endpoint-to-RedBox link and RedBox power remain dependencies. The exact connection must match the supported topology. Engineering schematic; illustrative configuration."
+  },
+  "13.11": {
+    "file": "ch13-11.svg",
+    "alt": "VLAN segmentation. VLAN ID selects a forwarding domain. PCP selects priority treatment where configured; neither alone guarantees security or timing.",
+    "caption": "VLAN ID selects a forwarding domain. PCP selects priority treatment where configured; neither alone guarantees security or timing. Engineering schematic; illustrative configuration."
+  },
+  "13.3": {
+    "file": "ch13-03.svg",
+    "alt": "Industrial switch functions. Verify exact firmware features and optical compatibility; a managed switch does not automatically support HSR or the required PTP profile.",
+    "caption": "Verify exact firmware features and optical compatibility; a managed switch does not automatically support HSR or the required PTP profile. Engineering schematic; illustrative configuration."
+  },
+  "13.15": {
+    "file": "ch13-15.svg",
+    "alt": "Fibre path engineering. Match both optics and fibre. Redundant paths need the physical diversity required by the station availability design.",
+    "caption": "Match both optics and fibre. Redundant paths need the physical diversity required by the station availability design. Engineering schematic; illustrative configuration."
+  },
+  "14.4": {
+    "file": "ch14-04.svg",
+    "alt": "GNSS station time source. Loss of satellite reference can lead to holdover with increasing uncertainty; monitor source and endpoint health.",
+    "caption": "Loss of satellite reference can lead to holdover with increasing uncertainty; monitor source and endpoint health. Engineering schematic; illustrative configuration."
+  },
+  "14.7": {
+    "file": "ch14-07.svg",
+    "alt": "SNTP client\u2013server architecture. Check each client actually uses the approved source; MMS connectivity does not prove timing traffic is permitted.",
+    "caption": "Check each client actually uses the approved source; MMS connectivity does not prove timing traffic is permitted. Engineering schematic; illustrative configuration."
+  },
+  "14.10": {
+    "file": "ch14-10.svg",
+    "alt": "PTP grandmaster selection. Test the preferred-source loss and restoration, recording endpoint offset and application behavior through the transition.",
+    "caption": "Test the preferred-source loss and restoration, recording endpoint offset and application behavior through the transition. Engineering schematic; illustrative configuration."
+  },
+  "14.11": {
+    "file": "ch14-11.svg",
+    "alt": "Boundary and transparent clocks. Clock roles differ. The selected profile and delay mechanism determine valid behavior; ordinary forwarding alone is not precision timing.",
+    "caption": "Clock roles differ. The selected profile and delay mechanism determine valid behavior; ordinary forwarding alone is not precision timing. Engineering schematic; illustrative configuration."
+  },
+  "14.14": {
+    "file": "ch14-14.svg",
+    "alt": "Process-bus time alignment. Verify sample alignment with appropriate test equipment; matching configured source names does not establish timing accuracy.",
+    "caption": "Verify sample alignment with appropriate test equipment; matching configured source names does not establish timing accuracy. Engineering schematic; illustrative configuration."
+  },
+  "14.3": {
+    "file": "ch14-03.svg",
+    "alt": "SOE source time and arrival time. Buffered delivery can arrive later while retaining the original source timestamp; time quality must remain visible.",
+    "caption": "Buffered delivery can arrive later while retaining the original source timestamp; time quality must remain visible. Engineering schematic; illustrative configuration."
+  },
+  "15.2": {
+    "file": "ch15-02.svg",
+    "alt": "IED to gateway to SCADA. Protocol conversion must preserve intended state, quality and time semantics, with any unsupported detail documented.",
+    "caption": "Protocol conversion must preserve intended state, quality and time semantics, with any unsupported detail documented. Engineering schematic; illustrative configuration."
+  },
+  "15.6": {
+    "file": "ch15-06.svg",
+    "alt": "Signal mapping layers. Source reference, engineering tag and destination address are different identifiers; keep them traceable in one controlled schedule.",
+    "caption": "Source reference, engineering tag and destination address are different identifiers; keep them traceable in one controlled schedule. Engineering schematic; illustrative configuration."
+  },
+  "15.13": {
+    "file": "ch15-13.svg",
+    "alt": "HMI electrical single-line model. Simplified project SLD: T1 supplies 33 kV; T2 supplies 11 kV. Device state colors are site conventions; quality must remain visible.",
+    "caption": "Simplified project SLD: T1 supplies 33 kV; T2 supplies 11 kV. Device state colors are site conventions; quality must remain visible. Engineering schematic; illustrative configuration."
+  },
+  "15.11": {
+    "file": "ch15-11.svg",
+    "alt": "Protocol conversion semantics. The gateway performs a reviewed semantic mapping. No universal IOA or Modbus register follows automatically from an LN name.",
+    "caption": "The gateway performs a reviewed semantic mapping. No universal IOA or Modbus register follows automatically from an LN name. Engineering schematic; illustrative configuration."
+  },
+  "15.14": {
+    "file": "ch15-14.svg",
+    "alt": "Alarm and SOE handling. Acknowledgment records operator recognition; it does not clear the physical condition or restore invalid source quality.",
+    "caption": "Acknowledgment records operator recognition; it does not clear the physical condition or restore invalid source quality. Engineering schematic; illustrative configuration."
+  },
+  "15.17": {
+    "file": "ch15-17.svg",
+    "alt": "Station to control-centre interface. Remote commands retain station authority and interlocking checks. Link loss must be visible without presenting stale points as live.",
+    "caption": "Remote commands retain station authority and interlocking checks. Link loss must be visible without presenting stale points as live. Engineering schematic; illustrative configuration."
+  },
+  "16.2": {
+    "file": "ch16-02.svg",
+    "alt": "Conceptual breaker control circuit. Functional example only: actual contacts, protection, ratings and wiring follow approved drawings; closing and trip circuits need separate review.",
+    "caption": "Functional example only: actual contacts, protection, ratings and wiring follow approved drawings; closing and trip circuits need separate review. Engineering schematic; illustrative configuration."
+  },
+  "16.5": {
+    "file": "ch16-05.svg",
+    "alt": "Select-before-operate transaction. Selection is not permission to bypass interlocks. Model-specific result handling and independent position confirmation remain required.",
+    "caption": "Selection is not permission to bypass interlocks. Model-specific result handling and independent position confirmation remain required. Engineering schematic; illustrative configuration."
+  },
+  "16.9": {
+    "file": "ch16-09.svg",
+    "alt": "CSWI, CILO and XCBR roles. Logical roles are illustrative. Exact control points and internal binding depend on the delivered device application.",
+    "caption": "Logical roles are illustrative. Exact control points and internal binding depend on the delivered device application. Engineering schematic; illustrative configuration."
+  },
+  "16.11": {
+    "file": "ch16-11.svg",
+    "alt": "Close-permissive evaluation. Each branch is a required review area, not a complete universal Boolean circuit. A failed condition must produce a controlled rejection.",
+    "caption": "Each branch is a required review area, not a complete universal Boolean circuit. A failed condition must produce a controlled rejection. Engineering schematic; illustrative configuration."
+  },
+  "16.18": {
+    "file": "ch16-18.svg",
+    "alt": "Bus coupler operating decision. Paralleling and dead-bus conditions are project-specific. Equal displayed voltage magnitudes alone do not establish a safe closing condition.",
+    "caption": "Paralleling and dead-bus conditions are project-specific. Equal displayed voltage magnitudes alone do not establish a safe closing condition. Engineering schematic; illustrative configuration."
+  },
+  "16.16": {
+    "file": "ch16-16.svg",
+    "alt": "Command failure investigation. An accepted request can still fail physically. A timeout does not justify automatically repeating a close operation.",
+    "caption": "An accepted request can still fail physically. A timeout does not justify automatically repeating a close operation. Engineering schematic; illustrative configuration."
+  },
+  "17.2": {
+    "file": "ch17-02.svg",
+    "alt": "FAT test bench. Identify simulated equipment and isolated outputs. Factory results do not prove the final site wiring or mechanical installation.",
+    "caption": "Identify simulated equipment and isolated outputs. Factory results do not prove the final site wiring or mechanical installation. Engineering schematic; illustrative configuration."
+  },
+  "17.6": {
+    "file": "ch17-06.svg",
+    "alt": "IED verification equipment. Match hardware and configuration to the approved baseline before testing functions; retain tool and firmware versions.",
+    "caption": "Match hardware and configuration to the approved baseline before testing functions; retain tool and firmware versions. Engineering schematic; illustrative configuration."
+  },
+  "17.11": {
+    "file": "ch17-11.svg",
+    "alt": "GOOSE verification boundaries. Test correct reception and missing/mismatched streams. A receive counter alone does not prove the internal application binding.",
+    "caption": "Test correct reception and missing/mismatched streams. A receive counter alone does not prove the internal application binding. Engineering schematic; illustrative configuration."
+  },
+  "17.14": {
+    "file": "ch17-14.svg",
+    "alt": "SCADA point testing. Record source and destination observations for every tested point, including abnormal states and communication loss.",
+    "caption": "Record source and destination observations for every tested point, including abnormal states and communication loss. Engineering schematic; illustrative configuration."
+  },
+  "17.17": {
+    "file": "ch17-17.svg",
+    "alt": "Redundancy acceptance test. Remove one path at a time, observe continued application service and degradation alarms, then restore and retest the other path.",
+    "caption": "Remove one path at a time, observe continued application service and degradation alarms, then restore and retest the other path. Engineering schematic; illustrative configuration."
+  },
+  "17.20": {
+    "file": "ch17-20.svg",
+    "alt": "Commissioning evidence workflow. Unexecuted tests remain pending. Every correction requires repeat tests for affected functions and a traceable final baseline.",
+    "caption": "Unexecuted tests remain pending. Every correction requires repeat tests for affected functions and a traceable final baseline. Engineering schematic; illustrative configuration."
+  },
+  "18.1": {
+    "file": "ch18-01.svg",
+    "alt": "Packet analysis workflow. A packet capture records one observation point. It does not independently prove physical output or protection performance.",
+    "caption": "A packet capture records one observation point. It does not independently prove physical output or protection performance. Engineering schematic; illustrative configuration."
+  },
+  "18.6": {
+    "file": "ch18-06.svg",
+    "alt": "MMS association diagnosis. Identify the last successful stage; distinguish transport silence, explicit rejection and later application-resource failures.",
+    "caption": "Identify the last successful stage; distinguish transport silence, explicit rejection and later application-resource failures. Engineering schematic; illustrative configuration."
+  },
+  "18.8": {
+    "file": "ch18-08.svg",
+    "alt": "GOOSE decoded field worksheet. Illustrative fields only, not a measured packet capture. Verify gocbRef, DataSet and payload types against the actual configuration.",
+    "caption": "Illustrative fields only, not a measured packet capture. Verify gocbRef, DataSet and payload types against the actual configuration. Engineering schematic; illustrative configuration."
+  },
+  "18.14": {
+    "file": "ch18-14.svg",
+    "alt": "VLAN fault isolation. Capture visibility and NIC offload must be checked before concluding that a missing tag or frame is an operational fault.",
+    "caption": "Capture visibility and NIC offload must be checked before concluding that a missing tag or frame is an operational fault. Engineering schematic; illustrative configuration."
+  },
+  "18.11": {
+    "file": "ch18-11.svg",
+    "alt": "Retransmission timing inspection. Same-state repeats retain the payload while sequence advances. Capture timing is not complete protection operating time.",
+    "caption": "Same-state repeats retain the payload while sequence advances. Capture timing is not complete protection operating time. Engineering schematic; illustrative configuration."
+  },
+  "18.19": {
+    "file": "ch18-19.svg",
+    "alt": "Troubleshooting decision path. Stop at the first failed boundary, collect evidence, change one cause and repeat the original test before closing the issue.",
+    "caption": "Stop at the first failed boundary, collect evidence, change one cause and repeat the original test before closing the issue. Engineering schematic; illustrative configuration."
+  },
+  "19.1": {
+    "file": "ch19-01.svg",
+    "alt": "Representative multi-vendor IED families. Original project equipment imagery reused for family recognition. Appearance does not establish model-specific services or capabilities.",
+    "caption": "Original project equipment imagery reused for family recognition. Appearance does not establish model-specific services or capabilities. Engineering schematic; illustrative configuration."
+  },
+  "19.7": {
+    "file": "ch19-07.svg",
+    "alt": "Multi-vendor system topology. Record tool versions, firmware, device packages and standards editions; validate the complete combination before replication.",
+    "caption": "Record tool versions, firmware, device packages and standards editions; validate the complete combination before replication. Engineering schematic; illustrative configuration."
+  },
+  "19.9": {
+    "file": "ch19-09.svg",
+    "alt": "SCD integration across suppliers. A successful import is only one checkpoint. Review dropped elements, semantic compatibility and the deployed online model.",
+    "caption": "A successful import is only one checkpoint. Review dropped elements, semantic compatibility and the deployed online model. Engineering schematic; illustrative configuration."
+  },
+  "19.12": {
+    "file": "ch19-12.svg",
+    "alt": "Inter-vendor GOOSE exchange. Check transmitted content and receiving internal binding. Never disable supervision simply to accept incompatible configurations.",
+    "caption": "Check transmitted content and receiving internal binding. Never disable supervision simply to accept incompatible configurations. Engineering schematic; illustrative configuration."
+  },
+  "19.17": {
+    "file": "ch19-17.svg",
+    "alt": "Multi-vendor SCADA normalization. Normalize engineering units and tag names while preserving source semantics and documenting unsupported information.",
+    "caption": "Normalize engineering units and tag names while preserving source semantics and documenting unsupported information. Engineering schematic; illustrative configuration."
+  },
+  "20.3": {
+    "file": "ch20-03.svg",
+    "alt": "132/33/11 kV project single-line diagram. One line, T1, two 33 kV sections with coupler, F01 load, F02/T2 supply and two 11 kV feeders. Simplified primary symbols; detailed bay drawings govern.",
+    "caption": "One line, T1, two 33 kV sections with coupler, F01 load, F02/T2 supply and two 11 kV feeders. Simplified primary symbols; detailed bay drawings govern. Engineering schematic; illustrative configuration."
+  },
+  "20.4": {
+    "file": "ch20-04.svg",
+    "alt": "132-L01 bay engineering. One illustrative information interface is shown; actual independent main and backup protection allocation follows the project study.",
+    "caption": "One illustrative information interface is shown; actual independent main and backup protection allocation follows the project study. Engineering schematic; illustrative configuration."
+  },
+  "20.5": {
+    "file": "ch20-05.svg",
+    "alt": "Transformer voltage boundaries. T1 feeds 33-B1. T2 is supplied from 33-B2 through 33-F02. Winding measurements, ratios and protection associations remain distinct.",
+    "caption": "T1 feeds 33-B1. T2 is supplied from 33-B2 through 33-F02. Winding measurements, ratios and protection associations remain distinct. Engineering schematic; illustrative configuration."
+  },
+  "20.6": {
+    "file": "ch20-06.svg",
+    "alt": "Two 33 kV outgoing circuits. Keep separate equipment names, references and settings. F02 consistently supplies T2 throughout this illustrative project.",
+    "caption": "Keep separate equipment names, references and settings. F02 consistently supplies T2 throughout this illustrative project. Engineering schematic; illustrative configuration."
+  },
+  "20.7": {
+    "file": "ch20-07.svg",
+    "alt": "11 kV supply and feeders. T2 transforms 33 kV to 11 kV; the 11 kV bus is never directly connected to the 33 kV bus in this project.",
+    "caption": "T2 transforms 33 kV to 11 kV; the 11 kV bus is never directly connected to the 33 kV bus in this project. Engineering schematic; illustrative configuration."
+  },
+  "20.9": {
+    "file": "ch20-09.svg",
+    "alt": "Protection panel allocation. Representative original artwork only, not a device selection endorsement. Hardware and independent protection channels follow the requirements matrix.",
+    "caption": "Representative original artwork only, not a device selection endorsement. Hardware and independent protection channels follow the requirements matrix. Engineering schematic; illustrative configuration."
+  },
+  "20.10": {
+    "file": "ch20-10.svg",
+    "alt": "Project PRP station bus. Independent LAN A and B carry approved services. Gateway B is .11; HMI .12; all endpoint roles and power dependencies are documented.",
+    "caption": "Independent LAN A and B carry approved services. Gateway B is .11; HMI .12; all endpoint roles and power dependencies are documented. Engineering schematic; illustrative configuration."
+  },
+  "20.14": {
+    "file": "ch20-14.svg",
+    "alt": "Project GOOSE indication exchange. Teaching exchange only: the received indication does not directly operate the coupler. Operational use needs an approved cause-and-effect design.",
+    "caption": "Teaching exchange only: the received indication does not directly operate the coupler. Operational use needs an approved cause-and-effect design. Engineering schematic; illustrative configuration."
+  },
+  "20.17": {
+    "file": "ch20-17.svg",
+    "alt": "Project SCADA/HMI traceability. Keep command and feedback references separate. The normal-open coupler baseline leaves the B2/T2 branch without the illustrated source.",
+    "caption": "Keep command and feedback references separate. The normal-open coupler baseline leaves the B2/T2 branch without the illustrated source. Engineering schematic; illustrative configuration."
+  },
+  "20.20": {
+    "file": "ch20-20.svg",
+    "alt": "Project commissioning handover. Retain exact device, switch and gateway revisions. Unexecuted tests and unresolved restrictions remain visible in the handover record.",
+    "caption": "Retain exact device, switch and gateway revisions. Unexecuted tests and unresolved restrictions remain visible in the handover record. Engineering schematic; illustrative configuration."
+  }
+}

@@ -43,6 +43,7 @@ const nextTrainingSoeTime = (minimumStepMs = 25): string => {
 };
 
 export type ActiveWorkspaceTab =
+  | 'OSI_MODEL'
   | 'HERO'
   | 'IEC61850_ACADEMY'
   | 'INTERVIEW_PREP'
@@ -619,20 +620,8 @@ const INITIAL_SOE: SoeRecord[] = [
   },
 ];
 
-const INITIAL_ALARMS: AlarmRecord[] = [
-  {
-    id: 'ALM-INIT-1',
-    timestamp: '2026-11-02T14:32:45.002Z',
-    bayId: 'BAY-11-SP1',
-    bayName: '11 kV Spare Feeder Bay 09 (Bus 11-A)',
-    iedId: 'IED-11-SP1',
-    signalName: 'Local/Remote Selection & Earth Switch Q8 Closed',
-    iec61850Ref: 'IED_11_SP1LD0/CSWI1.Loc.stVal',
-    severity: 'INFO',
-    state: 'ACTIVE_ACK',
-    valueText: 'LOCAL Mode Active / Q8 Earthing Switch CLOSED',
-  },
-];
+// Start with no pre-existing active alarms; runtime faults still create alarms normally.
+const INITIAL_ALARMS: AlarmRecord[] = [];
 
 export const useSubstationStore = create<SubstationStoreState>((set, get) => ({
   activeTab: 'HERO',

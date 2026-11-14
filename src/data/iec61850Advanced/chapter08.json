@@ -1,0 +1,341 @@
+[
+  {
+    "title": "Introduction to Manufacturing Message Specification",
+    "paragraphs": [
+      "Manufacturing Message Specification (MMS) defines services for exchanging named, typed information between applications. IEC 61850 uses a mapping to MMS for much of its client-server communication; MMS itself is not a protection function or a relay configuration language.",
+      "An IED exposes a server model while a gateway or station HMI acts as a client. Reads obtain current information, reports deliver configured updates, and control services request actions subject to the server's control model. A successful network connection proves none of these application functions by itself."
+    ],
+    "workflow": [
+      "Identify the required monitoring and control services",
+      "Check the server and client capability statements",
+      "Allocate point references and test each service independently"
+    ],
+    "example": "For 33-F01, the gateway reads XCBR1.Pos and receives breaker events through a configured report. Fault tripping remains a protection application with its own operating path.",
+    "check": "Explain which device initiates the association and which publishes a report; neither role is determined by the equipment's physical size."
+  },
+  {
+    "title": "MMS in IEC 61850 Architecture",
+    "paragraphs": [
+      "IEC 61850 separates information models, abstract services and communication mappings. Parts 7-3 and 7-4 describe common data structures and logical nodes; Part 7-2 describes abstract services; Part 8-1 maps relevant services to MMS and Ethernet communication.",
+      "The same breaker position has a semantic identity regardless of how an engineering tool displays it. The network transports an encoded representation of that identity. GOOSE and Sampled Values use different mappings and operating patterns, so a functioning MMS association does not establish that either multicast service works."
+    ],
+    "workflow": [
+      "Trace a physical input to its logical node",
+      "Identify its functional constraint and data type",
+      "Follow the configured service to the consuming application"
+    ],
+    "example": "52a/52b feedback becomes the illustrative object IED_33_F01LD0/XCBR1.Pos. The HMI must interpret its double-point state and quality, not simply turn any nonzero value green.",
+    "check": "Keep model naming, abstract service and Ethernet transport as separate columns in the engineering schedule."
+  },
+  {
+    "title": "IEC 61850 Client-Server Communication",
+    "paragraphs": [
+      "Client-server communication is association-oriented: the client requests a relationship with the server, then exchanges supported services within that relationship. The server may send unsolicited reports once the relevant RCB is correctly configured and enabled.",
+      "One physical computer can run several clients, and one IED may accept several associations within documented limits. Client identity, server resources and access rights matter. A reporting client is not automatically authorized to operate equipment or edit settings, even when it can browse the entire model."
+    ],
+    "workflow": [
+      "List each gateway, HMI and engineering client",
+      "Assign a purpose and access level",
+      "Test simultaneous connections and resource allocation"
+    ],
+    "example": "Gateway A and a maintenance laptop connect to 33-F01. Both can read approved measurements, but their report resources and control authority are engineered separately.",
+    "check": "Record association and report-instance limits from the exact firmware documentation rather than assuming unlimited clients."
+  },
+  {
+    "title": "MMS Protocol Stack and TCP/IP",
+    "paragraphs": [
+      "In the conventional IEC 61850-8-1 TCP mapping, MMS uses association, presentation and session services above an ISO transport mapping carried over TCP/IP. RFC 1006 provides the TPKT framing used with COTP over TCP. Ethernet carries the resulting IP packets on the station network.",
+      "TCP is a byte stream. One MMS message may span several TCP segments, while a packet may contain more than one higher-layer unit. Packet count therefore cannot be treated as report count. Reassembly and complete capture are essential when diagnosing an apparent malformed message."
+    ],
+    "workflow": [
+      "Inspect Ethernet and IP endpoints",
+      "Confirm TCP connection and TPKT/COTP decoding",
+      "Expand the reassembled MMS message"
+    ],
+    "example": "An oversized DataSet report from the 132 kV line relay spans multiple TCP segments. The SCADA client processes one reconstructed report, not independent values from each segment.",
+    "check": "Do not place ordinary GOOSE or SV inside the MMS/TCP stack in a network diagram."
+  },
+  {
+    "title": "MMS Association Establishment",
+    "paragraphs": [
+      "Association establishment progresses beyond the TCP three-way handshake. COTP connection setup and application association negotiation must also succeed; MMS initiation negotiates relevant capabilities and message handling parameters. A TCP socket marked connected may still have no usable IEC 61850 association.",
+      "Association selectors, application identifiers, access policy and supported services can differ between implementations. Diagnose the last successful exchange before changing configuration. Repeatedly increasing timeouts will not repair an explicitly rejected association or a mismatched selector."
+    ],
+    "workflow": [
+      "Capture from before connection startup",
+      "Identify TCP, COTP and association responses",
+      "Compare rejected parameters with the approved client/server settings"
+    ],
+    "example": "The 33-F01 server accepts TCP port 102 but rejects the gateway association. The test record distinguishes this application rejection from a firewall silently dropping the TCP SYN.",
+    "check": "Preserve the rejection response and both device logs; an HMI's generic communication alarm is insufficient evidence."
+  },
+  {
+    "title": "IEC 61850 Server Data Model Discovery",
+    "paragraphs": [
+      "Model discovery allows a client to enumerate available logical devices, logical nodes, data objects and supported data structures. Discovery services are useful for confirming the running model against the approved SCL configuration and for locating exact object references.",
+      "Browsing is evidence about the connected device, not permission to rewrite the engineering database automatically. Firmware changes, optional functions and naming prefixes can alter the exposed model. A client that silently accepts every discovered change can hide configuration drift and map the wrong physical equipment."
+    ],
+    "workflow": [
+      "Connect using read-only access",
+      "Browse the relevant logical device and types",
+      "Compare the model against the controlled signal schedule"
+    ],
+    "example": "For 33-F01, confirm whether the actual logical device domain is IED_33_F01LD0 and whether MMXU1 exists before importing illustrative references into the gateway.",
+    "check": "Compare types and functional constraints as well as names; matching text labels alone do not prove compatibility."
+  },
+  {
+    "title": "MMS Read Services",
+    "paragraphs": [
+      "Read services retrieve a present value or structure from the server. A read is useful for commissioning, initial display and targeted diagnostics, but cyclic reading alone does not guarantee collection of every intermediate event between polls.",
+      "Read the correct functional constraint and preserve quality and time where the selected structure includes them. A successful read can return invalid or questionable application data. Also distinguish a source timestamp from the workstation time at which the response arrived."
+    ],
+    "workflow": [
+      "Select the exact object and functional constraint",
+      "Read value, quality and source time as supported",
+      "Compare the response with an injected state or measurement"
+    ],
+    "example": "Polling XCBR1.Pos once per second can miss an open-close sequence completed between polls. Reporting and suitable event retention are required when that sequence must be recorded.",
+    "check": "Document polling intervals and stale-data rules; a continuously visible last value is not proof of a healthy source."
+  },
+  {
+    "title": "MMS Write Services and Access Control",
+    "paragraphs": [
+      "Write services change only attributes that the server permits to be written under the current conditions. IEC 61850 status attributes are generally produced by the application and should not be treated as editable process commands.",
+      "Access depends on the service, attribute, device mode and security policy. Writing an RCB parameter is different from issuing a breaker operation. A denied write may be correct behavior because the report is enabled, another client owns a resource, or the account lacks permission."
+    ],
+    "workflow": [
+      "Confirm the attribute is writable and the test is approved",
+      "Read and record its original value",
+      "Apply the change and verify both acceptance and resulting behavior"
+    ],
+    "example": "During an isolated FAT, adjust an assigned RCB's IntgPd using the documented sequence. Restore the approved interval and prove that another client's reporting was unaffected.",
+    "check": "Never test breaker control by trying to overwrite XCBR1.Pos.stVal; use the supported control service and authorized procedure."
+  },
+  {
+    "title": "MMS Reporting Services",
+    "paragraphs": [
+      "MMS reports carry data selected through a DataSet and governed by a Report Control Block. The client enables the appropriate RCB and interprets the report's inclusion information, trigger reason and optional fields according to the configured structure.",
+      "An event report may contain only changed members. A general interrogation or integrity report provides a current-state snapshot; neither reconstructs every past transition. Buffered reporting offers conditional recovery of retained entries, subject to finite capacity and correct resynchronization."
+    ],
+    "workflow": [
+      "Verify ordered DataSet members and ConfRev",
+      "Allocate and enable the assigned RCB",
+      "Exercise data change, quality change, GI and reconnect"
+    ],
+    "example": "33-F01 sends a breaker event to Gateway A. If stVal, q and t are separate scalar members, confirm their inclusion rather than assuming every event repeats all three.",
+    "check": "Check RptEna, ownership and event triggers before blaming the Ethernet network for missing reports."
+  },
+  {
+    "title": "MMS Control Services",
+    "paragraphs": [
+      "IEC 61850 control services manage requests to controllable data objects, including direct and select-before-operate models. Normal and enhanced security models have different service behavior; enhanced control can provide command termination information.",
+      "Communication acceptance, command execution and physical breaker feedback are distinct outcomes. The client must follow the object's ctlModel, preserve command context and observe application interlocks. A timeout leaves an uncertain result until actual position and relevant logs are checked."
+    ],
+    "workflow": [
+      "Read the supported control model",
+      "Verify authority and permissives",
+      "Execute the required sequence and independently inspect position feedback"
+    ],
+    "example": "An HMI operates the approved CSWI1.Pos control point for 33-F01 and monitors XCBR1.Pos feedback. The two references have related functions but are not interchangeable writable variables.",
+    "check": "After a timeout, reconcile physical state before any retry; do not blindly repeat a close command."
+  },
+  {
+    "title": "MMS Communication over Station Ethernet",
+    "paragraphs": [
+      "Station Ethernet carries MMS together with other engineered traffic. MMS normally uses unicast IP communication, while Layer-2 GOOSE and SV have different addressing and forwarding requirements. Sharing switches does not make their performance requirements identical.",
+      "Design paths for availability, bandwidth and controlled access. Excessive multicast flooding or oversubscribed uplinks can affect TCP performance, but giving every packet the highest priority merely moves the congestion problem. Switch monitoring should expose errors, discards and queue pressure."
+    ],
+    "workflow": [
+      "Draw source-to-destination paths",
+      "Calculate expected and burst traffic",
+      "Verify switch policies under representative loading"
+    ],
+    "example": "The 33 kV gateway reads several feeder IEDs across station VLAN 100. Process-bus SV is confined to its approved distribution paths so monitoring traffic remains predictable.",
+    "check": "Check both directions of a TCP path and the actual switch port membership, not only the logical network drawing."
+  },
+  {
+    "title": "TCP Port 102 and Network Requirements",
+    "paragraphs": [
+      "TCP port 102 is the conventional listener used by the RFC 1006-based MMS mapping. The client normally uses an ephemeral source port and connects to the IED's configured server address. The reply must return through the permitted network path.",
+      "An open port only proves a transport endpoint answered. Firewalls, routing, duplicate IP addresses, selectors and application policies remain separate checks. Any security-enabled alternative must follow the project's IEC 62351 and product implementation requirements rather than a guessed port change."
+    ],
+    "workflow": [
+      "Confirm server address, mask and route",
+      "Permit only approved endpoint/service paths",
+      "Test association and application exchange after transport connectivity"
+    ],
+    "example": "For Gateway A at 192.168.100.10 and 33-F01 at 192.168.100.31, verify the intended same-subnet path and TCP 102 policy before investigating RCB behavior.",
+    "check": "Avoid exposing the station MMS service directly to the public Internet; use the approved station access architecture.",
+    "table": {
+      "headers": [
+        "Parameter",
+        "Illustrative value",
+        "Purpose"
+      ],
+      "rows": [
+        [
+          "Server",
+          "192.168.100.31",
+          "33-F01 MMS endpoint"
+        ],
+        [
+          "Client",
+          "192.168.100.10",
+          "Gateway A; ephemeral source port"
+        ],
+        [
+          "Destination TCP port",
+          "102",
+          "Conventional RFC 1006 service"
+        ],
+        [
+          "Subnet",
+          "255.255.255.0",
+          "Example /24; verify actual routing"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "MMS Communication Between IED and SCADA",
+    "paragraphs": [
+      "SCADA integration converts the IED model into an operational point database. The client must acquire the correct values, interpret their types and quality, and present source time and communication health in a useful operator view.",
+      "The communication driver and HMI database are separate configuration layers. A correct MMS report can reach the driver while an incorrect database reference, scale or state conversion produces the wrong display. Test from the field stimulus through the final HMI indication."
+    ],
+    "workflow": [
+      "Bind each SCADA tag to a controlled reference",
+      "Configure quality, time and scaling rules",
+      "Inject representative values and compare every layer"
+    ],
+    "example": "IED_33_F01LD0/MMXU1.A.phsA.cVal.mag.f is an illustrative phase-current reference. Check the actual model, unit and ratio before displaying it as primary amperes.",
+    "check": "Do not declare a point tested from the driver's online value alone; inspect the operator screen and event list."
+  },
+  {
+    "title": "Multiple MMS Clients and Server Limitations",
+    "paragraphs": [
+      "Server resources include associations, outstanding requests, DataSet capacity and RCB instances. These limits are implementation-specific and can be shared across services. A maintenance client can consume resources needed by a redundant gateway if no capacity is reserved.",
+      "An RCB instance is not a general broadcast channel for arbitrary clients. Engineer independent instances or a documented redundancy strategy, and verify reservation and reconnection behavior. Conflicting clients can repeatedly enable, disable or reconfigure a resource without any physical network fault."
+    ],
+    "workflow": [
+      "Inventory normal and maintenance clients",
+      "Allocate server and reporting capacity",
+      "Test startup, failover and maintenance access together"
+    ],
+    "example": "Gateway A, Gateway B and the engineering laptop connect during FAT. Confirm each intended report stream remains stable and rejected extra connections produce a clear diagnostic.",
+    "check": "Record maximum tested load separately from a manufacturer's advertised maximum; both depend on the actual configuration."
+  },
+  {
+    "title": "MMS Connection Loss and Recovery",
+    "paragraphs": [
+      "Connection loss breaks the active association and requires an explicit client recovery process. The client detects failure, reconnects, confirms the model and report configuration, and restores data acquisition without presenting stale values as healthy live information.",
+      "Buffered recovery depends on retained entries and a valid recovery position. A changed configuration, buffer overflow or device restart may prevent complete replay. A GI or read restores current state but must not erase evidence of an unrecoverable event gap."
+    ],
+    "workflow": [
+      "Break the communication path under test control",
+      "Observe stale/invalid indication and reconnect",
+      "Reconcile retained events, current values and any recorded gap"
+    ],
+    "example": "After a station-switch outage, Gateway A reconnects to 33-F01 and requests eligible BRCB entries. It marks any discontinuity and refreshes the present breaker state.",
+    "check": "Test both short and long interruptions; a successful short outage does not prove buffer capacity for an extended failure."
+  },
+  {
+    "title": "MMS Communication Configuration",
+    "paragraphs": [
+      "MMS configuration combines network settings, the server model and client service allocation. Start with the approved SCD and signal list, then translate them into the settings supported by each device and gateway tool.",
+      "The sequence matters: model changes can invalidate DataSet membership, and DataSet changes can invalidate report decoding. Commission a controlled configuration revision rather than editing both endpoints independently until communication happens to work."
+    ],
+    "workflow": [
+      "Set address and association parameters",
+      "Import and verify the model and point schedule",
+      "Allocate DataSets/RCBs, enable acquisition and archive the tested revision"
+    ],
+    "example": "For 33-F01, use station address 192.168.100.31, Gateway A .10 and a project-assigned buffered status report. Timing values are engineering examples, not mandatory IEC defaults.",
+    "check": "Store exported configurations with firmware versions and checksums so the tested state can be restored exactly."
+  },
+  {
+    "title": "Practical Example — 33 kV Feeder Monitoring",
+    "paragraphs": [
+      "A feeder monitoring application combines breaker position, current, voltage, protection operation and device health. Group signals by engineering purpose and update behavior rather than creating one oversized DataSet containing the entire model.",
+      "Use event reporting for status changes and suitable deadbands or acquisition intervals for measurements. Preserve invalid quality and distinguish a fault operation from a breaker position change. Protection may operate without the breaker opening if the trip circuit or mechanism fails."
+    ],
+    "workflow": [
+      "Create the feeder point schedule",
+      "Configure status and measurement acquisition",
+      "Inject current, operate the test breaker model and inspect HMI/SOE"
+    ],
+    "example": "33-F01 uses XCBR1.Pos for position, PTOC1.Op for an available overcurrent indication and MMXU1 for measurements. Actual prefixes, instances and phase structure come from its exported model.",
+    "check": "Include a failed-breaker-feedback scenario; a protection trip indication is not physical proof that the primary circuit opened."
+  },
+  {
+    "title": "MMS Packet Analysis Using Wireshark",
+    "paragraphs": [
+      "Packet analysis shows what crossed the capture point. For MMS, identify the TCP stream, association setup, confirmed requests/responses and report traffic. Use reassembly and preserve capture timing before interpreting a missing or malformed message.",
+      "Capture placement limits conclusions. A mirrored switch port may omit traffic or drop packets under load, and capture timestamps are workstation observations rather than IED event times. Correlate packet evidence with device and client logs."
+    ],
+    "workflow": [
+      "Capture startup and one known event",
+      "Filter tcp.port == 102 and then mms",
+      "Follow the TCP stream and compare the decoded report with the point schedule"
+    ],
+    "example": "Toggle the isolated 33-F01 test input once and locate its report. Record inclusion, value and source time where present, then compare the HMI event without inventing a packet latency budget.",
+    "check": "TCP retransmission indicates transport recovery; it is different from an IED sending another application report.",
+    "code": "# Wireshark display filters (not capture-filter syntax)\ntcp.port == 102\nmms\nip.addr == 192.168.100.31 && tcp.port == 102\n# Select the observed stream number before using: tcp.stream == N"
+  },
+  {
+    "title": "MMS FAT/SAT Testing",
+    "paragraphs": [
+      "MMS acceptance testing verifies the delivered application, not merely a successful ping. Define expected values, quality transitions, timestamps, permitted controls and recovery behavior before applying test stimuli.",
+      "FAT can use an isolated simulator and representative IEDs; SAT confirms the installed addresses, ports, wiring and operational interfaces. Pass criteria must refer to the project requirements and the tested client/server versions."
+    ],
+    "workflow": [
+      "Verify discovery and reads",
+      "Test reporting, access restrictions and approved controls",
+      "Interrupt communication, reconnect and retain traceable evidence"
+    ],
+    "example": "For 33-F01, record the injected breaker state, reported value, source timestamp, HMI display and alarm result. Repeat with invalid quality and with the assigned RCB unavailable.",
+    "check": "Keep an expected/actual record for each point and failure mode; screenshots without a known stimulus are weak acceptance evidence.",
+    "table": {
+      "headers": [
+        "Test",
+        "Stimulus",
+        "Expected evidence"
+      ],
+      "rows": [
+        [
+          "Read",
+          "Known isolated input",
+          "Correct value and supported q/t"
+        ],
+        [
+          "Report",
+          "Data and quality changes",
+          "Correct included members and reasons"
+        ],
+        [
+          "Access",
+          "Unprivileged approved test account",
+          "Prohibited write/control rejected"
+        ],
+        [
+          "Recovery",
+          "Controlled link interruption",
+          "Stale indication, reconnect and gap handling"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "MMS Troubleshooting",
+    "paragraphs": [
+      "Troubleshoot MMS in layers: physical link, Ethernet/VLAN, IP, TCP, association, model reference, report configuration and client presentation. Stop at the first failed layer rather than changing unrelated settings simultaneously.",
+      "Different symptoms require different evidence. No TCP response suggests reachability or service availability; association rejection suggests application parameters or policy; successful reads with no reports suggest RCB ownership, triggers or DataSet configuration. Correct packets with wrong HMI values point toward mapping."
+    ],
+    "workflow": [
+      "Reproduce one bounded symptom",
+      "Compare a working and failing path",
+      "Change one cause, repeat the same test and archive the result"
+    ],
+    "example": "If 33-F01 reads work but status events do not, inspect RptEna and the assigned DataSet before altering VLANs. If reports arrive correctly, inspect the gateway database next.",
+    "check": "End with a cause-and-evidence statement, not simply 'reboot fixed it'; verify that recovery survives the original failure scenario."
+  }
+]

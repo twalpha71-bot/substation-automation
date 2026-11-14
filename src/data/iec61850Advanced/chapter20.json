@@ -1,0 +1,448 @@
+[
+  {
+    "title": "Project Introduction and Scope",
+    "paragraphs": [
+      "This illustrative project engineers a 132/33/11 kV station from requirements through acceptance. The fixed scope is one 132 kV incoming line 132-L01, transformer T1 at 132/33 kV, two 33 kV bus sections, coupler 33-BC01, two 33 kV outgoing circuits, transformer T2 at 33/11 kV and two 11 kV feeders.",
+      "33-F01 serves a 33 kV load from 33-B1. 33-F02 leaves 33-B2 and supplies T2; T2 feeds 11-B1 and feeders 11-F01/11-F02. This teaching project uses conventional analogue inputs and a PRP station bus; detailed protection ratings and additional independent schemes require the project study."
+    ],
+    "workflow": [
+      "Freeze the equipment and interface schedule",
+      "Allocate models, networks and operator functions",
+      "Test the complete chain and retain as-built records"
+    ],
+    "example": "33-BC01 is normally open in the stated baseline, leaving the B2/T2/11 kV branch de-energized until an approved operating condition and procedure permits energization.",
+    "check": "These are consistent teaching assumptions, not a construction design or a recommended operating arrangement for every station.",
+    "table": {
+      "headers": [
+        "Equipment",
+        "Count",
+        "Fixed teaching connection"
+      ],
+      "rows": [
+        [
+          "132 kV incoming line",
+          "1: 132-L01",
+          "External source → 132-B1"
+        ],
+        [
+          "T1",
+          "1: 132/33 kV",
+          "132-B1 → 33-B1"
+        ],
+        [
+          "33 kV bus sections/coupler",
+          "2 sections; 1 coupler",
+          "33-B1 ↔ 33-BC01 ↔ 33-B2"
+        ],
+        [
+          "33 kV outgoing circuits",
+          "2: 33-F01 / 33-F02",
+          "F01: B1 → load; F02: B2 → T2"
+        ],
+        [
+          "T2",
+          "1: 33/11 kV",
+          "33-F02 → 11-B1"
+        ],
+        [
+          "11 kV outgoing feeders",
+          "2: 11-F01 / 11-F02",
+          "Both supplied from 11-B1"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "132/33/11 kV Substation Architecture",
+    "paragraphs": [
+      "The project separates process equipment, bay IEDs and station systems. Conventional CT/VT and binary wiring connect equipment to its assigned protection/control application, while station Ethernet carries MMS, approved GOOSE and timing services.",
+      "PRP provides two independent network paths between compatible nodes. Gateway A/B and HMI provide acquisition and authorized control with a documented redundancy strategy. This project does not add an SV process bus implicitly; the process-bus chapter remains a separate architecture study."
+    ],
+    "workflow": [
+      "Draw physical equipment and IED boundaries",
+      "Connect the defined station services",
+      "Review common power, network and timing dependencies"
+    ],
+    "example": "132-L01 and T1 supply 33-B1. 33-BC01 connects B1 to B2 when permitted, and 33-F02/T2 then supplies the 11 kV system.",
+    "check": "Keep the electrical power path distinct from the Ethernet communication paths; a network arrow is not a primary conductor."
+  },
+  {
+    "title": "Single-Line Diagram and Equipment",
+    "paragraphs": [
+      "The single-line diagram is the electrical source of truth for this exercise. It contains 132-B1, T1, 33-B1/33-B2, 33-BC01, 33-F01/33-F02, T2, 11-B1 and 11-F01/11-F02 with the connections defined in the project scope.",
+      "Show breaker and transformer symbols consistently and distinguish normal position from commanded state. Detailed disconnectors, earth switches and instrument-transformer locations belong to approved bay drawings; the compact training SLD explicitly simplifies them rather than inventing a complete switchyard arrangement."
+    ],
+    "workflow": [
+      "Verify every voltage boundary and connection",
+      "Match names to the equipment schedule",
+      "Bind operational symbols to tested feedback tags"
+    ],
+    "example": "The 11 kV bus is supplied through T2, never directly connected to the 33 kV bus. Opening 33-BC01 isolates the B2 branch from the sole illustrated source.",
+    "check": "Do not infer that a de-energized display proves safe isolation; operating and earthing procedures require the actual approved scheme."
+  },
+  {
+    "title": "132 kV Line Bays",
+    "paragraphs": [
+      "The single incoming bay 132-L01 connects the external 132 kV source to 132-B1. Its protection and control functions are allocated according to a separate protection study, including any required independent main and backup systems.",
+      "For course mapping, IED_132_L01 at 192.168.100.21 represents the documented bay information interface. This address allocation does not assert that one IED alone is sufficient for a real 132 kV line scheme. Measurements, breaker status and protection indications are selected from the actual supported model."
+    ],
+    "workflow": [
+      "Review line protection and control requirements",
+      "Allocate the supported bay model and physical interfaces",
+      "Test indications, trip paths and station integration separately"
+    ],
+    "example": "The HMI displays 132-L01 position and measurements from its verified source, while protection test results establish the relevant operating behavior independently of MMS reporting.",
+    "check": "Do not choose distance, differential or backup settings from this tutorial; they require the line and system studies."
+  },
+  {
+    "title": "132/33 kV Power Transformers",
+    "paragraphs": [
+      "T1 is the project's single 132/33 kV transformer connecting 132-B1 to 33-B1. Transformer protection, cooling, tap control and mechanical indications are included only as supported and specified by the actual design.",
+      "IED_T1 at 192.168.100.22 is the illustrative protection-information interface. HV and LV measurements and breaker associations must be distinguished, including ratios and vector-group considerations for protection engineering. Generic point names cannot replace a winding-specific signal schedule."
+    ],
+    "workflow": [
+      "Review transformer data and protection requirements",
+      "Allocate winding measurements and equipment indications",
+      "Verify source identity, scaling and trip destinations"
+    ],
+    "example": "T1 status and alarms reach the gateway through controlled DataSets. A transformer protection operation and each associated breaker feedback are recorded separately.",
+    "check": "Transformer ratings, differential compensation and trip matrix are project-specific; this exercise does not invent mandatory settings or assume every mechanical alarm is available digitally."
+  },
+  {
+    "title": "33 kV Feeder Bays",
+    "paragraphs": [
+      "The project has exactly two 33 kV outgoing circuits. 33-F01 leaves 33-B1 for an external 33 kV load; 33-F02 leaves 33-B2 and supplies the HV side of transformer T2.",
+      "IED_33_F01 uses 192.168.100.31 and IED_33_F02 uses .32. Each has its own model references, reports and physical feedback. A copied feeder template must change equipment identity, ratios, protection settings and stream allocations as required."
+    ],
+    "workflow": [
+      "Create separate F01 and F02 signal schedules",
+      "Configure each IED from its approved circuit data",
+      "Test every point against the correct physical bay"
+    ],
+    "example": "F01's illustrative status object is IED_33_F01LD0/XCBR1.Pos. F02 uses its own IED_33_F02LD0 domain under the stated naming assumption.",
+    "check": "Do not label F02 as a second generic load feeder in later drawings; it is consistently the T2 supply circuit."
+  },
+  {
+    "title": "11 kV Distribution Feeders",
+    "paragraphs": [
+      "The 11 kV system contains one bus 11-B1 and two outgoing feeders, 11-F01 and 11-F02. T2 at 33/11 kV supplies the bus from the 33-F02 circuit; no direct 132/11 kV transformer is introduced.",
+      "IED_11_F01 uses 192.168.100.41 and IED_11_F02 uses .42. T2's illustrative interface IED_T2 uses .34. The LV incomer feedback is associated with the T2 application where supported, with exact object allocation documented in the real design."
+    ],
+    "workflow": [
+      "Verify the T2-to-11-B1 connection",
+      "Allocate distinct feeder references and tags",
+      "Test measurements and status at the correct voltage level"
+    ],
+    "example": "The HMI tags 11_F01_CB_POS and 11_F02_CB_POS bind to their respective IEDs, not copied 33 kV sources.",
+    "check": "Confirm transformer and feeder ratios independently; identical screen templates do not imply identical electrical scaling or protection settings."
+  },
+  {
+    "title": "Bus Coupler and Bus Section",
+    "paragraphs": [
+      "33-BC01 connects bus sections 33-B1 and 33-B2. IED_33_BC01 at 192.168.100.33 represents its illustrative control/status interface. The stated normal baseline leaves the coupler open.",
+      "With the single illustrated source feeding B1 through T1, B2 and its T2 branch are not energized until the approved operating conditions allow the connection. The control philosophy must address actual source states, equipment positions and required checks; future sources would require revisiting the matrix."
+    ],
+    "workflow": [
+      "Define the coupler's electrical role and normal position",
+      "Derive its project-specific interlocking requirements",
+      "Test allowed and rejected cases with independent feedback"
+    ],
+    "example": "The training HMI shows the B1/B2 separation and coupler state explicitly. It does not imply that a command acknowledgment proves the B2 bus is energized.",
+    "check": "Do not apply this single-source example's logic to a station with parallel independent sources without a new engineering study."
+  },
+  {
+    "title": "Protection IED Selection and Allocation",
+    "paragraphs": [
+      "IED selection starts from protection, control, measurement, environmental and availability requirements. Communication support is one selection dimension alongside input ratings, output duties, hardware redundancy and application capability.",
+      "The course schedule assigns one illustrative information interface per listed bay/function. Real projects may require additional independent protection IEDs, merging units or controllers; those must be allocated by the approved scheme rather than inferred from a vendor image."
+    ],
+    "workflow": [
+      "Create a functional requirement matrix",
+      "Verify candidate hardware/firmware capabilities",
+      "Record the selected interfaces and required acceptance tests"
+    ],
+    "example": "The fixed interface schedule assigns 132-L01 to .21, T1 to .22, 33-F01 to .31, 33-F02 to .32, 33-BC01 to .33, T2 to .34, 11-F01 to .41 and 11-F02 to .42.",
+    "check": "Use the address table as the unambiguous allocation record; product choice does not authorize unsupported functions or replace protection coordination."
+  },
+  {
+    "title": "Station Bus Network Design",
+    "paragraphs": [
+      "The station bus uses PRP with independent LAN A and LAN B for compatible IEDs and gateway nodes. Each logical PRP endpoint retains the addressing behavior documented by its implementation; the example schedule lists one logical station address per node.",
+      "Both LANs carry the required MMS, approved GOOSE and timing paths. They are not connected by an ordinary bridge. Switch power and fibre routes are reviewed for common failures, and single-attached equipment uses an explicitly documented arrangement."
+    ],
+    "workflow": [
+      "Build separate A/B port schedules",
+      "Configure matching required service delivery without cross-bridging",
+      "Test each path and redundancy supervision"
+    ],
+    "example": "33-F01 communicates with Gateway A .10 and Gateway B .11 through the supported PRP arrangement. The HMI server uses .12 in the station schedule.",
+    "check": "Network redundancy does not duplicate an IED's application or analogue inputs; document those remaining dependencies separately."
+  },
+  {
+    "title": "IP Addressing and VLAN Planning",
+    "paragraphs": [
+      "The project station subnet is 192.168.100.0/24 on VLAN 100. Gateway A/B use .10/.11, HMI uses .12 and the station time service uses .20. Bay interfaces use the fixed addresses in the project allocation table.",
+      "Selected GOOSE uses VLAN 200 with project-assigned multicast identities. Switch management has a separate 192.168.99.0/24 plan whose individual addresses are allocated in the switch schedule. VLAN numbers and example addresses are engineering choices, not IEC defaults."
+    ],
+    "workflow": [
+      "Reserve the complete address and stream register",
+      "Check duplicates and numerical bases",
+      "Verify exported configuration and live traffic"
+    ],
+    "example": "33-F01 gcbTrip uses APPID 0x1001 and MAC 01-0C-CD-01-00-01. VLAN 200 appears as hexadecimal 0C8 in the relevant SCL address field.",
+    "check": "Do not assign the same illustrative GOOSE identity to every copied feeder; allocate each additional stream explicitly.",
+    "table": {
+      "headers": [
+        "Endpoint",
+        "Station address /24",
+        "Role"
+      ],
+      "rows": [
+        [
+          "Gateway A / B",
+          "192.168.100.10 / .11",
+          "Supported redundant acquisition/control strategy"
+        ],
+        [
+          "HMI",
+          "192.168.100.12",
+          "Station operator interface"
+        ],
+        [
+          "Time service",
+          "192.168.100.20",
+          "Approved timing source"
+        ],
+        [
+          "IED_132_L01",
+          "192.168.100.21",
+          "Incoming line interface"
+        ],
+        [
+          "IED_T1",
+          "192.168.100.22",
+          "132/33 kV transformer interface"
+        ],
+        [
+          "IED_33_F01 / F02",
+          "192.168.100.31 / .32",
+          "Load feeder / T2 supply"
+        ],
+        [
+          "IED_33_BC01",
+          "192.168.100.33",
+          "33 kV coupler"
+        ],
+        [
+          "IED_T2",
+          "192.168.100.34",
+          "33/11 kV transformer interface"
+        ],
+        [
+          "IED_11_F01 / F02",
+          "192.168.100.41 / .42",
+          "Two 11 kV feeders"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "IEC 61850 Logical Node Engineering",
+    "paragraphs": [
+      "Logical-node engineering links each physical function to a supported model. For the tutorial, LD0 is the illustrative logical-device instance and the exposed domain follows the stated IED-name-plus-LD0 convention, subject to actual device verification.",
+      "XCBR represents breaker information, CSWI switching control, MMXU measurements and protection nodes the supported protection functions. Optional attributes and naming prefixes are never assumed universally. Equipment association remains essential when one IED hosts several functions."
+    ],
+    "workflow": [
+      "Map equipment/functions to actual logical nodes",
+      "Record exact references, types and functional constraints",
+      "Compare the exported and online models"
+    ],
+    "example": "For 33-F01, position is IED_33_F01LD0/XCBR1.Pos, an available control point may be CSWI1.Pos, and phase current may use MMXU1.A.phsA.cVal.mag.f.",
+    "check": "These references are coherent examples, not evidence that every selected vendor model exposes those exact names or attributes."
+  },
+  {
+    "title": "DataSet and Report Configuration",
+    "paragraphs": [
+      "The project groups required station status into controlled DataSets and assigns compatible report resources to gateways. The 33-F01 example uses dsStatus and brcbStatus with supported event triggers and optional fields.",
+      "Separate client allocation and recovery behavior must be defined for Gateway A/B. Buffered retention is finite, and a GI restores current state rather than missing historical transitions. Measurement deadbands and update policies are chosen from operator needs and device capability."
+    ],
+    "workflow": [
+      "Build ordered point selections",
+      "Allocate report instances and client ownership",
+      "Test data/quality changes, GI, integrity and reconnect"
+    ],
+    "example": "An object-level XCBR1.Pos [ST] selection carries the supported structure, while separate scalar selections need explicit inclusion handling. The gateway database matches the actual chosen DataSet layout.",
+    "check": "Do not reuse a tested report decoder after changing member order without coordinating ConfRev and repeating the affected tests."
+  },
+  {
+    "title": "GOOSE Communication Engineering",
+    "paragraphs": [
+      "The project demonstrates one explicitly allocated GOOSE exchange: 33-F01 publishes a supported trip indication through dsTrip/gcbTrip to a designated receiving application in IED_33_BC01 for a supervised indication/test function.",
+      "This teaching exchange does not automatically trip or close the bus coupler. Any operational protection or interlocking use requires the approved cause-and-effect matrix. The subscriber verifies identity, types, quality and expiry and maps the signal to its documented internal input."
+    ],
+    "workflow": [
+      "Configure the assigned publisher stream",
+      "Resolve the coupler IED's external reference and internal binding",
+      "Test indication, invalid quality and stream timeout in isolation"
+    ],
+    "example": "Use APPID 0x1001, MAC 01-0C-CD-01-00-01 and VLAN 200 consistently. The receiving test indication is separate from the coupler command output.",
+    "check": "Never turn a training subscription into an operational trip path without the required protection design and acceptance evidence."
+  },
+  {
+    "title": "SCL/SCD Engineering Workflow",
+    "paragraphs": [
+      "The project SCD coordinates the fixed equipment names, IED instances, addresses, reports and approved GOOSE exchange. Vendor projects retain protection logic, hardware settings and any internal bindings not fully represented in the system file.",
+      "Engineering changes follow one revision owner and a reviewed exchange process. A corrected publisher DataSet may affect the subscriber, gateway and test sheets. Keep all affected exports synchronized rather than distributing a mixture of old and new files."
+    ],
+    "workflow": [
+      "Collect verified ICD/IID inputs",
+      "Build and validate the coordinated SCD",
+      "Export device configurations, deploy through supported tools and compare online behavior"
+    ],
+    "example": "The final 33-F01 and 33-BC01 configurations reference the same gcbTrip definition and ordered members. Gateway reports match the final dsStatus layout.",
+    "check": "Archive the as-built SCD with tool versions, device firmware and complete vendor projects so the tested system can be reproduced."
+  },
+  {
+    "title": "Gateway and SCADA Signal Mapping",
+    "paragraphs": [
+      "The signal matrix connects each project source to a station tag and any remote protocol destination. It records value type, unit, quality, source-time policy and control semantics, preventing silent meaning changes during conversion.",
+      "Use consistent bay prefixes throughout the HMI and gateway. Distinguish T1 HV/LV measurements and T2/11 kV incomer information where represented. Command references remain separate from position feedback and protocol acknowledgments."
+    ],
+    "workflow": [
+      "Build the source/tag/destination matrix",
+      "Configure transformations and acquisition",
+      "Perform point-to-point tests through every required destination"
+    ],
+    "example": "33_F01_CB_POS maps to IED_33_F01LD0/XCBR1.Pos. A project-allocated remote IOA such as 1001 is documented separately and does not derive from the logical-node name.",
+    "check": "Verify all abnormal double-point states and invalid quality; a two-color open/closed display alone is incomplete.",
+    "table": {
+      "headers": [
+        "Tag",
+        "Illustrative source",
+        "Purpose"
+      ],
+      "rows": [
+        [
+          "33_F01_CB_POS",
+          "IED_33_F01LD0/XCBR1.Pos [ST]",
+          "Independent double-point feedback"
+        ],
+        [
+          "33_F01_IA",
+          "IED_33_F01LD0/MMXU1.A.phsA.cVal.mag.f [MX]",
+          "Verify actual units and ratio"
+        ],
+        [
+          "33_F01_TRIP",
+          "IED_33_F01LD0/PTRC1.Tr.general [ST]",
+          "Supported trip indication, not breaker-open proof"
+        ],
+        [
+          "33_F01_CB_CMD",
+          "IED_33_F01LD0/CSWI1.Pos",
+          "Supported control service and model"
+        ],
+        [
+          "11_F01_CB_POS",
+          "IED_11_F01LD0/XCBR1.Pos [ST]",
+          "Separate 11 kV source identity"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "HMI Single-Line Diagram Development",
+    "paragraphs": [
+      "The project HMI follows the fixed electrical SLD and uses verified source tags for all operational symbols. Voltage levels, equipment names and bus connections stay consistent with the drawings and point schedule.",
+      "Show unavailable or invalid information distinctly and provide useful alarm context. The normal-open coupler baseline must not make the B2 branch appear energized merely because a communication link is healthy. Electrical-state inference requires the approved logic and measurements."
+    ],
+    "workflow": [
+      "Create the SLD from the fixed project topology",
+      "Bind status, measurements and controls",
+      "Test normal, abnormal and stale indications with the operator"
+    ],
+    "example": "The screen shows T1 between 132-B1 and 33-B1, then 33-BC01 toward 33-B2 and 33-F02/T2 toward 11-B1. The two 11 kV feeders retain their own tags.",
+    "check": "Do not infer safe isolation or voltage absence solely from color; site operating procedures govern those determinations."
+  },
+  {
+    "title": "Breaker Control and Interlocking",
+    "paragraphs": [
+      "Project controls use supported IEC 61850 control models with explicit authority, interlocks and feedback. Feeder and coupler requirements are derived separately from their electrical roles and actual equipment.",
+      "The example does not prescribe a universal switching sequence. 33-F01 closing and 33-BC01 energization have different condition sets, and missing/invalid remote states require defined responses. Protection trip paths retain the behavior specified by the protection design."
+    ],
+    "workflow": [
+      "Approve the per-device interlocking matrix",
+      "Map control and feedback references",
+      "Test permitted, rejected and uncertain-result cases under isolation"
+    ],
+    "example": "The 33-F01 HMI request uses its supported CSWI1.Pos control point and checks XCBR1.Pos. The coupler's control input is never driven directly by the training GOOSE trip indication.",
+    "check": "After timeout or missing feedback, reconcile actual state before another authorized operation; do not automatically retry closing."
+  },
+  {
+    "title": "Complete FAT/SAT Testing Procedure",
+    "paragraphs": [
+      "The project FAT/SAT plan covers documents, device configurations, I/O, measurements, network services, timing, SCADA and authorized controls. Each requirement has a test ID, known stimulus and observable expected result.",
+      "FAT proves the engineered combination using declared simulation and isolated equipment. SAT confirms installed wiring, fibre routes, power and final station interfaces. Changes after FAT are incorporated into the baseline and trigger relevant repeat tests."
+    ],
+    "workflow": [
+      "Execute the bay point and service matrix",
+      "Test PRP paths, timing loss and acquisition recovery",
+      "Resolve punch points and verify normal-state restoration"
+    ],
+    "example": "33-F01 receives a full stimulus-to-HMI test, while 33-F02/T2/11 kV identities and scaling are verified independently. Coupler tests confirm the approved rejection and permitted cases.",
+    "check": "Do not prefill pass results in the example checklist; actual witnessed measurements and observations determine acceptance.",
+    "table": {
+      "headers": [
+        "Stage",
+        "Project-specific check",
+        "Required evidence"
+      ],
+      "rows": [
+        [
+          "Documents",
+          "Fixed equipment, addresses and SCD agree",
+          "Reviewed revision register"
+        ],
+        [
+          "Bay tests",
+          "Every F01/F02 point belongs to its actual voltage level",
+          "Known stimulus and source/destination record"
+        ],
+        [
+          "PRP",
+          "A failure and B failure separately",
+          "Application continuity + degraded-path alarms"
+        ],
+        [
+          "GOOSE example",
+          "F01 indication reaches coupler test input only",
+          "No coupler command/output operation"
+        ],
+        [
+          "Control",
+          "Approved per-bay positive/negative cases",
+          "Result and independent feedback"
+        ],
+        [
+          "Restoration",
+          "No simulations, overrides or temporary links remain",
+          "Witnessed release and as-built backup"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Project Commissioning and Troubleshooting",
+    "paragraphs": [
+      "Commissioning closes the gap between tested design and maintainable operation. The final package includes as-built drawings, SCD, vendor projects, gateway database, switch backups, timing configuration and accepted test records.",
+      "Troubleshooting follows the same source-to-destination boundaries used during testing. Record unresolved limitations and any operating restrictions explicitly. Remove temporary simulations, test streams and overrides, then verify normal modes before the authorized handover."
+    ],
+    "workflow": [
+      "Reconcile every punch point and revision",
+      "Verify restored physical and logical boundaries",
+      "Deliver backups, evidence and operating/maintenance information"
+    ],
+    "example": "The final project record keeps the fixed 132-L01/T1/33-F01/33-F02/T2/11-F01/11-F02 topology and 33-BC01 baseline consistent across all artifacts. A replacement device is checked against that record before connection.",
+    "check": "This course supplies an illustrative engineering workflow; construction settings and energization authorization require the responsible project's approved studies, procedures and acceptance."
+  }
+]

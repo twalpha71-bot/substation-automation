@@ -1,0 +1,351 @@
+[
+  {
+    "title": "Introduction to GOOSE",
+    "paragraphs": [
+      "Generic Object Oriented Substation Event (GOOSE) communication distributes an ordered set of application data from a publisher to configured subscribers. Conventional station-LAN GOOSE uses Ethernet multicast without a TCP connection or per-subscriber acknowledgment.",
+      "The publisher repeats state information so a subscriber can receive updates despite occasional frame loss. Correct reception still depends on addressing, configuration agreement, network delivery and application supervision. GOOSE does not automatically make an arbitrary protection scheme dependable or secure."
+    ],
+    "workflow": [
+      "Identify the required inter-IED signal",
+      "Define publisher and all consumers",
+      "Specify supervision and the consequence of missing or invalid data"
+    ],
+    "example": "A 33 kV feeder IED publishes a protection operation to a designated receiving IED. The receiver maps the relevant member into its approved application logic.",
+    "check": "Distinguish GOOSE service availability from complete protection performance, which includes sensing, logic, output and breaker operation."
+  },
+  {
+    "title": "Why GOOSE Is Used in Substations",
+    "paragraphs": [
+      "GOOSE can replace selected inter-panel signal wiring with engineered data exchange. It supports protection coordination, interlocking, blocking and status distribution where the required timing, dependability and supervision have been demonstrated.",
+      "Removing a copper connection transfers part of the engineering responsibility into DataSet design, network paths and subscriber logic. It does not remove the need for signal ownership, cause-and-effect documentation or failure analysis. Communication health becomes an application input that must have a defined response."
+    ],
+    "workflow": [
+      "Compare the existing hardwired function with its networked equivalent",
+      "Define timing and failure requirements",
+      "Prove the complete signal path under normal and degraded conditions"
+    ],
+    "example": "An upstream 33 kV protection function receives a downstream blocking signal. The project specifies how loss of that signal affects coordination rather than assuming all lost signals should become false.",
+    "check": "Choose a communication-failure response from the protection study; a universal fail-open or fail-closed rule is inappropriate."
+  },
+  {
+    "title": "Publisher and Subscriber Architecture",
+    "paragraphs": [
+      "A publisher sends one multicast stream that multiple subscribers can receive. Subscription is configured by engineering tools and application mapping; the publisher does not establish a separate TCP session with every recipient.",
+      "Subscriber matching involves the engineered identity and structure of the stream. Destination MAC, APPID, control-block reference, configuration revision and ordered data types have different roles. Matching only one field can admit the wrong stream or reject a valid update."
+    ],
+    "workflow": [
+      "List each publisher control block",
+      "Map every DataSet member to a subscriber input",
+      "Verify reception and application use at each destination"
+    ],
+    "example": "33-F01 may publish one stream to a bay controller and a station test device. Each consumer interprets only the members assigned to its function and supervises the stream independently.",
+    "check": "A packet visible on a mirrored port does not prove that the subscriber application has accepted it."
+  },
+  {
+    "title": "GOOSE Communication over Ethernet",
+    "paragraphs": [
+      "Conventional GOOSE frames use EtherType 0x88B8 and are forwarded within the engineered Layer-2 network. They do not use an IP destination, TCP port or ordinary IP multicast subscription mechanism.",
+      "An optional IEEE 802.1Q tag carries VLAN identity and priority. Ethernet switches must deliver the multicast frame along intended paths while avoiding excessive flooding. Routable GOOSE is a separate architecture and should not be inferred from a standard station-LAN example."
+    ],
+    "workflow": [
+      "Confirm the publisher's Ethernet interface",
+      "Trace VLAN and multicast forwarding through each switch",
+      "Capture at the receiving port and check stream identity"
+    ],
+    "example": "Two IEDs with reachable IP addresses can still fail to exchange GOOSE if their Layer-2 VLAN membership differs. A successful ping is therefore not an acceptance test for subscription.",
+    "check": "Do not troubleshoot a conventional GOOSE failure by opening TCP port 102; that port belongs to the MMS transport mapping."
+  },
+  {
+    "title": "GOOSE DataSet Configuration",
+    "paragraphs": [
+      "A GOOSE DataSet defines the ordered application values in a stream. Subscribers rely on the member order, encoded types and intended meaning. Reordering members can be just as disruptive as removing one.",
+      "Include quality or other supervision information according to the engineered application and supported model. Do not assume each scalar value implicitly carries a separate quality and timestamp field. Changing the DataSet requires coordinated configuration and revision handling across publisher and consumers."
+    ],
+    "workflow": [
+      "Select exact model references and functional constraints",
+      "Record member order and types",
+      "Update publisher and subscriber configurations as one controlled change"
+    ],
+    "example": "An illustrative trip DataSet selects PTRC1.Tr.general and PTRC1.Tr.q as separate supported members. The receiver maps the Boolean trip and quality to different application inputs.",
+    "check": "Verify the actual IED exposes those attributes; do not manufacture missing logical nodes or rely on an undocumented member position."
+  },
+  {
+    "title": "GOOSE Control Block Configuration",
+    "paragraphs": [
+      "The GOOSE Control Block associates the publisher's DataSet with a stream identity and configuration revision. Network addressing is represented in the associated SCL communication configuration, while application logic determines the values being published.",
+      "Parameters such as GoCBRef, DatSet, GoID and ConfRev are not interchangeable. A configuration revision identifies a relevant configuration change; it is not the current event number. Enabling publication does not prove that any subscriber has accepted the configuration."
+    ],
+    "workflow": [
+      "Bind the control block to the approved DataSet",
+      "Assign stream identity and network parameters",
+      "Export SCL and verify the live frame against that configuration"
+    ],
+    "example": "For 33-F01, an illustrative gcbTrip references dsTrip. The project records its APPID, multicast address and VLAN separately so addressing changes cannot silently alter the signal definition.",
+    "check": "Check ConfRev and ordered types at every subscriber after a DataSet edit, then repeat functional tests."
+  },
+  {
+    "title": "APPID, MAC Address and VLAN Parameters",
+    "paragraphs": [
+      "APPID identifies an application stream within the configured Ethernet service context; the multicast destination MAC controls Ethernet delivery. VLAN ID identifies the broadcast domain and priority code point influences switch queue treatment where configured.",
+      "These fields must be coordinated in a station allocation register. Different tools may display APPID and VLAN values in decimal or hexadecimal. SCL encodings and engineering interfaces must be interpreted explicitly rather than copying a number without its base."
+    ],
+    "workflow": [
+      "Reserve unique project stream allocations",
+      "Record numeric value and display format",
+      "Compare the exported SCL with live frame fields"
+    ],
+    "example": "Use illustrative GOOSE APPID 0x1001, destination 01-0C-CD-01-00-01 and VLAN decimal 200 for one approved stream. In an SCL VLAN-ID field, hexadecimal 0C8 represents decimal 200.",
+    "check": "Priority 4 is an example, not a universal performance guarantee; verify the switch policy and device support.",
+    "table": {
+      "headers": [
+        "Field",
+        "Example",
+        "Meaning"
+      ],
+      "rows": [
+        [
+          "APPID",
+          "0x1001",
+          "Project stream allocation; not a TCP port"
+        ],
+        [
+          "Destination MAC",
+          "01-0C-CD-01-00-01",
+          "GOOSE multicast destination"
+        ],
+        [
+          "VLAN ID",
+          "200 decimal / 0C8 hex",
+          "Same numerical VLAN in different representations"
+        ],
+        [
+          "PCP",
+          "4 (illustrative)",
+          "Priority must match switch policy"
+        ],
+        [
+          "ConfRev",
+          "1 (illustrative)",
+          "Configuration revision, not state counter"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "GOOSE State Number and Sequence Number",
+    "paragraphs": [
+      "stNum identifies a new GOOSE state, while sqNum distinguishes transmissions associated with that state. A state change advances stNum and starts a new transmission sequence; retransmissions of the same state advance sqNum.",
+      "Do not treat these counters as permanent event IDs across device restarts, wraparound or reconfiguration. Evaluate the event timestamp, configuration revision, publisher identity and subscriber supervision together. A repeated state with increasing sqNum is normal behavior, not automatically an event storm."
+    ],
+    "workflow": [
+      "Capture a stable interval",
+      "Change one DataSet value",
+      "Compare state, sequence, timestamp and payload before and after the change"
+    ],
+    "example": "An illustrative capture shows stNum 17/sqNum 6 before a trip, then stNum 18/sqNum 0 followed by 18/1 and 18/2. Exact observed startup behavior must match the implementation.",
+    "check": "Differentiate an application state change from packet duplication introduced by PRP or HSR capture placement."
+  },
+  {
+    "title": "GOOSE Retransmission Mechanism",
+    "paragraphs": [
+      "After a state change, GOOSE typically repeats quickly and then increases the interval toward a steady-state heartbeat. This repetition supports delivery without acknowledgments, but the exact schedule is implementation- and configuration-dependent.",
+      "timeAllowedtoLive tells a receiver how long the received state remains valid for communication supervision. It is not a guaranteed end-to-end trip time or a permanent DataSet retention period. A subscriber must detect expiry and apply its engineered loss-of-communication behavior."
+    ],
+    "workflow": [
+      "Measure the event burst and steady heartbeat",
+      "Remove the stream under test control",
+      "Verify expiry indication and application response"
+    ],
+    "example": "For an isolated 33-F01 test, an illustrative sequence uses increasing gaps of 1, 2, 4 and 8 ms before longer intervals. These values explain the mechanism and are not universal relay settings.",
+    "check": "Prove the subscriber response to missing frames; counting retransmissions at the publisher alone cannot establish scheme dependability."
+  },
+  {
+    "title": "GOOSE Subscription and External References",
+    "paragraphs": [
+      "SCL external references describe how inputs depend on data produced elsewhere. For GOOSE, engineering must identify the publisher, source logical node and data attribute, then bind that input to a receiving application function.",
+      "The standard exchange description and a vendor's internal logic binding are separate parts of the workflow. A valid ExtRef may still be unbound inside the relay application. Conversely, a local input name may exist while pointing at an obsolete publisher revision."
+    ],
+    "workflow": [
+      "Import the approved publisher definition",
+      "Resolve external references and stream identity",
+      "Bind each received member to the intended internal signal"
+    ],
+    "example": "The receiving bay IED maps the 33-F01 trip member to its designated test logic input. Its communication diagnostic and the internal Boolean transition are both checked.",
+    "check": "Confirm the application binding after every import; successful file import is not evidence that subscriber logic changed correctly."
+  },
+  {
+    "title": "GOOSE-Based Breaker Trip",
+    "paragraphs": [
+      "GOOSE-based tripping uses a received signal as part of an engineered protection path. The receiving logic must evaluate the correct member, data quality, operating mode and supervision state before driving an authorized output.",
+      "Total clearing time includes protection detection, publisher processing, network transfer, subscriber processing, output operation and breaker mechanics. A fast packet timestamp difference does not measure that complete chain. Independent backup protection and failure behavior follow the protection design."
+    ],
+    "workflow": [
+      "Isolate outputs under the approved test procedure",
+      "Inject the intended protection condition",
+      "Measure receiving logic, trip output and breaker feedback separately"
+    ],
+    "example": "In a test of the 33-F01 trip path, record publisher operation and receiver output with synchronized test equipment. Confirm the intended breaker only, then test stream loss and invalid quality.",
+    "check": "Do not bypass physical isolation merely because a message carries a test or simulation indication; receiving behavior is implementation-dependent."
+  },
+  {
+    "title": "GOOSE-Based Interlocking",
+    "paragraphs": [
+      "GOOSE interlocking shares equipment states and permissive information between controllers. The receiving controller combines those inputs with local conditions according to the approved switching philosophy and interlocking matrix.",
+      "An absent, stale or invalid input must not silently become a valid permissive. Interlocks also need meaningful operator diagnostics explaining which condition prevents an action. GOOSE communication is only one part of the safety-related switching function; local hardware constraints may remain necessary."
+    ],
+    "workflow": [
+      "List every remote condition and its owner",
+      "Define invalid-data and timeout behavior",
+      "Test permitted and prohibited combinations against the matrix"
+    ],
+    "example": "Closing a 33 kV bay may depend on a remote earth-switch indication. The example permits closing only when the required verified condition is valid; the actual scheme determines all additional checks.",
+    "check": "Never present one generic interlocking Boolean expression as suitable for every substation or bus arrangement."
+  },
+  {
+    "title": "GOOSE Blocking and Protection Schemes",
+    "paragraphs": [
+      "Blocking schemes use a received condition to inhibit or coordinate another protection element. Permissive schemes require a positive condition before action. The same communication failure can affect these schemes very differently.",
+      "Define timing margins and failure responses from the protection coordination study. A lost blocking signal may reduce selectivity; a lost permissive signal may delay a required trip. Supervision, backup elements and alarms must be evaluated together, including device mode transitions and startup behavior."
+    ],
+    "workflow": [
+      "Document the protection cause-and-effect sequence",
+      "Allocate blocking or permissive signals explicitly",
+      "Test delayed, missing, invalid and unexpected inputs"
+    ],
+    "example": "A downstream feeder fault publishes a blocking condition to an upstream element in the illustrative 33 kV scheme. The approved backup timing remains effective if the communication path fails.",
+    "check": "Prove the scheme with actual protection settings and timing requirements; a Boolean logic demonstration alone is insufficient."
+  },
+  {
+    "title": "GOOSE Communication Across Ethernet Switches",
+    "paragraphs": [
+      "Switches forward GOOSE according to Ethernet membership, VLAN policy and multicast handling. Port tagging and ingress classification must be consistent from the publisher through every trunk to the subscriber.",
+      "Ordinary IGMP snooping controls IP multicast membership and does not automatically learn conventional Layer-2 GOOSE subscriptions. Use supported static multicast forwarding or another documented industrial switching mechanism. Excessive filtering loses required streams, while indiscriminate flooding wastes bandwidth."
+    ],
+    "workflow": [
+      "Trace the stream port by port",
+      "Inspect VLAN membership and multicast tables",
+      "Measure discards and delivery under representative traffic"
+    ],
+    "example": "33-F01's VLAN 200 stream traverses an uplink that allows VLAN 100 only. The subscriber fails even though MMS remains healthy on station VLAN 100.",
+    "check": "After fixing one trunk, check the return maintenance path and all intended subscribers; do not assume the whole topology is now correct."
+  },
+  {
+    "title": "GOOSE Configuration Using SCL Files",
+    "paragraphs": [
+      "SCL engineering connects the logical GSEControl and DataSet to Ethernet parameters in the Communication section. The GSE entry identifies the logical device and control-block name, avoiding a separate undocumented address spreadsheet as the only source of truth.",
+      "Publisher and subscriber configurations must derive from the same approved revision. XML schema validity catches structural errors, but semantic validation is still needed for references, member order, types and tool-specific application bindings."
+    ],
+    "workflow": [
+      "Validate the publisher DataSet and GSEControl",
+      "Assign Communication/GSE addressing",
+      "Resolve subscriber inputs and export device configurations"
+    ],
+    "example": "For the illustrative LD0/gcbTrip, verify the GSE element's ldInst and cbName resolve to the actual publisher control block before comparing APPID and MAC in a packet capture.",
+    "check": "Treat an XML excerpt as a teaching fragment; a deployable file needs complete device types, services and vendor-supported context.",
+    "code": "<!-- SCL fragments: inside a supported LN0 and matching Communication context.\n     Full model/types and device capabilities are required for deployment. -->\n<DataSet name=\"dsTrip\">\n  <FCDA ldInst=\"LD0\" lnClass=\"PTRC\" lnInst=\"1\" doName=\"Tr\" daName=\"general\" fc=\"ST\"/>\n  <FCDA ldInst=\"LD0\" lnClass=\"PTRC\" lnInst=\"1\" doName=\"Tr\" daName=\"q\" fc=\"ST\"/>\n</DataSet>\n<GSEControl name=\"gcbTrip\" type=\"GOOSE\" appID=\"Trip33F01\" datSet=\"dsTrip\" confRev=\"1\"/>"
+  },
+  {
+    "title": "Multi-Vendor GOOSE Engineering",
+    "paragraphs": [
+      "Multi-vendor GOOSE integration depends on compatible data types, edition features, supported services and engineering exchange behavior. Using the same protocol name does not guarantee that every optional feature or application binding is interoperable.",
+      "Collect capability statements and test the exact firmware and tools that will be delivered. Check quality handling, test/simulation behavior, configuration revision response and lost-stream supervision. Vendor tool labels may differ even when the underlying standardized data is equivalent."
+    ],
+    "workflow": [
+      "Exchange controlled capability files",
+      "Map publisher members to receiving types",
+      "Run a joint functional and negative-test matrix"
+    ],
+    "example": "A Siemens-style publisher and ABB-style subscriber are generic equipment roles here. The project must establish their actual supported member types and binding process from model-specific documentation.",
+    "check": "Avoid converting an unsupported type by guessing its bit layout; use a documented compatible signal or revise the engineering design."
+  },
+  {
+    "title": "Practical Example — 33 kV Feeder Trip",
+    "paragraphs": [
+      "The practical trip example follows one source signal from 33-F01 through a GOOSE stream to a designated receiving IED. It separates the protection operation, multicast delivery, subscriber logic and output confirmation so failures can be located.",
+      "Use a controlled simulator or isolated relay test arrangement. The subscriber must reject the wrong stream and respond correctly to a valid stream, invalid quality and timeout. Capture evidence at both ends when timing or loss is under investigation."
+    ],
+    "workflow": [
+      "Publish the assigned dsTrip/gcbTrip stream",
+      "Inject one known protection operation",
+      "Confirm receiver logic and output, then restore the normal test state"
+    ],
+    "example": "Use the allocated APPID 0x1001 and VLAN 200 consistently throughout the exercise. Record the expected DataSet order before toggling the trip member.",
+    "check": "Acceptance requires the intended output behavior and failure response; seeing stNum change in Wireshark is only one observation."
+  },
+  {
+    "title": "GOOSE Testing Using IED Tools",
+    "paragraphs": [
+      "IED tools and test sets can monitor or simulate GOOSE streams, but their capabilities vary. A passive monitor reads traffic; an active publisher injects messages and can influence connected subscribers if the test boundary is wrong.",
+      "Define the test network and output isolation before enabling simulation. Confirm how the receiver handles test and simulation indications for its edition and operating mode. Test positive reception and intentional mismatches without assuming one vendor's test mode isolates another vendor's outputs."
+    ],
+    "workflow": [
+      "Record baseline traffic and device modes",
+      "Apply one controlled simulated signal",
+      "Verify subscriber diagnostics, logic and isolated output response"
+    ],
+    "example": "For 33-F01 FAT, use a separate test switch and a receiving relay with outputs isolated. Test correct and incorrect ConfRev values and record the diagnostic result.",
+    "check": "Remove simulated streams and restore modes before releasing the test boundary; verify that normal publishers regain authority."
+  },
+  {
+    "title": "GOOSE Packet Analysis in Wireshark",
+    "paragraphs": [
+      "Wireshark can decode GOOSE identity, counters, lifetime and payload fields. Start with the display filter goose, then narrow to an approved APPID or destination MAC. Preserve the full capture so filtering does not discard evidence of competing streams.",
+      "Illustrative field values must agree: a stable retransmission retains state, while a new state changes the relevant payload and stNum. VLAN tags can be stripped by capture hardware, so absence in the capture is not conclusive proof of untagged transmission."
+    ],
+    "workflow": [
+      "Filter goose.appid == 0x1001",
+      "Inspect gocbRef, datSet, confRev and ordered data",
+      "Compare stNum/sqNum and timeAllowedtoLive across packets"
+    ],
+    "example": "For 33-F01, compare one pre-trip frame and the first post-trip frame. Record both the data transition and its receiving-IED interpretation rather than copying a screenshot alone.",
+    "check": "Use the field names supported by the installed Wireshark version; decoder labels can change between releases.",
+    "table": {
+      "headers": [
+        "Observation",
+        "stNum",
+        "sqNum",
+        "Trip member"
+      ],
+      "rows": [
+        [
+          "Before event",
+          "17",
+          "6",
+          "false"
+        ],
+        [
+          "New state",
+          "18",
+          "0",
+          "true"
+        ],
+        [
+          "Repeat same state",
+          "18",
+          "1",
+          "true"
+        ],
+        [
+          "Later repeat",
+          "18",
+          "2",
+          "true"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "GOOSE Troubleshooting",
+    "paragraphs": [
+      "GOOSE troubleshooting separates publication, network delivery, subscriber acceptance and application execution. A fault at one stage can produce the same high-level symptom as a fault at another, such as a missing interlock or trip.",
+      "Check the last known good configuration and current live identity before editing anything. Duplicate publishers, wrong VLANs, mismatched ConfRev, reordered members and unbound inputs are distinct causes requiring different corrective actions."
+    ],
+    "workflow": [
+      "Confirm live publisher frames",
+      "Capture at the receiving port and inspect acceptance diagnostics",
+      "Trace the accepted member into logic and output"
+    ],
+    "example": "If the receiver sees the stream but declares a configuration mismatch, repair the coordinated SCL configuration. If it accepts the member but no output changes, inspect application logic and mode conditions.",
+    "check": "Repeat normal, timeout and invalid-data tests after repair and archive the final publisher/subscriber revisions together."
+  }
+]

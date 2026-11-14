@@ -1,0 +1,389 @@
+[
+  {
+    "title": "Introduction to IEC 61850 Testing",
+    "paragraphs": [
+      "IEC 61850 testing verifies information models, communication services and the applications that use them. Device conformance testing, interoperability testing and project acceptance testing answer different questions.",
+      "IEC 61850-10 addresses conformance techniques; FAT and SAT demonstrate the delivered system against project requirements. A certificate does not prove the installed point database, wiring or protection logic is correct. Build traceability from each requirement to an observable test result."
+    ],
+    "workflow": [
+      "Classify the required test scope",
+      "Define stimulus, expected result and evidence",
+      "Record configuration versions and repeatability conditions"
+    ],
+    "example": "The 33-F01 test plan includes reporting, GOOSE and control integration in addition to the relay's independent protection tests.",
+    "check": "Keep protocol compliance evidence separate from system acceptance and physical protection-performance evidence."
+  },
+  {
+    "title": "Factory Acceptance Testing (FAT)",
+    "paragraphs": [
+      "Factory Acceptance Testing verifies the engineered system before shipment or site installation using a controlled representative setup. It should exercise actual configurations and relevant devices, not only static screenshots or empty HMI pages.",
+      "FAT reduces site surprises by exposing model, mapping and compatibility errors early. Any simulated equipment must be identified so untested physical interfaces remain visible in the report. Negative and recovery cases should be planned alongside normal functions."
+    ],
+    "workflow": [
+      "Freeze the FAT configuration baseline",
+      "Connect representative devices and simulators",
+      "Execute witnessed cases and record deviations for resolution"
+    ],
+    "example": "33-F01's isolated test setup feeds known states into the IED and observes gateway, HMI and subscriber behavior. A simulated breaker is explicitly labeled in the evidence.",
+    "check": "Do not claim factory simulation proves the final site wiring or mechanical breaker operation; those require the appropriate later tests."
+  },
+  {
+    "title": "Site Acceptance Testing (SAT)",
+    "paragraphs": [
+      "Site Acceptance Testing verifies that installation, configuration and interfaces match the accepted design. It adds real cable routes, terminal connections, network equipment, time distribution and operational boundaries.",
+      "Site changes made after FAT must be reconciled into the configuration baseline. Testing follows approved isolation and access procedures so injected signals cannot unintentionally operate live equipment. Record what was tested physically and what remained simulated."
+    ],
+    "workflow": [
+      "Verify as-built drawings and installed identities",
+      "Establish approved test boundaries",
+      "Execute point, communication, control and failure tests and update records"
+    ],
+    "example": "At 33-F01, SAT confirms actual auxiliary contacts, trip/control interfaces, fibre ports and HMI identity. Any corrected terminal or mapping triggers the affected repeat tests.",
+    "check": "Release the bay only after simulations, temporary links and test modes are removed and independently checked."
+  },
+  {
+    "title": "FAT vs SAT Comparison",
+    "paragraphs": [
+      "FAT and SAT share many functional checks but differ in environment and evidence. FAT emphasizes engineered compatibility and application behavior; SAT confirms the installed system and site-specific interfaces.",
+      "Avoid repeating every factory step mechanically while missing installation risks. Use FAT results to focus SAT, but recheck functions affected by transport, installation, configuration changes or different network paths. Neither stage replaces the protection study or equipment maintenance tests."
+    ],
+    "workflow": [
+      "Map each requirement to FAT, SAT or both",
+      "Identify assumptions that change at site",
+      "Define mandatory repeat tests after modifications"
+    ],
+    "example": "A GOOSE publisher/subscriber pair passes FAT on a test switch. SAT still verifies the installed VLAN path, fibre connection, time conditions and final application binding.",
+    "check": "Document exclusions and dependencies explicitly; 'tested at factory' is not sufficient evidence for an interface changed during installation.",
+    "table": {
+      "headers": [
+        "Test scope",
+        "FAT emphasis",
+        "SAT emphasis"
+      ],
+      "rows": [
+        [
+          "Model/services",
+          "Actual representative firmware and configurations",
+          "Confirm deployed revisions"
+        ],
+        [
+          "Physical interfaces",
+          "Declared simulation or isolated hardware",
+          "Installed terminals and equipment identity"
+        ],
+        [
+          "Network",
+          "Representative topology/load",
+          "Actual ports, optics, routes and power"
+        ],
+        [
+          "Control",
+          "Isolated positive/negative cases",
+          "Approved site boundary and final feedback"
+        ],
+        [
+          "Evidence",
+          "Witnessed baseline and punch points",
+          "As-built reconciliation and release"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Engineering Document Verification",
+    "paragraphs": [
+      "Document verification confirms that drawings, signal lists, settings, SCD files and network schedules describe the same system. Inconsistent documents can make a technically correct test verify the wrong intended function.",
+      "Check unique equipment names, voltage levels, ratios, addresses, DataSet membership and control references. Record revision numbers and resolve discrepancies before energizing or testing outputs. The as-built record must incorporate approved corrections."
+    ],
+    "workflow": [
+      "Collect the approved document set",
+      "Cross-check identities and dependencies",
+      "Resolve discrepancies and freeze the test baseline"
+    ],
+    "example": "33-F01 appears consistently in the SLD, terminal schedule, IED project, gateway tag list and test sheet. A copied 33-F02 address is corrected before communication tests begin.",
+    "check": "Do not use an unapproved spreadsheet as the sole authority when it conflicts with the controlled engineering drawings."
+  },
+  {
+    "title": "IED Configuration Verification",
+    "paragraphs": [
+      "IED configuration verification compares the deployed device with the approved settings and application project. It includes hardware, firmware, protection parameters, logic, communication and time configuration relevant to the test scope.",
+      "A file stored on the engineering laptop may differ from what is running in the relay. Use supported comparison or readback functions and record checksums where meaningful. Protect original backups and document any tool-driven conversion."
+    ],
+    "workflow": [
+      "Identify the installed IED and firmware",
+      "Compare deployed configuration with the baseline",
+      "Record differences and repeat affected tests after correction"
+    ],
+    "example": "Before testing 33-F01 reports, verify its online DataSet and RCB configuration matches the approved export. A successful previous download is not sufficient evidence after later site edits.",
+    "check": "Do not overwrite unknown site changes blindly; establish their origin and approval before restoring a baseline."
+  },
+  {
+    "title": "Network Communication Testing",
+    "paragraphs": [
+      "Network communication testing verifies actual service paths, not only link lights and ping. Include VLAN membership, multicast forwarding, IP routes, transport connectivity and relevant application exchanges.",
+      "Test under representative traffic and degraded paths. Mirror-port packet loss can be a measurement artifact, so combine captures with switch and endpoint diagnostics. Acceptance limits come from the project requirements and chosen measurement method."
+    ],
+    "workflow": [
+      "Verify port and address schedules",
+      "Exercise MMS, GOOSE and timing paths",
+      "Apply planned failures and record service continuity/recovery"
+    ],
+    "example": "For 33-F01, confirm MMS on VLAN 100 and the assigned GOOSE stream on VLAN 200 at the subscriber port. Repeat on each required redundant path.",
+    "check": "Do not infer GOOSE or SV delivery from a successful IP ping; they require their own Layer-2 verification."
+  },
+  {
+    "title": "MMS Read and Write Testing",
+    "paragraphs": [
+      "MMS read tests confirm correct references, types and returned application values. Write tests should target only approved writable attributes in an isolated configuration and verify both permitted and prohibited access.",
+      "Status values are not generic writable commands. A denied write can be the expected result of access policy, ownership or current state. Record the exact service response and restore any changed test parameter to its approved value."
+    ],
+    "workflow": [
+      "Read known value/quality/time structures",
+      "Perform an approved writable-parameter test",
+      "Verify rejection of a prohibited operation and restore the baseline"
+    ],
+    "example": "During 33-F01 FAT, read XCBR1.Pos and test a supported report parameter using the documented sequence. Breaker control uses its own control-service test, never a write to stVal.",
+    "check": "Keep a before/after record and confirm that changing a shared resource did not interrupt another client's service."
+  },
+  {
+    "title": "DataSet and RCB Testing",
+    "paragraphs": [
+      "DataSet/RCB tests verify ordered membership, trigger behavior, inclusion, timestamps and client allocation. Buffered reporting additionally requires controlled interruption, recovery-position handling and overflow behavior where testable.",
+      "Use distinct stimuli for data change and quality change. GI and integrity reports are current snapshots and should not be credited as historical recovery. Report receipt must be checked through the client database and event display."
+    ],
+    "workflow": [
+      "Compare DataSet order and ConfRev",
+      "Exercise dchg, qchg, GI and integrity",
+      "Disconnect/reconnect and assess retained events and gaps"
+    ],
+    "example": "33-F01's assigned BRCB is tested with several known transitions during an outage. The report records which entries were recovered and how any discontinuity was displayed.",
+    "check": "Do not promise unlimited replay or persistence through reboot unless supported and specifically verified for the device."
+  },
+  {
+    "title": "GOOSE Publisher Testing",
+    "paragraphs": [
+      "Publisher testing proves that the intended application signal appears in the correct GOOSE stream. Check identity, member order, data types, quality, counters and retransmission behavior against the approved configuration.",
+      "A packet with the right APPID may still carry the wrong application member. Inject one known source transition and compare the local model with the payload. Keep active simulation inside the approved test boundary."
+    ],
+    "workflow": [
+      "Verify the source logic state",
+      "Capture the assigned stream during a transition",
+      "Compare payload, stNum, sqNum and configuration identity"
+    ],
+    "example": "33-F01 publishes gcbTrip with APPID 0x1001. The trip member changes only for the intended test condition, and unrelated members retain their expected values.",
+    "check": "Publisher success does not prove subscriber action; record it as one stage of the complete functional test."
+  },
+  {
+    "title": "GOOSE Subscriber Testing",
+    "paragraphs": [
+      "Subscriber testing verifies stream acceptance, member binding, quality supervision and application response. Both correct traffic and deliberate mismatches are needed to reveal unsafe assumptions.",
+      "Test missing stream, changed configuration revision, wrong identity and invalid data through supported isolated methods. The expected output response comes from the approved scheme. Test/simulation mode behavior must be checked for each device rather than assumed universal."
+    ],
+    "workflow": [
+      "Send the approved stream and observe internal input",
+      "Introduce one defined mismatch or loss",
+      "Confirm diagnostics and the required application response"
+    ],
+    "example": "The receiving IED accepts 33-F01's correct trip member and drives only the isolated intended output. On stream expiry it follows the documented supervision policy and raises the required indication.",
+    "check": "Verify the internal logic input, not only a receive counter or green subscription icon."
+  },
+  {
+    "title": "Sampled Values Testing",
+    "paragraphs": [
+      "Sampled Values tests verify measurement identity, profile, channel order, scaling, synchronization and receiver behavior. Continuous packet reception alone does not establish accurate protection quantities.",
+      "Use known injected waveforms and suitable calibrated equipment. Check phase-selective values and angle relationships, then exercise stream or timing degradation. Distinguish actual network loss from capture limitations under high-rate traffic."
+    ],
+    "workflow": [
+      "Confirm compatible profile and stream identity",
+      "Inject each channel and compare receiver quantities",
+      "Test invalid samples, missing stream and time degradation"
+    ],
+    "example": "MU_132_L01 supplies the line IED in the isolated process-bus test. A phase-A-only stimulus must appear on the correct protection input with the expected ratio and polarity.",
+    "check": "Never create a test failure by opening an energized CT secondary; use the approved isolation and test arrangement."
+  },
+  {
+    "title": "Time Synchronization Testing",
+    "paragraphs": [
+      "Time testing verifies source selection, endpoint synchronization, accuracy and quality indication. The required method depends on whether the application is SOE correlation or precise sample alignment.",
+      "Measure against an appropriate reference and state uncertainty. Test reference loss, holdover and restoration, including grandmaster transitions for the selected PTP design. A clock display with many decimal places is not evidence of accuracy."
+    ],
+    "workflow": [
+      "Record source and endpoint status",
+      "Measure normal offset/alignment",
+      "Interrupt the reference and observe quality, alarms and recovery"
+    ],
+    "example": "33-F01 event timestamps are checked through the HMI, while MU_132_L01 timing is assessed at the measurement application boundary. The two results use their respective acceptance limits.",
+    "check": "Retain measurement conditions and equipment calibration information with the report so another engineer can interpret the claimed performance."
+  },
+  {
+    "title": "SCADA/HMI Signal Testing",
+    "paragraphs": [
+      "SCADA point testing confirms that a known source stimulus reaches the correct operator tag with correct value, state, unit, quality and time. It should include every required abnormal state as well as normal indication.",
+      "Template-based databases can contain duplicated sources or incorrect scaling. Test each physical identity, not merely one representative graphic. For remote points, extend the test through the gateway protocol conversion to the control-centre display."
+    ],
+    "workflow": [
+      "Apply a known source value/state",
+      "Compare IED, driver, database and HMI",
+      "Verify invalid quality, stale state and source timestamp handling"
+    ],
+    "example": "33-F01 open, closed, intermediate and bad-state indications are checked separately. Current is tested at multiple values to expose gain or offset errors.",
+    "check": "Record both source and destination observations; an HMI screenshot without a known stimulus cannot prove mapping correctness."
+  },
+  {
+    "title": "Breaker Control and Interlocking Testing",
+    "paragraphs": [
+      "Control testing verifies authorized requests, the supported control model, interlocks, physical output and independent feedback. It must also demonstrate that prohibited operations remain blocked.",
+      "Use an isolated breaker simulator or approved site test boundary. Include local mode, invalid permissives, selection expiry and missing feedback. Protection trip behavior is assessed separately according to the scheme, avoiding accidental application of close interlocks to trip logic."
+    ],
+    "workflow": [
+      "Confirm isolation and equipment identity",
+      "Execute permitted and rejected command cases",
+      "Verify output, feedback, diagnostics and final restoration"
+    ],
+    "example": "For 33-F01, the witness observes the selected control object and intended output while an adjacent feeder remains unchanged. A timeout produces uncertainty handling rather than an automatic retry.",
+    "check": "Remove test injections and verify normal authority and feedback before returning the bay to service."
+  },
+  {
+    "title": "Alarm and SOE Testing",
+    "paragraphs": [
+      "Alarm and SOE tests verify condition priority, source time, acknowledgment, return-to-normal and retention. They also check that repeated transport messages do not create false repeated physical events.",
+      "Test event bursts and buffered recovery, not only isolated slow transitions. Clock uncertainty and communication gaps must remain visible. Acknowledging an alarm should not clear its active condition or erase the event evidence."
+    ],
+    "workflow": [
+      "Inject a known ordered sequence",
+      "Verify event identity/time and alarm lifecycle",
+      "Repeat during communication loss and recovery"
+    ],
+    "example": "33-F01 protection operation, breaker-open feedback and communication loss appear as distinct records. Reconnection preserves recovered source timestamps and identifies unrecoverable gaps according to the design.",
+    "check": "Check sorting and export behavior when events share timestamps or have degraded time quality; do not imply an unjustified causal order."
+  },
+  {
+    "title": "Network Redundancy Testing",
+    "paragraphs": [
+      "Redundancy testing verifies service continuity for the explicitly defined failure set. PRP, HSR, RSTP and server redundancy have different mechanisms and acceptance expectations.",
+      "Observe application behavior as well as link status. A successful cable-pull test can hide missing redundancy alarms, duplicate events or failed restoration. Test each independent path and confirm the normal configuration is recovered afterward."
+    ],
+    "workflow": [
+      "Predict surviving paths for each failure",
+      "Apply one controlled fault at a time",
+      "Record application continuity, diagnostics and restoration"
+    ],
+    "example": "Disconnect 33-F01's PRP LAN A path, verify acquisition through B and inspect the redundancy alarm. Restore A, then repeat for B without joining the two LANs.",
+    "check": "Do not generalize single-link results to shared power failure, endpoint failure or multiple simultaneous faults that were not covered."
+  },
+  {
+    "title": "Practical 33 kV Feeder FAT Procedure",
+    "paragraphs": [
+      "The feeder FAT procedure combines document review, input simulation, protection/communication checks and operator-interface validation for one representative 33 kV bay. It uses the exact configuration intended for delivery.",
+      "Prepare expected results before testing and isolate outputs. A complete sequence includes normal indication, a representative protection operation, reporting, GOOSE where assigned, control rejection and communication recovery. Protection setting verification follows its own approved procedure."
+    ],
+    "workflow": [
+      "Verify 33-F01 identity, settings and signal list",
+      "Execute normal, fault-indication and control cases",
+      "Test failure recovery, resolve punch points and archive the tested revision"
+    ],
+    "example": "The evidence sheet links each stimulus to IED state, transmitted service, subscriber/HMI result and witness. Test equipment and simulated breaker status are recorded explicitly.",
+    "check": "Any correction to the tested configuration requires repeat tests for affected functions before closing the FAT record.",
+    "table": {
+      "headers": [
+        "Case",
+        "Stimulus",
+        "Required observation"
+      ],
+      "rows": [
+        [
+          "F01-01",
+          "Open/closed/abnormal feedback",
+          "Correct IED, HMI and SOE state/quality"
+        ],
+        [
+          "F01-02",
+          "Known analog values",
+          "Correct phase, ratio, unit and alarm threshold"
+        ],
+        [
+          "F01-03",
+          "Protection test operation",
+          "Intended output, GOOSE and report indications"
+        ],
+        [
+          "F01-04",
+          "Rejected remote close condition",
+          "No unintended output; clear diagnostic"
+        ],
+        [
+          "F01-05",
+          "Link interruption and recovery",
+          "Stale indication, report recovery/gap handling"
+        ],
+        [
+          "F01-06",
+          "Test restoration",
+          "Normal modes, outputs and configuration confirmed"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Practical 132/33 kV SAT Procedure",
+    "paragraphs": [
+      "The station SAT procedure confirms installed bays, networks, timing and station/remote interfaces against the accepted design. It must coordinate with site access, isolation and operational responsibilities.",
+      "Begin with identity and wiring checks, then perform functional tests in approved stages. Reconcile FAT punch points and site changes into as-built records. Avoid active network or control testing on live connected schemes without the approved boundary."
+    ],
+    "workflow": [
+      "Verify installed 132/33 kV equipment and documentation",
+      "Test point paths, control boundaries and redundancy",
+      "Restore normal state and obtain the required witnessed release"
+    ],
+    "example": "The 33-F01 bay is checked against its actual terminal schedule and fibre ports, while the 132 kV process-bus interfaces receive their specific measurement/timing tests where installed.",
+    "check": "The SAT report must distinguish completed, deferred and excluded tests and state any operating restriction associated with an unresolved issue."
+  },
+  {
+    "title": "Test Reports, Punch Points and Troubleshooting",
+    "paragraphs": [
+      "Test reports preserve the requirement, stimulus, expected result, observed result and evidence for each case. Punch points record deviations with severity, owner, corrective action and retest status.",
+      "A pass should be reproducible from the documented configuration and method. Do not close an issue because a symptom disappeared after a reboot without identifying what changed. Link capture files, logs and drawings to the relevant test ID."
+    ],
+    "workflow": [
+      "Record results as tests execute",
+      "Assign and resolve deviations",
+      "Repeat affected tests and issue the controlled final report"
+    ],
+    "example": "A 33-F01 wrong-scale finding includes the injected current, displayed value, mapping correction and successful retest at several points. The final database revision is attached.",
+    "check": "Separate measured results from engineering analysis and remaining assumptions; never mark an unexecuted test as passed.",
+    "table": {
+      "headers": [
+        "Record field",
+        "Required content",
+        "Example"
+      ],
+      "rows": [
+        [
+          "Test identity",
+          "Requirement, bay, version",
+          "F01-05 / 33-F01 / approved revision"
+        ],
+        [
+          "Method",
+          "Stimulus, isolation, equipment",
+          "Controlled Ethernet interruption"
+        ],
+        [
+          "Expected/actual",
+          "Observable criterion and measured result",
+          "Populate only after execution"
+        ],
+        [
+          "Evidence",
+          "Trace, log, screenshot, witness",
+          "Linked files and timestamps"
+        ],
+        [
+          "Disposition",
+          "Pass/fail/pending and retest",
+          "Never prefill an unexecuted pass"
+        ]
+      ]
+    }
+  }
+]

@@ -1,0 +1,341 @@
+[
+  {
+    "title": "Introduction to Process Bus",
+    "paragraphs": [
+      "The process bus connects process-level equipment, such as merging units, to protection and control applications using engineered digital communication. Sampled Values transfer current and voltage samples; GOOSE may carry binary information where the project uses it.",
+      "Process bus is an architecture, not simply an Ethernet cable replacing every wire. Auxiliary power, safety circuits, instrument-transformer interfaces and local equipment functions remain part of the design. Its performance depends on acquisition, synchronization, network delivery and receiving algorithms working together."
+    ],
+    "workflow": [
+      "Identify every analogue and binary interface",
+      "Allocate merging units and receiving IEDs",
+      "Define timing, availability and supervision requirements"
+    ],
+    "example": "For a 132 kV line bay, a merging unit publishes measured currents and voltages to designated protection IEDs. The protection trip path is engineered separately from the measurement stream.",
+    "check": "Document which functions are digital and which remain hardwired; do not label a station fully digital from one SV connection."
+  },
+  {
+    "title": "Conventional vs Digital Substation Architecture",
+    "paragraphs": [
+      "Conventional protection commonly carries analogue CT/VT secondary signals to panel-mounted relays. A digital process-bus design digitizes signals near their source or through a merging unit and distributes samples over Ethernet.",
+      "The digital design can reduce long analogue cable runs and allow several subscribers, but introduces dependencies on merging-unit health, time alignment and network delivery. Compare complete lifecycle requirements, including testing and maintenance, instead of assuming fewer wires automatically means less engineering."
+    ],
+    "workflow": [
+      "Draw both signal paths from instrument transformer to relay",
+      "Compare failure points and test access",
+      "Select the architecture that satisfies the project performance requirements"
+    ],
+    "example": "The 132 kV line example replaces the measurement link to two protection IEDs with an engineered SV stream. Required independent protection channels must retain the independence specified by the protection philosophy.",
+    "check": "Do not accidentally merge Main 1 and Main 2 dependencies into one unprotected merging unit or power supply."
+  },
+  {
+    "title": "Sampled Values Communication",
+    "paragraphs": [
+      "Sampled Values transport sequences of instantaneous measurements rather than occasional SCADA magnitudes. Protection algorithms use correctly ordered, scaled and time-related samples to calculate quantities and make decisions.",
+      "An SV stream is continuous traffic with a defined profile, channel arrangement and sample rate. Missing, duplicated or delayed samples can affect the receiving application differently from a delayed MMS measurement. The receiver's documented supervision and fallback behavior must be understood."
+    ],
+    "workflow": [
+      "Select the supported SV profile",
+      "Agree channel order, scaling and sampling",
+      "Verify the subscriber's measured quantities against a known injected waveform"
+    ],
+    "example": "Inject a balanced three-phase test current into the 132 kV bay measurement chain. Compare phase magnitude, angle and sequence at the merging unit and each receiving protection IED.",
+    "check": "Receiving Ethernet frames alone does not prove correct analogue interpretation; phase order and scaling errors can look like valid communication."
+  },
+  {
+    "title": "Merging Unit Fundamentals",
+    "paragraphs": [
+      "A merging unit acquires analogue instrument-transformer signals or supported digital sensor inputs, processes them and publishes synchronized sample information. Its channel count, input ratings, accuracy and output profiles are device-specific.",
+      "The merging unit becomes part of the protection measurement chain. Configuration must cover nominal ratings, channel assignment, timing source and health supervision. A correct network setting cannot compensate for an incorrect analogue ratio or reversed polarity at the input."
+    ],
+    "workflow": [
+      "Match input interfaces to the instrument transformers",
+      "Configure channel identity and ratios",
+      "Test magnitude, polarity, phase angle and health indications"
+    ],
+    "example": "MU_132_L01 supplies the illustrative 132 kV line protection stream. Its current channels correspond to phases A, B and C in the approved wiring schedule, with any neutral channel explicitly identified.",
+    "check": "Check the complete measurement-chain accuracy requirements and calibration evidence, including the merging unit and connected sensors."
+  },
+  {
+    "title": "Current Transformer and Voltage Transformer Inputs",
+    "paragraphs": [
+      "CT and VT inputs have different electrical behavior and installation requirements. Conventional CT secondary circuits require controlled handling because opening an energized secondary can create dangerous voltage; VT secondary circuits require appropriate protection against short circuits.",
+      "A training diagram shows functional relationships, not terminal instructions for live equipment. Actual polarity, earthing, test links, ratings and protection must follow approved drawings and qualified site procedures. Digital output does not remove these analogue-side obligations."
+    ],
+    "workflow": [
+      "Review approved CT/VT drawings and test boundaries",
+      "Verify ratios, polarity and channel allocation with suitable equipment",
+      "Record injected and received quantities before release"
+    ],
+    "example": "For MU_132_L01, phase-A current and voltage channels are verified individually before a three-phase test. A swapped phase is corrected in the approved wiring/configuration record, not hidden by an unexplained display label.",
+    "check": "Never disconnect an energized CT secondary to create a test failure; use the approved isolation and shorting arrangement."
+  },
+  {
+    "title": "Digital and Conventional Instrument Transformers",
+    "paragraphs": [
+      "Conventional instrument transformers produce analogue secondary quantities. Digital instrument-transformer systems may use different sensing and electronic conversion arrangements, with output interfaces governed by their specified standards and product design.",
+      "Do not assume every optical or low-power sensor can connect to any merging unit. Compatibility includes sensor interface, power, timing, scaling and diagnostic behavior. The protection application needs a traceable relationship between primary quantity and delivered digital sample."
+    ],
+    "workflow": [
+      "Identify the sensor technology and rated interface",
+      "Match the receiving electronics and profile",
+      "Test the complete chain at representative operating points"
+    ],
+    "example": "A low-power sensor proposed for the 132 kV bay requires its documented interface module. A conventional 1 A CT input on another merging unit is not a substitute merely because both ultimately publish SV.",
+    "check": "Obtain the manufacturer's supported combination and accuracy declaration; protocol compatibility cannot prove analogue interface compatibility."
+  },
+  {
+    "title": "IEC 61850-9-2 and IEC 61869-9 Overview",
+    "paragraphs": [
+      "IEC 61850-9-2 defines the Ethernet mapping for sampled values. IEC 61869-9 addresses the digital interface of instrument transformers and associated profiles. Historical 9-2LE implementation guidance is a particular interoperability approach, not a synonym for every 9-2 implementation.",
+      "Profile selection determines details such as sampling, channel arrangement and frame organization. A publisher and subscriber must support the same applicable profile. Never infer compatibility solely from both datasheets mentioning IEC 61850 or process bus."
+    ],
+    "workflow": [
+      "Record exact editions and implemented profiles",
+      "Compare publisher and subscriber capabilities",
+      "Validate one representative stream before expanding the design"
+    ],
+    "example": "The line-bay exercise can use an agreed 9-2LE-style profile or a compatible IEC 61869-9 profile. It does not mix their rates and channel conventions in one unexplained configuration.",
+    "check": "Use the project-selected profile documents and device manuals for exact numeric settings and limits."
+  },
+  {
+    "title": "Sampled Value Publisher and Subscriber",
+    "paragraphs": [
+      "The SV publisher sends measurement streams to subscribing protection or metering devices. Several subscribers may consume one stream, but each must associate the stream with the correct electrical circuit and measurement channels.",
+      "Binding includes stream identification, profile, configuration revision and channel interpretation. A receiver can decode a frame successfully while assigning phase-A current to the wrong protection input. Functional injection testing is therefore essential after communication setup."
+    ],
+    "workflow": [
+      "Allocate the stream and subscriber list",
+      "Bind channel identities to protection inputs",
+      "Verify every receiving device with phase-selective injection"
+    ],
+    "example": "MU_132_L01 publishes to Main 1 and Main 2 IEDs only where the protection design permits that shared dependency. Each subscriber is tested independently for the same phase and ratio interpretation.",
+    "check": "Record the subscriber application binding, not only the MAC and APPID fields in the network register."
+  },
+  {
+    "title": "Sampled Value Ethernet Frames",
+    "paragraphs": [
+      "Conventional SV Ethernet frames use EtherType 0x88BA. Their application content includes stream identification, sample count, configuration information and sample data according to the selected profile and edition.",
+      "APPID and destination MAC identify delivery context, while fields such as svID and smpCnt help interpret the stream. The number of ASDUs per Ethernet frame can vary by profile. Frame rate and sample rate are therefore not always equal."
+    ],
+    "workflow": [
+      "Identify EtherType and APPID",
+      "Inspect ASDU count, svID and configuration revision",
+      "Compare sample counters and channel layout with the selected profile"
+    ],
+    "example": "An illustrative stream carries 4,800 samples per second with two samples per frame only if both endpoints support that specific configuration. Its frame rate is then 2,400 frames per second.",
+    "check": "Do not apply that example to a one-ASDU profile or treat the encoded integer sample as primary amperes without scaling."
+  },
+  {
+    "title": "Sampling Rates and Synchronization",
+    "paragraphs": [
+      "Sampling rate defines how frequently the analogue waveform is represented. Some profiles describe samples per nominal power-system cycle, while others use fixed samples per second. These conventions must be identified before calculating traffic or comparing devices.",
+      "Synchronization aligns sample timing across sources when the receiving application requires it. A counter progressing smoothly does not prove that two merging units sample the same instant. Accuracy and holdover requirements come from the protection application and profile."
+    ],
+    "workflow": [
+      "Confirm the profile's rate convention",
+      "Calculate samples and frames per second",
+      "Test phase alignment and receiver behavior during timing degradation"
+    ],
+    "example": "At 50 Hz, an illustrative 80-samples-per-cycle profile yields 4,000 samples per second. At 60 Hz the corresponding calculation is 4,800; this does not make every SV profile frequency-dependent.",
+    "check": "Keep sample rate, frame rate, nominal frequency and synchronization status as separate configuration fields.",
+    "table": {
+      "headers": [
+        "Rate example",
+        "Calculation",
+        "Qualification"
+      ],
+      "rows": [
+        [
+          "80 samples/cycle at 50 Hz",
+          "80 × 50 = 4,000 samples/s",
+          "Only the selected compatible profile"
+        ],
+        [
+          "80 samples/cycle at 60 Hz",
+          "80 × 60 = 4,800 samples/s",
+          "Not a universal fixed SV rate"
+        ],
+        [
+          "4,800 samples/s, 2 ASDUs/frame",
+          "4,800 / 2 = 2,400 frames/s",
+          "Only if that packing is supported"
+        ],
+        [
+          "Wire load estimate",
+          "Frames/s × wire bytes/frame × 8",
+          "Include Ethernet overhead and redundancy"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Process Bus Ethernet Network Design",
+    "paragraphs": [
+      "Process-bus networks must carry continuous SV traffic plus engineered GOOSE and timing messages. Capacity planning includes Ethernet overhead, redundancy duplication, multicast distribution and worst-case paths, not just the sample payload size.",
+      "Constrain each stream to intended receivers using supported switch features. Check egress bottlenecks, queue behavior and mirror-port capacity. A network that works with one merging unit can fail after all bays are enabled or after a redundant path failure concentrates traffic."
+    ],
+    "workflow": [
+      "Calculate per-stream wire rate",
+      "Map aggregate traffic on every link",
+      "Test normal and degraded paths with the full intended stream set"
+    ],
+    "example": "For the 132 kV bay, calculate the MU stream load from measured frame size and frame rate, then include both PRP networks separately if PRP is selected.",
+    "check": "Reserve engineering margin from the project design; do not assert a universal safe utilization percentage for all switches and applications."
+  },
+  {
+    "title": "Sampled Values and PTP",
+    "paragraphs": [
+      "PTP can provide the precise timing needed by compatible process-bus equipment. The selected profile defines message behavior and interoperability expectations; IEC/IEEE 61850-9-3 is the power-utility profile used where specified.",
+      "Grandmaster quality, hardware timestamping, switch clock behavior and path asymmetry influence delivered accuracy. Merely receiving PTP packets does not prove synchronized sampling. The receiver must expose suitable timing health and react correctly when the reference is lost or changes."
+    ],
+    "workflow": [
+      "Verify matching PTP profile and domain",
+      "Inspect master selection and offset diagnostics",
+      "Test loss, holdover and restoration while observing SV quality and protection behavior"
+    ],
+    "example": "MU_132_L01 obtains time through a compatible PTP network. During a controlled grandmaster interruption, the test records its synchronization indication and the line IED's documented response.",
+    "check": "Keep PTP time quality and individual sample quality distinct; one field does not summarize every measurement-chain failure."
+  },
+  {
+    "title": "Protection IED Subscription to SV",
+    "paragraphs": [
+      "Protection subscription assigns received SV channels to specific algorithm inputs. Correct communication identity is necessary, but protection also requires the right ratios, polarity, phase sequence, nominal frequency and measurement source allocation.",
+      "Some IEDs support only particular profiles or numbers of streams. Resource and compatibility checks must precede configuration. Subscription supervision should identify absent streams, invalid samples and synchronization problems without silently substituting plausible-looking values."
+    ],
+    "workflow": [
+      "Select a documented compatible stream",
+      "Map every current and voltage channel",
+      "Perform phase-selective and multi-phase secondary-injection tests"
+    ],
+    "example": "For the 132 kV line IED, inject phase-A current only and confirm the phase-A measurement and intended protection response. Repeat for the remaining phases and voltage channels.",
+    "check": "Check protection calculations and operating direction after mapping; a correct RMS magnitude can still conceal a phase-angle or polarity error."
+  },
+  {
+    "title": "Process Bus Redundancy",
+    "paragraphs": [
+      "Redundancy protects selected communication failure modes. PRP sends copies across two independent LANs; HSR sends copies along the ring paths. Both require compatible equipment and a design that avoids common failure dependencies.",
+      "Network redundancy does not duplicate the merging unit, its input circuit, auxiliary supply or timing reference automatically. A fully redundant measurement architecture must examine those sources separately. Receiver behavior under duplicates and path changes must be tested with the intended profile."
+    ],
+    "workflow": [
+      "Identify every shared measurement-chain dependency",
+      "Select and verify the redundancy topology",
+      "Interrupt each path separately while observing sample continuity and protection health"
+    ],
+    "example": "With PRP, MU_132_L01 and its subscribing IED connect to independent LAN A and LAN B. Disconnecting LAN A should leave a valid path through LAN B within the tested design assumptions.",
+    "check": "Do not bridge PRP LAN A and LAN B with an ordinary switch; that defeats their intended separation."
+  },
+  {
+    "title": "Process Bus Engineering Using SCL",
+    "paragraphs": [
+      "SCL describes sampled-value control configuration, DataSets, communication addressing and references needed for system engineering. Device tools also establish the internal analogue channel and protection bindings that make the exchange useful.",
+      "Check the supported SCL edition and profile-specific fields before importing. Schema-valid XML can still refer to the wrong merging unit or a channel arrangement unsupported by the receiver. Keep the system configuration and both endpoint exports under revision control."
+    ],
+    "workflow": [
+      "Collect compatible device descriptions",
+      "Configure the SV publisher and Communication/SMV entry",
+      "Resolve subscriptions and verify deployed configuration against the SCD"
+    ],
+    "example": "The illustrative MU_132_L01 stream identity is used consistently in the SCD, receiver configuration and capture evidence. A renamed stream requires coordinated updates, not just a changed drawing.",
+    "check": "Validate sample rate, ASDU arrangement, revision and channel mapping together after any SCL round trip."
+  },
+  {
+    "title": "Sampled Value Quality and Data Validity",
+    "paragraphs": [
+      "Sample quality indicates whether measurement data should be trusted for its intended use. Relevant indications depend on the profile and implementation and may include invalidity, failure, out-of-range or other conditions. Synchronization is another essential dimension of stream health.",
+      "The receiving protection application needs an engineered policy for degraded inputs. Continuing indefinitely with a frozen last sample is not equivalent to valid measurement. Alarm, blocking, fallback and backup protection behavior must be specified and tested."
+    ],
+    "workflow": [
+      "List supported quality and synchronization indications",
+      "Define the receiving action for each relevant condition",
+      "Inject controlled failures and confirm application behavior"
+    ],
+    "example": "During an isolated 132 kV line test, mark the selected channel invalid through supported test equipment and observe the receiver's quality alarm and documented protection response.",
+    "check": "Do not invent a universal rule that every bad-quality sample immediately trips or blocks every protection function.",
+    "table": {
+      "headers": [
+        "Condition",
+        "Evidence",
+        "Engineering response"
+      ],
+      "rows": [
+        [
+          "Invalid channel",
+          "Supported quality indication",
+          "Apply documented receiver policy"
+        ],
+        [
+          "Missing stream",
+          "Counter/rate loss and subscriber alarm",
+          "Check publisher, path and profile"
+        ],
+        [
+          "Time degradation",
+          "Clock diagnostics + synchronization status",
+          "Check selected timing profile and holdover"
+        ],
+        [
+          "Wrong magnitude",
+          "Injection versus receiver quantity",
+          "Check ratio, units and channel binding"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Practical Example — 132 kV Line Protection",
+    "paragraphs": [
+      "The practical line-bay example includes instrument transformers, MU_132_L01, a process network and subscribing line protection. The test follows measurement information from known injected waveforms to the protection calculation and separately verifies the trip output path.",
+      "Use an agreed channel schedule and profile throughout the exercise. Document the Main 1/Main 2 independence requirement before sharing equipment. Network availability, timing quality and analogue correctness must all be demonstrated rather than inferred from a healthy Ethernet link."
+    ],
+    "workflow": [
+      "Verify the line-bay measurement schedule",
+      "Inject normal load and representative fault waveforms",
+      "Test stream loss, timing degradation and restored operation"
+    ],
+    "example": "Record primary-equivalent current, voltage, phase angle, SV stream identity, receiving measurements and protection operating result for each test. Keep the analogue stimulus and network capture on a common evidence timeline.",
+    "check": "Acceptance limits come from the protection study and procurement specification, not from the illustrative diagram."
+  },
+  {
+    "title": "Process Bus FAT/SAT Testing",
+    "paragraphs": [
+      "Process-bus FAT proves compatible equipment and engineered behavior before site installation. SAT verifies actual fibre paths, instrument-transformer connections, merging-unit identity, timing distribution and protection interfaces in the installed bay.",
+      "The acceptance plan should distinguish measurement accuracy, communication performance, synchronization and functional protection tests. A packet analyzer cannot certify analogue accuracy, and a correct injection result under normal conditions does not prove failure-mode behavior."
+    ],
+    "workflow": [
+      "Approve test boundaries and acceptance criteria",
+      "Test every channel and normal operating function",
+      "Exercise network, time and publisher failures with recorded recovery"
+    ],
+    "example": "For MU_132_L01, include channel polarity, sample profile, subscriber mapping, invalid quality and redundant-path interruption. At site, reconcile every tested channel with the approved as-built terminal schedule.",
+    "check": "Use suitable calibrated equipment and authorized isolation procedures; no live CT disturbance is required to demonstrate communication loss."
+  },
+  {
+    "title": "Sampled Value Packet Analysis",
+    "paragraphs": [
+      "SV packet analysis identifies stream rate, counter progression, identity and quality information visible at the capture point. Use the sv display filter and inspect fields such as sv.appid, sv.svID and sv.smpCnt supported by the installed decoder.",
+      "Counter discontinuities can arise from capture loss as well as network or publisher problems. Mirror ports can be oversubscribed by multiple high-rate streams. Compare receiver diagnostics and capture statistics before attributing missing frames to the process network."
+    ],
+    "workflow": [
+      "Capture one identified stream at sufficient capacity",
+      "Check ASDU/sample counter progression and rate",
+      "Correlate anomalies with receiver logs and injected waveform tests"
+    ],
+    "example": "For MU_132_L01, calculate frames per second separately from samples per second. If two ASDUs are carried per frame, inspect both sample counts rather than assuming one count per packet.",
+    "check": "An illustrative decoded-field table is not a genuine measured capture; retain original pcapng files for actual acceptance evidence.",
+    "code": "# Display filters; decoder fields depend on installed Wireshark version\nsv\nsv.appid == 0x4001\n# Inspect sv.svID, sv.smpCnt, sv.confRev and quality in the packet tree.\n# Values below are an illustrative field worksheet, not a captured frame:\n# APPID=0x4001; svID=MU132L01; confRev=1; smpCnt=120 then 121"
+  },
+  {
+    "title": "Process Bus Troubleshooting",
+    "paragraphs": [
+      "Troubleshooting proceeds from the physical measurement chain to the publisher, network, timing system and subscriber application. A wrong phase magnitude with healthy stream counters suggests a different cause from a missing-stream alarm.",
+      "Separate ratio/polarity errors, profile mismatch, multicast filtering, sample loss and clock degradation. Changing several parameters simultaneously can conceal the cause and invalidate previously accepted tests. Restore a controlled baseline before comparing results."
+    ],
+    "workflow": [
+      "Classify the symptom as analogue, communication, timing or application",
+      "Compare source and receiver evidence",
+      "Correct one cause and repeat the relevant functional and failure tests"
+    ],
+    "example": "If the line IED reports swapped phase angles with normal packet delivery, inspect channel mapping and polarity. If counters stop at the receiving port, trace stream delivery before changing protection settings.",
+    "check": "Close the issue only after documenting the cause, updated configuration and successful repeat test under the original failing condition."
+  }
+]

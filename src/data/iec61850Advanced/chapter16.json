@@ -1,0 +1,351 @@
+[
+  {
+    "title": "Introduction to Substation Control Functions",
+    "paragraphs": [
+      "Substation control functions turn authorized requests into equipment actions under defined conditions. They include authority selection, interlocking, command sequencing, output operation and independent feedback.",
+      "Protection tripping and operator switching are related but different applications. Their permissives and priorities must follow the approved design. Communication services provide the request mechanism; they do not determine every electrical or operational condition for safe switching."
+    ],
+    "workflow": [
+      "Identify the equipment and permitted actions",
+      "Define authority and interlocking requirements",
+      "Verify the complete command-to-feedback chain"
+    ],
+    "example": "33-F01 supports an approved remote close/open function while its protection trip path retains the required independence. Both paths are documented rather than represented by one generic HMI button.",
+    "check": "Do not assume every condition that blocks closing should also block protection tripping; evaluate the actual scheme."
+  },
+  {
+    "title": "Circuit Breaker Operating Mechanism",
+    "paragraphs": [
+      "A circuit breaker mechanism converts electrical control energy into mechanical opening or closing. Auxiliary contacts provide position feedback, while stored-energy, trip-circuit and other supervision signals depend on the installed equipment.",
+      "An energized coil does not guarantee the main contacts reached the intended position. Mechanical failure, supply loss or wiring faults can interrupt the action. Control engineering therefore monitors both command results and physical feedback within specified timing."
+    ],
+    "workflow": [
+      "Review approved mechanism/control drawings",
+      "Identify command outputs and auxiliary feedback",
+      "Test the isolated mechanism or simulator with expected timing"
+    ],
+    "example": "For 33-F01, a close output is followed by verified XCBR1.Pos feedback. If feedback does not change, the HMI reports failure or uncertainty according to the project design.",
+    "check": "A teaching block diagram is not a terminal-level wiring instruction; actual coils, contacts and supply ratings come from approved drawings."
+  },
+  {
+    "title": "Local and Remote Control",
+    "paragraphs": [
+      "Local/remote control establishes where switching authority resides. Authority may involve physical selectors, device modes, station roles and remote-control-centre permissions according to the station philosophy.",
+      "A local selector can block an otherwise valid network command. The rejection should be visible and understandable rather than bypassed. Changing authority must not accidentally suppress required protection functions or leave an old selection active indefinitely."
+    ],
+    "workflow": [
+      "Define authority sources and priorities",
+      "Map their status and command checks",
+      "Test each permitted and prohibited operating location"
+    ],
+    "example": "33-F01 in local mode rejects an HMI close request while allowing the authorized local procedure. The HMI shows the authority state so the operator can understand the rejection.",
+    "check": "Verify authority again at execution time where required; an earlier screen indication may be stale."
+  },
+  {
+    "title": "Direct Control vs Select-Before-Operate",
+    "paragraphs": [
+      "Direct control sends an operation request without a separate selection phase. Select-before-operate reserves or selects the controllable object before an operation under the supported control model.",
+      "SBO helps coordinate access and request context but does not replace electrical interlocks, authorization or physical feedback. Normal and enhanced security variants differ in service behavior. The client must use the object's actual ctlModel rather than a generic preferred sequence."
+    ],
+    "workflow": [
+      "Read the configured control model",
+      "Configure the client sequence accordingly",
+      "Test acceptance, rejection, cancellation and timeout"
+    ],
+    "example": "33-F01's approved control point may use an SBO model, while another device uses direct control. The gateway stores those differences explicitly instead of forcing every breaker through the same driver behavior.",
+    "check": "Do not label enhanced control security as equivalent to encrypted transport; those are different concepts."
+  },
+  {
+    "title": "Select-Before-Operate (SBO) Sequence",
+    "paragraphs": [
+      "An SBO transaction includes selection, an operation while selection remains valid, and result handling. Depending on the control model, selection can use the normal or enhanced service form, with supported cancellation and timeout behavior.",
+      "Selection is not a guarantee that a later operation will succeed. Authority, interlocks or equipment state can change before execution. The client must preserve the required command context and treat rejection or timeout as an explicit outcome."
+    ],
+    "workflow": [
+      "Verify current state and permissives",
+      "Select using the supported service and then operate within its validity",
+      "Evaluate service result, termination where applicable and independent feedback"
+    ],
+    "example": "For isolated 33-F01 closing, select the approved object, issue close and confirm breaker feedback. A deliberately expired selection must not execute as if still valid.",
+    "check": "After uncertainty, reconcile the actual position before another attempt; never retry an old operation automatically."
+  },
+  {
+    "title": "IEC 61850 Control Models",
+    "paragraphs": [
+      "IEC 61850 control models distinguish status-only, direct and SBO behavior, with normal or enhanced security variants for controllable objects. The model is represented through ctlModel where applicable.",
+      "Enhanced control provides additional command-result handling such as command termination according to the service model. That response still differs from independent physical feedback and does not prove every external mechanism condition. Exact supported options must come from the device model and manual."
+    ],
+    "workflow": [
+      "Inspect ctlModel and supported control structure",
+      "Match the client implementation",
+      "Test the required sequence and error/result handling"
+    ],
+    "example": "The tutorial compares direct-normal, SBO-normal, direct-enhanced and SBO-enhanced behavior without assigning a universal model to every XCBR or CSWI instance.",
+    "check": "Do not write a new ctlModel value in service merely to satisfy a client limitation; any change requires supported engineering and retesting.",
+    "table": {
+      "headers": [
+        "ctlModel value",
+        "Model",
+        "Client behavior"
+      ],
+      "rows": [
+        [
+          "0",
+          "Status only",
+          "No control operation"
+        ],
+        [
+          "1",
+          "Direct with normal security",
+          "Operate according to supported model"
+        ],
+        [
+          "2",
+          "SBO with normal security",
+          "Select then operate"
+        ],
+        [
+          "3",
+          "Direct with enhanced security",
+          "Operate and handle command termination"
+        ],
+        [
+          "4",
+          "SBO with enhanced security",
+          "SelectWithValue/operate and termination as supported"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "CSWI Logical Node",
+    "paragraphs": [
+      "CSWI represents switching-control functionality in the IEC 61850 model. It commonly provides an application interface for requests that are evaluated with authority and interlocking logic before driving equipment.",
+      "The exact relationship between CSWI, physical outputs and breaker feedback is implementation-specific. A supported controllable object must be identified from the actual IED model. Naming a logical node CSWI1 does not create an operating circuit by itself."
+    ],
+    "workflow": [
+      "Locate the supported switching-control object",
+      "Trace its authority and permissive inputs",
+      "Verify output action and feedback association"
+    ],
+    "example": "The illustrative HMI request targets IED_33_F01LD0/CSWI1.Pos where supported. The resulting action is checked against the actual 33-F01 breaker feedback source.",
+    "check": "Keep command intent separate from measured position; the CSWI request value is not evidence that the breaker moved."
+  },
+  {
+    "title": "XCBR Logical Node",
+    "paragraphs": [
+      "XCBR models circuit-breaker information and associated functionality. Its position object represents the breaker state according to the configured application and available feedback.",
+      "Use the correct double-point interpretation and preserve quality. Intermediate or inconsistent auxiliary-contact combinations should not be forced into a healthy open or closed display. Some implementations expose control through different supported objects, so follow the actual model."
+    ],
+    "workflow": [
+      "Trace auxiliary contacts into position logic",
+      "Verify the exposed Pos structure and quality",
+      "Test open, closed, transition and abnormal cases"
+    ],
+    "example": "33-F01's 52a/52b inputs update XCBR1.Pos. The HMI uses this feedback to confirm a requested close independently of the command-service response.",
+    "check": "An object name alone does not prove which physical breaker it represents; verify the equipment association and signal schedule."
+  },
+  {
+    "title": "CILO Interlocking Logical Node",
+    "paragraphs": [
+      "CILO models interlocking-related information. Supported objects can communicate whether switching actions are permitted, while the detailed logic behind those indications belongs to the engineered application.",
+      "Interlocking must reflect the actual bus arrangement, equipment capabilities and operating policy. A permissive should be based on valid and sufficiently fresh inputs. CILO is a standardized model concept, not a universal built-in interlocking program for every substation."
+    ],
+    "workflow": [
+      "Review the approved interlocking matrix",
+      "Map supported permissive indications and their inputs",
+      "Test allowed and blocked states with diagnostics"
+    ],
+    "example": "The example controller combines verified earth-switch and disconnector conditions with local authority before allowing the selected close action. The full condition set is project-specific.",
+    "check": "Do not assume CILO removes the need for independent mechanical or electrical interlocks required by the equipment design."
+  },
+  {
+    "title": "Electrical and Logical Interlocking",
+    "paragraphs": [
+      "Electrical interlocks use physical circuitry or equipment mechanisms to constrain operation; logical interlocks evaluate configured conditions in a controller or IED. A station may require both, with clearly defined responsibilities.",
+      "Their interaction must be tested. A software permissive can be true while a hardwired contact prevents coil energization, and a wiring error can undermine an assumed electrical constraint. Document the intended command path and feedback at each boundary."
+    ],
+    "workflow": [
+      "Review electrical drawings and logic together",
+      "Identify independent and shared conditions",
+      "Test each blocking condition and the final permitted path"
+    ],
+    "example": "33-F01 close logic may require a healthy local condition while the physical circuit includes approved mechanism contacts. The tutorial shows functional stages without prescribing a universal wiring circuit.",
+    "check": "Do not defeat a physical interlock to make a software test pass; investigate the reason and follow the approved isolation procedure."
+  },
+  {
+    "title": "Breaker Close Permissive Conditions",
+    "paragraphs": [
+      "Close permissives prevent an operation when the required electrical, mechanical or operational conditions are not satisfied. Possible inputs include authority, earth-switch state, mechanism readiness and synchronism conditions where the scheme requires them.",
+      "The complete list comes from the approved switching philosophy. A feeder close and a bus-coupler close may have different requirements. Invalid or stale input data must have an explicit policy rather than defaulting silently to permission."
+    ],
+    "workflow": [
+      "Create the close-permissive matrix",
+      "Define each input's source and validity rule",
+      "Test each individual block and the fully permitted case"
+    ],
+    "example": "For the 33-F01 exercise, remote authority and valid approved equipment-state conditions are required. This is an illustrative subset, not a design instruction for every feeder.",
+    "check": "Show the failed permissive to the operator where supported; a generic 'command failed' message obscures the engineering cause."
+  },
+  {
+    "title": "Breaker Trip and Open Commands",
+    "paragraphs": [
+      "An operator open command and a protection trip can act on the same breaker through different logic paths. Their authority, permissive and priority requirements must be defined separately.",
+      "Closing interlocks should not be copied automatically into trip logic. Some operational restrictions may apply to manual commands while protection retains the required ability to clear faults. Physical trip-circuit supervision and independent feedback remain essential."
+    ],
+    "workflow": [
+      "Trace operator open and protection trip paths separately",
+      "Review applicable conditions and priorities",
+      "Test each path and its failure indications"
+    ],
+    "example": "33-F01's protection operation drives the approved trip output and reports the event. A remote open request follows the supported control model and operator authority checks.",
+    "check": "Verify the design does not let a lost HMI or stale close-permissive input disable required fault-clearing behavior."
+  },
+  {
+    "title": "Disconnector and Earth Switch Interlocking",
+    "paragraphs": [
+      "Disconnectors and earth switches have switching duties and interlocking requirements different from circuit breakers. Their permitted operations depend on equipment ratings, circuit conditions and the station's approved operating sequence.",
+      "Do not assume a disconnector can interrupt load or that an earth switch may close based only on one remote Boolean. Position, isolation and other required conditions must be verified through the actual scheme, including mechanical constraints where present."
+    ],
+    "workflow": [
+      "Review equipment duties and switching sequence",
+      "Build the device-specific interlocking matrix",
+      "Test prohibited combinations and invalid feedback in an isolated arrangement"
+    ],
+    "example": "The practical project treats earth-switch information as one required input to relevant bay operations. It does not prescribe a universal live switching sequence.",
+    "check": "Use approved operating procedures and qualified personnel for site operations; the training logic does not replace equipment-specific instructions."
+  },
+  {
+    "title": "Control Authority and Origin",
+    "paragraphs": [
+      "Control authority identifies who may request an action, while origin information helps describe the request source and context in supported IEC 61850 control services. Authentication, application roles and origin fields are related but not interchangeable.",
+      "An origin category alone is not proof that a user is authorized. The station's access-control and operating policy must enforce permissions. Logs should retain enough context to investigate rejected, completed and uncertain commands."
+    ],
+    "workflow": [
+      "Define authorized operator/client roles",
+      "Configure supported origin and access behavior",
+      "Test competing sources and unauthorized requests"
+    ],
+    "example": "The station HMI and remote control centre have explicitly assigned authority for 33-F01. A maintenance client may browse data while being prohibited from switching.",
+    "check": "Do not trust a freely supplied origin label as the only security control; use the supported station access architecture."
+  },
+  {
+    "title": "Command Feedback and Timeout",
+    "paragraphs": [
+      "Command feedback includes service acceptance/rejection, additional diagnostics where supported and independent equipment position. Timeout handling determines what the client does when a definitive result is not received in the expected interval.",
+      "A timeout can mean the request failed, the response was lost or the equipment moved without timely feedback. Treat it as uncertainty until the actual state is reconciled. Repeating a command without that check can create an unintended operation."
+    ],
+    "workflow": [
+      "Set project-approved response and feedback limits",
+      "Test delayed or missing responses",
+      "Compare command logs with actual position before recovery"
+    ],
+    "example": "33-F01 receives a close request during an isolated test, but feedback is withheld. The HMI reports the failed/uncertain result and does not display closed merely because the request was accepted.",
+    "check": "Keep service timeout and mechanism travel/feedback timeout as separate parameters where the implementation supports them."
+  },
+  {
+    "title": "Control Failure Handling",
+    "paragraphs": [
+      "Control failures require a clear, non-ambiguous operator result and retained diagnostic evidence. Reasons can include authority, selection expiry, interlocking, unsupported service, output failure or missing feedback.",
+      "The response should guide investigation without bypassing constraints. A retry policy must account for the possibility that the first action already occurred. Enhanced command diagnostics can help, but physical state and application logs remain necessary."
+    ],
+    "workflow": [
+      "Capture the exact rejection or timeout",
+      "Inspect authority, permissives and feedback",
+      "Correct the cause and perform a new authorized test"
+    ],
+    "example": "If 33-F01 rejects closing because local mode is active, the operator follows the approved authority-transfer process. The engineer does not simply disable the local check in logic.",
+    "check": "Test that a failed command cannot remain queued and execute unexpectedly when a permissive later changes."
+  },
+  {
+    "title": "Practical Example — 33 kV Feeder Closing",
+    "paragraphs": [
+      "The feeder-close exercise demonstrates a complete controlled transaction using an isolated breaker simulator or approved test arrangement. It verifies authority, current state, supported control model, interlocks and independent feedback.",
+      "Use the actual configured object references and timings. The exercise must include rejection and uncertainty cases so a positive result is not the only behavior taught. Record both the command-service outcome and the simulated physical position."
+    ],
+    "workflow": [
+      "Confirm the 33-F01 identity and approved permissives",
+      "Execute its supported direct/SBO sequence",
+      "Verify position, SOE and absence of unintended outputs"
+    ],
+    "example": "For an SBO-enabled CSWI1.Pos example, select then operate close while the selection is valid. XCBR1.Pos confirms the result; an expired selection or invalid permissive is rejected.",
+    "check": "This is a training sequence, not authorization for live switching; actual station operations use the approved procedure and responsible operator.",
+    "code": "Illustrative operator transaction record — not executable switching code\nEquipment: 33-F01\nControl object: IED_33_F01LD0/CSWI1.Pos (verify actual model)\nFeedback object: IED_33_F01LD0/XCBR1.Pos\n1. Confirm identity, authority, present position and approved permissives.\n2. Use the configured direct/SBO normal/enhanced sequence.\n3. Record service result and command termination where applicable.\n4. Independently verify feedback and SOE.\n5. On timeout: reconcile physical state before any new authorized attempt."
+  },
+  {
+    "title": "Practical Example — Bus Coupler Interlocking",
+    "paragraphs": [
+      "Bus-coupler control depends on bus topology, source conditions and the operating philosophy. Closing can parallel sources or energize a bus section, so its permissives may differ substantially from feeder switching.",
+      "Synchronism checking, dead-bus conditions and disconnector states must be included where the approved scheme requires them. A generic 'both buses healthy' condition is insufficient. Define invalid measurement and unavailable remote-state behavior explicitly."
+    ],
+    "workflow": [
+      "Review the coupler's electrical role",
+      "Derive the approved close/open matrix",
+      "Test source combinations, invalid inputs and rejection diagnostics"
+    ],
+    "example": "In the practical project, 33-BC01 joins bus sections 33-B1 and 33-B2 only under its approved matrix. No universal automatic paralleling rule is assumed.",
+    "check": "Do not infer safe paralleling from equal displayed voltage magnitudes alone; the required checks depend on the actual electrical system."
+  },
+  {
+    "title": "Control FAT/SAT Testing",
+    "paragraphs": [
+      "Control FAT verifies service sequences, authority, interlocks, outputs and feedback in a controlled setup. SAT verifies installed wiring, equipment identity and actual station interfaces under approved test boundaries.",
+      "Negative tests are as important as successful operations. Include local mode, invalid inputs, expired selection, missing feedback and communication loss at defined stages. Confirm that independent protection behavior remains consistent with the design."
+    ],
+    "workflow": [
+      "Approve isolation and expected results",
+      "Execute positive and prohibited-state tests",
+      "Restore modes, remove simulations and record final configuration"
+    ],
+    "example": "33-F01 testing records requested action, object reference, service result, output and position feedback. A witness verifies that no adjacent feeder output responds.",
+    "check": "Release the test boundary only after confirming normal authority, subscriptions and physical connections are restored.",
+    "table": {
+      "headers": [
+        "Test",
+        "Expected outcome",
+        "Evidence"
+      ],
+      "rows": [
+        [
+          "Local authority",
+          "Remote request rejected per policy",
+          "Authority status + service diagnostic"
+        ],
+        [
+          "Selection expired",
+          "Operation not accepted as a valid selected command",
+          "Client/server transaction log"
+        ],
+        [
+          "Permissive false or invalid",
+          "Defined rejection / safe application response",
+          "Input quality and logic trace"
+        ],
+        [
+          "No physical feedback",
+          "Failure/uncertainty shown; no blind retry",
+          "Output and position timeline"
+        ],
+        [
+          "Correct authorized request",
+          "Intended output and feedback only",
+          "Witnessed isolated functional test"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Breaker Control Troubleshooting",
+    "paragraphs": [
+      "Breaker-control troubleshooting traces the request through authority, control model, selection, interlocking, output and feedback. The first failed boundary determines the next investigation step.",
+      "Distinguish a service rejection from a physical failure after acceptance. Packet evidence can show the request and response but cannot prove coil energization or mechanism movement. Use the appropriate electrical and application diagnostics under approved conditions."
+    ],
+    "workflow": [
+      "Reproduce one isolated failing command",
+      "Compare client, IED and physical-feedback evidence",
+      "Correct the cause and repeat positive and negative tests"
+    ],
+    "example": "If 33-F01 accepts a close but XCBR1.Pos remains open, inspect output logic and the approved control circuit rather than changing the MMS port. If selection fails, inspect ownership, model and timeout first.",
+    "check": "Never use repeated live command attempts as a diagnostic substitute for understanding the failure."
+  }
+]

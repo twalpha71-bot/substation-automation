@@ -1,0 +1,350 @@
+[
+  {
+    "title": "Introduction to Substation Communication Networks",
+    "paragraphs": [
+      "Substation communication networks connect protection, control, monitoring and engineering systems with different performance and availability requirements. The design must account for traffic paths and failure consequences rather than merely provide enough Ethernet sockets.",
+      "MMS, GOOSE, SV and time synchronization use different service mechanisms. Their coexistence requires capacity planning, appropriate forwarding and observable diagnostics. IEC TR 61850-90-4 provides a network-engineering framework where applicable to the project."
+    ],
+    "workflow": [
+      "Inventory communicating devices and services",
+      "Define performance and availability requirements",
+      "Draw normal and degraded traffic paths"
+    ],
+    "example": "The 132/33 kV station has feeder IEDs, gateways, operator stations and timing equipment. Process-bus traffic is included only where the selected architecture actually uses it.",
+    "check": "Record what each network failure means to protection, control and operator visibility; a single generic availability target can hide important differences."
+  },
+  {
+    "title": "Station Bus Architecture",
+    "paragraphs": [
+      "The station bus links bay devices with station-level functions and may carry inter-IED GOOSE. Its physical topology, VLAN design and redundancy arrangement must support the actual application exchanges.",
+      "Station bus is a functional architecture, not necessarily one physical switch or one flat VLAN. Separate management and process paths where required, while keeping necessary service connectivity explicit. Unplanned routing or filtering can break a valid logical design."
+    ],
+    "workflow": [
+      "Place each station and bay endpoint",
+      "Mark MMS, GOOSE and time paths",
+      "Verify capacity and single-failure behavior"
+    ],
+    "example": "Gateway A acquires 33-F01 over station VLAN 100. Approved GOOSE uses VLAN 200 on the engineered ports, with no assumption that an IP route transfers that Layer-2 stream.",
+    "check": "Compare the as-built port schedule with the logical drawing before commissioning; mismatched patching can invalidate both addressing and redundancy assumptions."
+  },
+  {
+    "title": "Industrial Ethernet Switches",
+    "paragraphs": [
+      "Industrial Ethernet switches provide forwarding plus features suited to the specified environment and network design. Relevant capabilities may include VLANs, priority queues, multicast filtering, redundancy support, diagnostics and precise-time functions.",
+      "Feature names alone are insufficient. Check exact firmware behavior, port speed, optical compatibility, environmental ratings and whether the required PTP profile or redundancy role is supported. A switch with two power inputs can still share other single points of failure."
+    ],
+    "workflow": [
+      "Match switch capabilities to the network specification",
+      "Verify optics, power and port allocation",
+      "Test configured forwarding and diagnostics under load"
+    ],
+    "example": "The station switch serving 33-F01 must forward its approved GOOSE stream and MMS traffic while exposing link errors and discards to maintenance staff.",
+    "check": "Do not assume all managed switches implement PRP, HSR or transparent-clock behavior; those functions need explicit support."
+  },
+  {
+    "title": "Ethernet Network Topologies",
+    "paragraphs": [
+      "Star, ring, dual-LAN and mesh arrangements have different failure and maintenance properties. A drawing should show actual links, forwarding behavior and device roles rather than use the word ring as a substitute for a redundancy protocol.",
+      "A physical ring requires a mechanism that prevents uncontrolled loops or deliberately handles duplicates. RSTP, HSR and proprietary ring protocols are not interchangeable. End-device capabilities and recovery requirements determine which architecture is appropriate."
+    ],
+    "workflow": [
+      "Draw the physical topology",
+      "Identify the loop-control or duplication mechanism",
+      "Evaluate each link and node failure"
+    ],
+    "example": "A dual-star PRP station uses two separate switched LANs, while an HSR bay ring connects compatible two-port nodes around a closed loop.",
+    "check": "Keep physical topology and protocol behavior separate in documentation so maintenance staff do not bridge paths that must remain independent."
+  },
+  {
+    "title": "Network Redundancy Requirements",
+    "paragraphs": [
+      "Redundancy requirements follow the permitted interruption and failure consequences of each application. Monitoring may tolerate a different outage from a high-speed protection exchange or synchronized measurement path.",
+      "Identify common dependencies such as power, cable route, switch chassis, timing source and end device. Two visible cables do not provide independent paths if both pass through the same failed component. Define the fault set the design is intended to survive."
+    ],
+    "workflow": [
+      "List credible single failures",
+      "Trace which functions remain available",
+      "Allocate independent resources and acceptance tests"
+    ],
+    "example": "For 33-F01 reporting, the project may require continued acquisition after one LAN failure. That requirement does not automatically cover failure of the feeder IED itself.",
+    "check": "State the failure assumptions explicitly; 'zero downtime' without a defined fault model cannot be verified."
+  },
+  {
+    "title": "Parallel Redundancy Protocol (PRP)",
+    "paragraphs": [
+      "Parallel Redundancy Protocol (PRP), standardized in IEC 62439-3, sends duplicate frames through two separate LANs. A compatible receiving node accepts the useful copy and discards the duplicate.",
+      "LAN A and LAN B remain independent networks. They must not be joined through an ordinary bridge or switch. PRP provides seamless communication for covered network-path failures but does not protect a failed application, shared supply or incorrectly configured endpoint."
+    ],
+    "workflow": [
+      "Connect each PRP port to its assigned LAN",
+      "Verify duplicate handling and supervision",
+      "Interrupt LAN A and LAN B separately while observing the application"
+    ],
+    "example": "33-F01 and Gateway A are PRP-capable nodes in the illustrative dual-LAN station. Both LANs carry the required service, with independent switches and power paths as specified.",
+    "check": "Do not assign PRP behavior to two ordinary NICs without the supported redundancy implementation."
+  },
+  {
+    "title": "High-availability Seamless Redundancy (HSR)",
+    "paragraphs": [
+      "High-availability Seamless Redundancy (HSR) uses compatible nodes that forward duplicate traffic along opposite ring directions in a typical ring arrangement. The receiver processes the first valid copy and removes the duplicate.",
+      "HSR is not two independent switched LANs. Ring nodes and RedBoxes have defined forwarding responsibilities, and ring loading depends on the traffic and topology. A single ring break can leave a surviving path, while multiple breaks can partition the network."
+    ],
+    "workflow": [
+      "Confirm every ring node's HSR role",
+      "Connect the intended closed ring",
+      "Test each link break and observe forwarding, duplicates and application continuity"
+    ],
+    "example": "Four compatible bay devices form an illustrative HSR ring. Opening one link changes the available path without requiring the same convergence mechanism as RSTP.",
+    "check": "Never replace an HSR ring node with an ordinary two-port device unless the documented architecture explicitly supports that connection."
+  },
+  {
+    "title": "PRP vs HSR Comparison",
+    "paragraphs": [
+      "PRP and HSR both use duplicate transmission to avoid recovery delay for covered failures, but their physical arrangements differ. PRP uses independent LANs; a typical HSR ring threads compatible two-port nodes around a ring.",
+      "Selection affects device requirements, traffic loading, maintenance and expansion. Neither protocol eliminates all common-mode failures or guarantees a correct application configuration. Choose from the station's failure model and supported equipment rather than visual preference."
+    ],
+    "workflow": [
+      "Compare topology and endpoint support",
+      "Calculate traffic and expansion effects",
+      "Test the selected architecture with representative devices"
+    ],
+    "example": "The practical station project selects PRP for its station bus. An HSR ring is taught as a separate alternative and is not drawn as a renamed second PRP LAN.",
+    "check": "Keep the comparison focused on tested requirements; seamless network delivery does not guarantee zero application delay or unlimited fault tolerance.",
+    "table": {
+      "headers": [
+        "Aspect",
+        "PRP",
+        "HSR ring"
+      ],
+      "rows": [
+        [
+          "Physical arrangement",
+          "Two independent LANs",
+          "Compatible two-port nodes in a ring"
+        ],
+        [
+          "Copies",
+          "One through each LAN",
+          "Opposite ring directions"
+        ],
+        [
+          "Ordinary endpoint",
+          "One LAN or supported RedBox",
+          "Supported RedBox attachment"
+        ],
+        [
+          "Covered example",
+          "One network-path failure",
+          "One ring-link break"
+        ],
+        [
+          "Remaining risk",
+          "Shared endpoint/supply or multiple faults",
+          "Node dependencies or multiple partitioning faults"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "RedBox and Single-Attached Nodes",
+    "paragraphs": [
+      "A RedBox connects suitable single-attached equipment to a redundant network according to its supported PRP or HSR role. It handles the redundancy functions that the ordinary attached device lacks.",
+      "A directly single-attached node on one PRP LAN has only that path. A RedBox can improve network access availability, but its own power, connection to the attached node and hardware remain dependencies. RedBox roles for connecting HSR rings or networks must follow the supported design."
+    ],
+    "workflow": [
+      "Identify nonredundant endpoints",
+      "Select the appropriate documented RedBox arrangement",
+      "Test path loss and RedBox-related failure cases"
+    ],
+    "example": "A maintenance server connects through a supported RedBox to the station's PRP networks. Its single cable to the RedBox remains a visible failure point in the availability assessment.",
+    "check": "Do not describe every device with two Ethernet ports as a RedBox; verify the implemented protocol and topology role."
+  },
+  {
+    "title": "RSTP and Network Recovery",
+    "paragraphs": [
+      "Rapid Spanning Tree Protocol maintains a loop-free active topology and can activate alternate paths after a change. Unlike duplicate-transmission schemes, it involves convergence and can produce an interruption.",
+      "Actual recovery depends on topology, settings, link detection and connected equipment. Protection and control applications must tolerate the measured interruption or use another architecture. Incorrect edge-port settings or unmanaged loops can create severe instability."
+    ],
+    "workflow": [
+      "Identify the intended root and alternate paths",
+      "Configure supported RSTP roles",
+      "Measure application recovery during representative failures"
+    ],
+    "example": "A station monitoring network uses an RSTP ring only if its measured outage meets the project requirement. That result does not automatically qualify the same design for a time-critical protection exchange.",
+    "check": "Do not quote one universal RSTP recovery time; measure the delivered topology and verify the application's response."
+  },
+  {
+    "title": "VLAN Fundamentals",
+    "paragraphs": [
+      "A VLAN partitions Ethernet forwarding into logical broadcast domains. IEEE 802.1Q tagging carries a VLAN identifier and priority information where used, while access-port classification can assign untagged frames to a configured VLAN.",
+      "VLAN separation controls traffic reachability but is not, by itself, complete cybersecurity. Port membership, trunk allowances and routing policy determine which endpoints can exchange information. A missing tag in a capture may reflect NIC offload or switch mirror behavior."
+    ],
+    "workflow": [
+      "Define VLAN purposes and IDs",
+      "Configure ingress classification and egress tagging",
+      "Verify permitted and prohibited traffic paths"
+    ],
+    "example": "Station MMS uses VLAN 100 and a selected protection GOOSE group uses VLAN 200 in the tutorial. These numbers are project examples, not IEC-mandated allocations.",
+    "check": "Keep VLAN ID and priority code point separate; changing priority does not move traffic into another VLAN."
+  },
+  {
+    "title": "VLAN Configuration for GOOSE and MMS",
+    "paragraphs": [
+      "MMS and GOOSE can be carried through engineered VLAN arrangements, but their forwarding needs differ. MMS uses the configured IP path; conventional GOOSE requires Layer-2 delivery to its subscribers.",
+      "An access/trunk mismatch can allow one service and block another. Define which devices send tagged frames and which rely on switch ingress classification. Maintain consistent numeric representation between SCL, device tools and switch configuration."
+    ],
+    "workflow": [
+      "Map each service to a VLAN and endpoint",
+      "Configure every intermediate port",
+      "Test live frames at the publisher and receiving port"
+    ],
+    "example": "33-F01 can communicate with Gateway A on VLAN 100 while its GOOSE VLAN 200 is blocked at an uplink. The repair is a reviewed port policy change, followed by subscriber tests.",
+    "check": "Do not assume an IP router forwards conventional GOOSE between VLANs; any alternate architecture needs explicit design support."
+  },
+  {
+    "title": "Ethernet Multicast and Filtering",
+    "paragraphs": [
+      "Ethernet multicast delivers one frame toward multiple recipients. GOOSE and SV require an engineered distribution plan so necessary consumers receive traffic without flooding every unrelated port.",
+      "IGMP snooping concerns IP multicast and does not automatically discover conventional Layer-2 GOOSE/SV subscriptions. Industrial switches may provide static multicast tables or other supported filtering mechanisms. Verify actual behavior rather than relying on a checkbox label."
+    ],
+    "workflow": [
+      "List stream destinations and subscriber ports",
+      "Configure supported multicast forwarding",
+      "Measure reception and unwanted traffic under normal and failure conditions"
+    ],
+    "example": "The 132 kV MU stream is forwarded only to its approved protection subscribers and test access point. Station HMIs do not need every high-rate SV frame.",
+    "check": "Check failover paths as well as normal paths; a filter that works on one LAN can silently block the redundant copy."
+  },
+  {
+    "title": "IP Addressing and Subnet Planning",
+    "paragraphs": [
+      "IP planning allocates unique addresses, subnet masks and routes for services that use IP. The plan should distinguish station applications, management interfaces and remote-access boundaries.",
+      "An address identifies an IP endpoint, not a GOOSE subscription or physical bay by itself. Document names and roles alongside addresses. Duplicate assignments, incorrect masks and unintended default gateways can create intermittent or asymmetric communication."
+    ],
+    "workflow": [
+      "Reserve address ranges by function",
+      "Assign and verify each endpoint",
+      "Test same-subnet and routed paths with the approved access policy"
+    ],
+    "example": "The example uses Gateway A 192.168.100.10, Gateway B .11 and 33-F01 .31 on /24. Switch management uses a separately documented management subnet.",
+    "check": "Check the actual device address and MAC before reconnecting a replacement IED; cloned configurations can introduce duplicates.",
+    "table": {
+      "headers": [
+        "Role",
+        "Address/subnet",
+        "Notes"
+      ],
+      "rows": [
+        [
+          "Gateway A",
+          "192.168.100.10/24",
+          "Station acquisition"
+        ],
+        [
+          "Gateway B",
+          "192.168.100.11/24",
+          "Documented redundancy strategy"
+        ],
+        [
+          "33-F01",
+          "192.168.100.31/24",
+          "Illustrative PRP logical endpoint"
+        ],
+        [
+          "Switch management",
+          "192.168.99.0/24 plan",
+          "Allocate individual addresses separately"
+        ],
+        [
+          "GOOSE stream",
+          "APPID 0x1001; VLAN 200",
+          "Layer-2 identity; no IP destination"
+        ]
+      ]
+    }
+  },
+  {
+    "title": "Fibre-Optic Communication",
+    "paragraphs": [
+      "Fibre links provide electrical isolation and support substation distances when the correct optical components are selected. Fibre type, wavelength, connector, transceiver compatibility and optical budget must agree at both ends.",
+      "A link LED does not prove adequate margin or a clean path. Dirty connectors, excessive bends, incorrect patching and marginal receive power can cause intermittent errors. Redundant fibres also need physically diverse routes where the availability design requires them."
+    ],
+    "workflow": [
+      "Match optics and fibre specification",
+      "Inspect and test the installed path",
+      "Record optical levels, port errors and route identity"
+    ],
+    "example": "PRP LAN A and LAN B fibres to 33-F01 follow the approved separate routes. Placing both in one vulnerable tray may defeat the intended common-cause protection.",
+    "check": "Use approved fibre inspection practices and equipment; do not look into an active optical connector."
+  },
+  {
+    "title": "Network Switch Configuration and Monitoring",
+    "paragraphs": [
+      "Switch configuration includes port roles, VLANs, multicast forwarding, redundancy, timing features and management access. Monitoring provides evidence of link state, errors, discards and topology changes.",
+      "Save a controlled configuration after testing and verify it survives restart. An unsaved running configuration can make a station work during FAT and fail after a power cycle. Alarm thresholds and log retention should support useful diagnosis without overwhelming operators."
+    ],
+    "workflow": [
+      "Apply the approved port schedule",
+      "Verify forwarding and monitoring",
+      "Save, restart under test conditions and compare the restored configuration"
+    ],
+    "example": "The switch serving 33-F01 exposes loss of either PRP-facing network path to station maintenance. The alarm identifies the actual port and LAN rather than a generic communication fault.",
+    "check": "Keep switch backups linked to the SCD/network revision; switch settings are not fully represented by the SCD alone."
+  },
+  {
+    "title": "Practical Example — 132/33 kV Station Bus",
+    "paragraphs": [
+      "The practical station-bus example uses dual PRP LANs with compatible IEDs and gateways. Each LAN has its own switched path, and every required service is verified independently on both.",
+      "The architecture includes station acquisition, approved GOOSE exchanges and time distribution. Single-attached maintenance equipment is documented explicitly. Device power, switch power and fibre route independence are reviewed alongside logical connectivity."
+    ],
+    "workflow": [
+      "Prepare the dual-LAN port and address schedules",
+      "Configure each LAN without cross-bridging",
+      "Test normal operation and each single-path interruption"
+    ],
+    "example": "33-F01 at 192.168.100.31 communicates with Gateway A at .10 through PRP. The example uses one logical endpoint identity per PRP node, not unrelated A/B application addresses by default.",
+    "check": "Verify the device's documented PRP addressing behavior and capture placement before interpreting duplicate frames as a fault."
+  },
+  {
+    "title": "PRP/HSR Failure Scenarios",
+    "paragraphs": [
+      "Failure analysis asks what remains connected after a specified fault. In PRP, one failed LAN path can leave the other available; in a typical HSR ring, one break can leave an alternate direction.",
+      "Multiple faults, shared power loss or endpoint failure can exceed the design's protection. Tests should include diagnostics and recovery, not just whether the HMI stayed green. The application must detect degraded redundancy before the second fault removes service."
+    ],
+    "workflow": [
+      "Enumerate link, switch, supply and endpoint failures",
+      "Predict the surviving paths",
+      "Apply controlled failures and compare observed behavior"
+    ],
+    "example": "Disconnect LAN A from 33-F01 and confirm acquisition continues through B with a redundancy alarm. Restore A and verify supervision clears without duplicate application events.",
+    "check": "State which failures were tested and which were only analyzed; do not generalize one cable-pull result to every network failure."
+  },
+  {
+    "title": "Network FAT/SAT Testing",
+    "paragraphs": [
+      "Network FAT verifies the designed topology and configuration under representative traffic. SAT confirms installed ports, optics, fibre routes, power supplies and management access match the accepted design.",
+      "Test both service delivery and failure behavior. Capture loss at a mirror port must be separated from actual network loss. Acceptance criteria should include relevant latency, availability and diagnostic requirements from the project specification."
+    ],
+    "workflow": [
+      "Verify addresses, VLANs and multicast paths",
+      "Load the network with intended services",
+      "Test each redundancy path and restore the baseline"
+    ],
+    "example": "For the 132/33 kV station, record MMS continuity, GOOSE reception and timing health during each planned failure. Include configuration backups and as-built port labels in the evidence pack.",
+    "check": "Do not certify protection transfer performance from an unsynchronized laptop capture alone; use a suitable measurement method."
+  },
+  {
+    "title": "Network Troubleshooting",
+    "paragraphs": [
+      "Network troubleshooting follows the actual packet path. Start with power, optical/link status and port identity, then inspect VLANs, forwarding, addressing, transport and the application service.",
+      "Use port counters and captures to locate where traffic disappears or becomes corrupted. Avoid disabling all filtering as a permanent fix; that can mask the original fault and overload unrelated devices. Preserve the failing configuration for comparison."
+    ],
+    "workflow": [
+      "Identify source, destination and service",
+      "Compare ingress and egress evidence at each hop",
+      "Correct the specific mismatch and repeat normal/failure tests"
+    ],
+    "example": "If 33-F01 GOOSE is visible at the source switch but absent at the receiving port, inspect VLAN and multicast policy on the intervening path before editing relay logic.",
+    "check": "Finish with an updated drawing, saved switch configuration and reproducible test result, not only a restored green link indicator."
+  }
+]
