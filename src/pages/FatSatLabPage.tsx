@@ -211,7 +211,7 @@ const FatSatInteractiveLab: React.FC = () => {
     const pass = prp ? (a === 'up' || b === 'up') && supervisor === 'on' : failures.length === 0;
     const detail = prp ? (!pass ? 'Communication unavailable or supervision disabled. Verify LAN A/B and supervision.' : a === 'up' && b === 'up' ? 'Both PRP paths healthy.' : 'Communication available via remaining LAN; redundancy DEGRADED and alarm expected.') : pass ? 'All simulated acceptance conditions satisfied.' : `Check: ${failures.map(c => c.label).join(', ')}.`;
     setFeedback({pass,text:detail});
-    setLogs(old => [{time:new Date().toLocaleTimeString(),caseId:test.id,result:pass?'PASS':'FAIL',detail},...old].slice(0,40));
+    setLogs(old => [{time:new Date().toLocaleTimeString(),caseId:test.id,result:(pass?'PASS':'FAIL') as 'PASS' | 'FAIL',detail},...old].slice(0,40));
   };
   const reset = () => {setValues({});setFeedback(null);};
   const exportCsv = () => {
@@ -431,7 +431,7 @@ const AdvancedFaultInjectionLab: React.FC = () => {
    const pass = correct && fixed;
    const message = !diagnosis ? 'Select a root-cause diagnosis first.' : !correct ? 'Incorrect diagnosis. Inspect the symptom and review the troubleshooting hints.' : !fixed ? 'Correct diagnosis. Apply the simulated corrective action, then retest.' : 'PASS — correct diagnosis and approved simulated correction verified.';
    setResult({pass,message});
-   setLogs(old=>[{at:new Date().toLocaleString(),id:item.id,title:item.title,diagnosis:diagnosis||'Not selected',result:pass?'PASS':'FAIL',feedback:message},...old].slice(0,60));
+   setLogs(old=>[{at:new Date().toLocaleString(),id:item.id,title:item.title,diagnosis:diagnosis||'Not selected',result:(pass?'PASS':'FAIL') as 'PASS' | 'FAIL',feedback:message},...old].slice(0,60));
  };
  const csv = () => {
    const quote=(v:string)=>'"'+v.replace(/"/g,'""')+'"';

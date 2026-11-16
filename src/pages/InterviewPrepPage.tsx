@@ -1,6 +1,9 @@
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 import React, { useEffect, useMemo, useState } from 'react';
-import { BookOpen, ChevronDown, GraduationCap, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { BookOpen, ChevronDown, GraduationCap, Search, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import './InterviewPrepPage.css';
+import { getActiveLanguage, translateOfflineText, translateByKey, ensureLanguageLoaded, LANGUAGE_CODES, type SupportedLanguageCode } from '../i18n/offlineTranslation';
 
 const chapters = [
   { id: '01', title: 'SAS Fundamentals' },
@@ -3388,86 +3391,584 @@ const questionsByChapter: Record<string, InterviewQuestion[]> = {
   '20': chapterTwentyQuestions
 };
 
+
+// One export at a time, including rapid double-clicks before React can re-render.
+let interviewPdfInProgress = false;
+
+/** Export all 20 chapters or a specific chapter in the active language with full multi-script support. */
+const exportInterviewPdf = async (targetChapterId?: string) => {
+  if (interviewPdfInProgress) return;
+  interviewPdfInProgress = true;
+  const overlay = document.createElement('div');
+  const frame = document.createElement('iframe');
+  try {
+    // Snapshot the selection and ensure the full static catalog for `lang` is loaded before rendering.
+    const lang = getActiveLanguage();
+    await ensureLanguageLoaded(lang);
+
+    const tr = (value: string) => translateOfflineText(value, lang);
+    const trKey = (key: string, fallback: string) => translateByKey(key, fallback, lang, translateOfflineText);
+    const safe = (value: string) =>
+      String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const text = (value: string) => safe(tr(value));
+    const keyedText = (key: string, fallback: string) => safe(trKey(key, fallback));
+
+    overlay.setAttribute('data-no-translate', '');
+    overlay.style.cssText =
+      'position:fixed;inset:0;z-index:2147483647;background:rgba(2,12,24,.96);display:flex;align-items:center;justify-content:center;color:#fff;font:16px/1.5 Arial,sans-serif;';
+    const status = document.createElement('div');
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.style.cssText =
+      'background:#0b2539;border:1px solid #00cfff;border-radius:12px;padding:24px;max-width:460px;text-align:center;';
+    status.textContent = tr(`Preparing ${lang} PDF...`);
+    overlay.appendChild(status);
+    document.body.appendChild(overlay);
+
+    frame.title = 'PDF rendering surface';
+    frame.setAttribute('aria-hidden', 'true');
+    frame.setAttribute('data-no-translate', '');
+    frame.tabIndex = -1;
+    frame.style.cssText =
+      'position:fixed;left:0;top:0;width:800px;height:1200px;border:0;pointer-events:none;z-index:2147483646;background:#fff;';
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument;
+    if (!doc) throw new Error('Could not create the PDF rendering surface.');
+
+    const fontFamilies: Record<SupportedLanguageCode, string> = {
+      EN: '"Noto Sans", Arial, sans-serif',
+      TE: '"Noto Sans Telugu", "Nirmala UI", Gautami, "Noto Sans", sans-serif',
+      TA: '"Noto Sans Tamil", "Nirmala UI", Latha, "Noto Sans", sans-serif',
+      HI: '"Noto Sans Devanagari", "Nirmala UI", Mangal, "Noto Sans", sans-serif',
+      PT: '"Noto Sans", Arial, sans-serif',
+      KO: '"Noto Sans KR", "Noto Sans CJK KR", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif',
+      FR: '"Noto Sans", Arial, sans-serif',
+      JA: '"Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic", Meiryo, sans-serif',
+    };
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+    const margin = 12;
+    const usableWidth = pdf.internal.pageSize.getWidth() - margin * 2;
+    const usableHeight = pdf.internal.pageSize.getHeight() - margin * 2;
+    const pageWidth = 720;
+    const pageHeight = Math.floor((pageWidth * usableHeight) / usableWidth);
+    doc.open();
+    doc.write(`<!doctype html><html lang="${safe(LANGUAGE_CODES[lang])}"><head><meta charset="utf-8"><style>
+      * { box-sizing:border-box; }
+      html, body { margin:0; padding:0; background:#fff; color:#142a3c; }
+      body { font:14.5px/1.68 ${fontFamilies[lang]}; }
+      #pdf-page { width:${pageWidth}px; height:${pageHeight}px; background:#fff; overflow:hidden; }
+      #pdf-content { display:flow-root; width:100%; }
+      article { display:flow-root; padding:0 0 12px; border-bottom:1px solid #e5eef5; margin-bottom:10px; }
+      h1 { font-size:24px; line-height:1.42; color:#0a4467; margin:0 0 12px; }
+      h2 { font-size:20px; line-height:1.48; color:#087c9d; margin:0 0 12px; }
+      h3 { font-size:16.5px; line-height:1.58; color:#0f2940; margin:0 0 8px; }
+      h4 { font-size:14.5px; color:#087c9d; margin:8px 0 3px; }
+      p { margin:0 0 8px; }
+      ol { margin:0 0 8px; padding-left:26px; }
+      li { margin:0 0 4px; }
+      h1,h2,h3,h4,p,li { overflow-wrap:anywhere; word-break:break-word; white-space:pre-wrap; }
+    </style></head><body><div id="pdf-page"><div id="pdf-content"></div></div></body></html>`);
+    doc.close();
+    const page = doc.getElementById('pdf-page')!;
+    const content = doc.getElementById('pdf-content')!;
+    await doc.fonts.ready;
+    let pageCount = 0;
+    const fits = () => content.getBoundingClientRect().height <= pageHeight - 2;
+
+    const flushPage = async () => {
+      if (!content.textContent?.trim()) return;
+      await doc.fonts.ready;
+      const canvas = await html2canvas(page, {
+        scale: 1.5,
+        backgroundColor: '#ffffff',
+        logging: false,
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: 800,
+        windowHeight: 1200,
+        width: pageWidth,
+        height: pageHeight,
+      });
+      try {
+        if (!canvas.width || !canvas.height) throw new Error('The PDF page could not be rendered.');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) throw new Error('Canvas rendering is not available in this browser.');
+        const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        let hasInk = false;
+        for (let i = 0; i < pixels.length; i += 4) {
+          if (pixels[i + 3] > 0 && Math.min(pixels[i], pixels[i + 1], pixels[i + 2]) < 230) {
+            hasInk = true;
+            break;
+          }
+        }
+        if (!hasInk) throw new Error('An empty PDF page was detected. Please retry after fonts have loaded.');
+        if (pageCount > 0) pdf.addPage();
+        pdf.addImage(
+          canvas.toDataURL('image/jpeg', 0.94),
+          'JPEG',
+          margin,
+          margin,
+          usableWidth,
+          (pageHeight * usableWidth) / pageWidth
+        );
+        pageCount++;
+      } finally {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+      content.replaceChildren();
+    };
+
+    const appendBlock = async (block: HTMLElement): Promise<void> => {
+      content.appendChild(block);
+      await doc.fonts.ready;
+      if (fits()) return;
+      block.remove();
+      // A multi-element question must flow into the remaining page space.
+      // Moving the whole article to the next page creates large blank areas.
+      if (block.children.length) {
+        const children = Array.from(block.children) as HTMLElement[];
+        for (const [index, child] of children.entries()) {
+          if (block.tagName === 'OL') {
+            const numbered = doc.createElement('p');
+            numbered.textContent = `${index + 1}. ${child.textContent ?? ''}`;
+            await appendBlock(numbered);
+          } else {
+            await appendBlock(child);
+          }
+        }
+        return;
+      }
+
+      // A single heading/paragraph may need a new page or a text split.
+      let remaining = Array.from(block.textContent ?? '');
+      while (remaining.length) {
+        const part = block.cloneNode(false) as HTMLElement;
+        content.appendChild(part);
+        let low = 0,
+          high = remaining.length;
+        while (low < high) {
+          const mid = Math.ceil((low + high) / 2);
+          part.textContent = remaining.slice(0, mid).join('');
+          if (fits()) low = mid;
+          else high = mid - 1;
+        }
+        if (low === 0) {
+          part.remove();
+          if (content.textContent?.trim()) {
+            await flushPage();
+            continue;
+          }
+          throw new Error('A text block could not fit on an empty PDF page.');
+        }
+        let end = low;
+        if (end < remaining.length) {
+          for (let i = end - 1; i > end / 2; i--) {
+            if (/\s/.test(remaining[i])) {
+              end = i + 1;
+              break;
+            }
+          }
+        }
+        part.textContent = remaining.slice(0, end).join('');
+        remaining = remaining.slice(end);
+        if (remaining.length) await flushPage();
+      }
+    };
+
+    const appendHtml = async (html: string) => {
+      const template = doc.createElement('template');
+      template.innerHTML = html;
+      for (const child of Array.from(template.content.children)) await appendBlock(child as HTMLElement);
+    };
+
+    const selectedChapters = targetChapterId
+      ? chapters.filter((c) => c.id === targetChapterId)
+      : chapters;
+
+    // The front cover occupies the first PDF page, edge to edge.
+    // The cover artwork is stored in public/assets/books, not in the translation JSON.
+    const addFullPageCover = async (url: string, existingPage = false) => {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Could not load PDF cover artwork: ${url}`);
+      const blob = await response.blob();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error(`Could not read PDF cover artwork: ${url}`));
+        reader.readAsDataURL(blob);
+      });
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(`Could not decode PDF cover artwork: ${url}`));
+        img.src = dataUrl;
+      });
+      if (!existingPage) pdf.addPage();
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      // Crop the artwork slightly instead of stretching it out of proportion.
+      const pageRatio = pdfWidth / pdfHeight;
+      const imageRatio = image.naturalWidth / image.naturalHeight;
+      const canvas = document.createElement('canvas');
+      canvas.width = 1240;
+      canvas.height = Math.round(canvas.width / pageRatio);
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Cover rendering is unavailable.');
+      const sourceWidth = imageRatio > pageRatio ? image.naturalHeight * pageRatio : image.naturalWidth;
+      const sourceHeight = imageRatio > pageRatio ? image.naturalHeight : image.naturalWidth / pageRatio;
+      context.drawImage(image, (image.naturalWidth - sourceWidth) / 2,
+        (image.naturalHeight - sourceHeight) / 2, sourceWidth, sourceHeight,
+        0, 0, canvas.width, canvas.height);
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      canvas.width = 0;
+      canvas.height = 0;
+      pageCount++;
+    };
+
+    await addFullPageCover('/assets/books/sas-interview-front-cover.png', true);
+    // Reserve the Table of Contents on the second page.
+    const tocPageNumber = pageCount + 1;
+    const chapterStarts: Array<{ id: string; title: string; page: number }> = [];
+    const tocTitle = tr('Table of Contents');
+    const renderToc = (withPages: boolean) =>
+      `<h1>${safe(tocTitle)}</h1>` +
+      selectedChapters.map((chapter) => {
+        const title = keyedText(`interview.chapter${chapter.id}.title`, chapter.title);
+        const start = chapterStarts.find((entry) => entry.id === chapter.id);
+        return `<div style="display:flex;align-items:baseline;gap:12px;padding:8px 0;border-bottom:1px dotted #b6c9d5;page-break-inside:avoid">` +
+          `<span style="flex:1">${safe(chapter.id)}. ${title}</span>` +
+          `<strong style="min-width:34px;text-align:right">${withPages && start ? start.page : '—'}</strong></div>`;
+      }).join('');
+    await appendHtml(renderToc(false));
+    await flushPage();
+    const total = selectedChapters.reduce((sum, chapter) => sum + (questionsByChapter[chapter.id] ?? []).length, 0);
+    let done = 0;
+    for (const chapter of selectedChapters) {
+      const chTitle = keyedText(`interview.chapter${chapter.id}.title`, chapter.title);
+      // Keep the chapter heading with enough room for its first question.
+      if (content.getBoundingClientRect().height > pageHeight - 170) await flushPage();
+      chapterStarts.push({ id: chapter.id, title: chTitle, page: pageCount + 1 });
+      await appendHtml(
+        `<h2>${keyedText('interview.ui.chapterWord', 'Chapter')} ${safe(chapter.id)}: ${chTitle}</h2>`
+      );
+      for (const [index, question] of (questionsByChapter[chapter.id] ?? []).entries()) {
+        const qid = `q${String(index + 1).padStart(2, '0')}`;
+        const qKeyBase = `interview.chapter${chapter.id}.${qid}`;
+        const stepsHtml = question.steps
+          .map((step, sIdx) => {
+            const sid = `step${String(sIdx + 1).padStart(2, '0')}`;
+            return `<li>${keyedText(`${qKeyBase}.${sid}`, step)}</li>`;
+          })
+          .join('');
+        await appendHtml(
+          `<article><h3>Q${String(index + 1).padStart(2, '0')}. ${keyedText(`${qKeyBase}.question`, question.question)}</h3>` +
+            `<h4>${keyedText('interview.ui.detailedAnswer', 'Detailed Answer')}</h4><p>${keyedText(`${qKeyBase}.answer`, question.answer)}</p>` +
+            `<h4>${keyedText('interview.ui.stepByStep', 'Step-by-Step Explanation')}</h4><ol>${stepsHtml}</ol>` +
+            `<h4>${keyedText('interview.ui.practicalScenario', 'Practical Engineering Scenario')}</h4><p>${keyedText(`${qKeyBase}.scenario`, question.scenario)}</p>` +
+            `<h4>${keyedText('interview.ui.interviewTip', 'Interview Tip')}</h4><p>${keyedText(`${qKeyBase}.takeaway`, question.takeaway)}</p></article>`
+        );
+        done++;
+        status.textContent = tr(`Generating ${lang} PDF: ${done} / ${total} questions`);
+      }
+    }
+    await flushPage();
+    if (!pageCount) throw new Error('No interview content was available to export.');
+    // Replace the reserved contents page with the actual chapter starting pages.
+    content.innerHTML = renderToc(true);
+    await doc.fonts.ready;
+    if (!fits()) throw new Error('The table of contents exceeds its reserved page.');
+    const tocCanvas = await html2canvas(page, {
+      scale: 1.5, backgroundColor: '#ffffff', logging: false,
+      scrollX: 0, scrollY: 0, windowWidth: 800, windowHeight: 1200,
+      width: pageWidth, height: pageHeight,
+    });
+    try {
+      pdf.setPage(tocPageNumber);
+      pdf.addImage(tocCanvas.toDataURL('image/jpeg', 0.94), 'JPEG', margin, margin,
+        usableWidth, (pageHeight * usableWidth) / pageWidth);
+    } finally {
+      tocCanvas.width = 0;
+      tocCanvas.height = 0;
+      content.replaceChildren();
+    }
+    // Append the back cover after the final chapter, as the last page.
+    await addFullPageCover('/assets/books/sas-interview-back-cover.png');
+    // Covers are full-bleed artwork; footer is printed on interior pages only.
+    for (let number = 2; number < pageCount; number++) {
+      pdf.setPage(number);
+      pdf.setFontSize(8);
+      pdf.setTextColor(80, 95, 110);
+      pdf.text(
+        `SAS Interview Preparation | ${lang} | Page ${number} of ${pageCount}`,
+        margin,
+        pdf.internal.pageSize.getHeight() - 5
+      );
+    }
+    const fileName = targetChapterId
+      ? `SAS_Interview_Chapter_${targetChapterId}_${lang}.pdf`
+      : `SAS_Interview_All_20_Chapters_${lang}.pdf`;
+    await pdf.save(fileName, { returnPromise: true });
+  } catch (error) {
+    window.alert(`PDF download failed: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    frame.remove();
+    overlay.remove();
+    interviewPdfInProgress = false;
+  }
+};
+
+const downloadAllChaptersPdf = () => exportInterviewPdf();
+
 export const InterviewPrepPage: React.FC = () => {
   const [selectedChapter, setSelectedChapter] = useState<string>('01');
+  const [lang, setLang] = useState<SupportedLanguageCode>(() => getActiveLanguage());
+  const [, setCatalogVersion] = useState<number>(0);
+
+  useEffect(() => {
+    const activeLang = getActiveLanguage();
+    setLang(activeLang);
+    void ensureLanguageLoaded(activeLang).then(() => setCatalogVersion((v) => v + 1));
+
+    const onLangChange = (ev: Event) => {
+      const next = (ev as CustomEvent<string>).detail ? getActiveLanguage() : getActiveLanguage();
+      setLang(next);
+      void ensureLanguageLoaded(next).then(() => setCatalogVersion((v) => v + 1));
+    };
+    const onLangReady = () => {
+      setLang(getActiveLanguage());
+      setCatalogVersion((v) => v + 1);
+    };
+    window.addEventListener('sas:language-change', onLangChange);
+    window.addEventListener('sas:language-ready', onLangReady);
+    return () => {
+      window.removeEventListener('sas:language-change', onLangChange);
+      window.removeEventListener('sas:language-ready', onLangReady);
+    };
+  }, []);
+
+  const tr = (value: string) => translateOfflineText(value, lang);
+  const trKey = (key: string, fallback: string) => translateByKey(key, fallback, lang, translateOfflineText);
+
   const [search, setSearch] = useState('');
   const [openQuestions, setOpenQuestions] = useState<number[]>([0]);
   const activeIndex = chapters.findIndex((chapter) => chapter.id === selectedChapter);
   const active = chapters[activeIndex] ?? chapters[0];
   const questions = questionsByChapter[active.id] ?? [];
-  const matches = useMemo(() => questions.map((item, index) => ({ item, index })).filter(({ item }) => {
-    const needle = search.trim().toLowerCase();
-    return !needle || [item.question, item.answer, ...item.steps, item.scenario, item.takeaway].join(' ').toLowerCase().includes(needle);
-  }), [questions, search]);
-  useEffect(() => { setOpenQuestions([0]); setSearch(''); }, [selectedChapter]);
+  const matches = useMemo(
+    () =>
+      questions
+        .map((item, index) => ({ item, index }))
+        .filter(({ item, index }) => {
+          const needle = search.trim().toLowerCase();
+          if (!needle) return true;
+          const qid = `q${String(index + 1).padStart(2, '0')}`;
+          const baseKey = `interview.chapter${active.id}.${qid}`;
+          return [
+            item.question,
+            item.answer,
+            ...item.steps,
+            item.scenario,
+            item.takeaway,
+            trKey(`${baseKey}.question`, item.question),
+            trKey(`${baseKey}.answer`, item.answer),
+            trKey(`${baseKey}.scenario`, item.scenario),
+            trKey(`${baseKey}.takeaway`, item.takeaway),
+          ]
+            .join(' ')
+            .toLowerCase()
+            .includes(needle);
+        }),
+    [questions, search, active.id, lang]
+  );
+
+  useEffect(() => {
+    setOpenQuestions([0]);
+    setSearch('');
+  }, [selectedChapter]);
+
   const toggleQuestion = (index: number) => {
-   
-    setOpenQuestions((prev) => prev.includes(index) ? prev.filter((item) => item !== index) : [...prev, index]);
+    setOpenQuestions((prev) => (prev.includes(index) ? prev.filter((item) => item !== index) : [...prev, index]));
   };
   const changeChapter = (index: number) => {
     if (index >= 0 && index < chapters.length) setSelectedChapter(chapters[index].id);
   };
   const allExpanded = matches.length > 0 && matches.every(({ index }) => openQuestions.includes(index));
   const toggleAll = () => {
-    if (allExpanded) { setOpenQuestions([]); }
-    else { setOpenQuestions(matches.map(({ index }) => index)); }
+    if (allExpanded) {
+      setOpenQuestions([]);
+    } else {
+      setOpenQuestions(matches.map(({ index }) => index));
+    }
   };
+
   return (
-    <main className="interview-prep-page" aria-label="Interview Preparation">
+    <main className="interview-prep-page" aria-label={tr('Interview Preparation')}>
       <div className="interview-prep-shell">
         <header className="interview-prep-hero">
-          <div className="interview-prep-eyebrow"><GraduationCap size={15} aria-hidden="true" /> SAS ENGINEERING HUB / INTERVIEW PREPARATION</div>
-          <h1>Substation Automation Interview Preparation</h1>
-          <p>2–3 Years Experience <span aria-hidden="true">|</span> Beginner to Advanced <span aria-hidden="true">|</span> Practical Troubleshooting</p>
+          <div className="interview-prep-eyebrow">
+            <GraduationCap size={15} aria-hidden="true" />{' '}
+            {trKey('interview.ui.eyebrow', 'SAS ENGINEERING HUB / INTERVIEW PREPARATION')}
+          </div>
+          <h1>{trKey('interview.ui.title', 'Substation Automation Interview Preparation')}</h1>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="interview-prep-download-pdf"
+              onClick={downloadAllChaptersPdf}
+              title={tr('Download all 20 chapters as a single PDF')}
+            >
+              <Download size={17} aria-hidden="true" />{' '}
+              {trKey('interview.ui.downloadAllPdf', 'Download PDF — All 20 Chapters')}
+            </button>
+            <button
+              type="button"
+              className="interview-prep-action"
+              onClick={() => exportInterviewPdf(active.id)}
+              title={tr('Download current chapter as PDF')}
+            >
+              <Download size={15} aria-hidden="true" />{' '}
+              {trKey('interview.ui.downloadChapterPdf', 'Download PDF — Current Chapter')} ({active.id})
+            </button>
+          </div>
+          <p>
+            {trKey('interview.ui.exp2to3', '2–3 Years Experience')} <span aria-hidden="true">|</span>{' '}
+            {trKey('interview.ui.begToAdv', 'Beginner to Advanced')} <span aria-hidden="true">|</span>{' '}
+            {trKey('interview.ui.pracTs', 'Practical Troubleshooting')}
+          </p>
         </header>
         <section className="interview-prep-chapters" aria-labelledby="interview-chapters-heading">
-          <div className="interview-prep-section-heading"><BookOpen size={19} aria-hidden="true" /><h2 id="interview-chapters-heading">Technical Chapters</h2></div>
+          <div className="interview-prep-section-heading">
+            <BookOpen size={19} aria-hidden="true" />
+            <h2 id="interview-chapters-heading">{trKey('interview.ui.technicalChapters', 'Technical Chapters')}</h2>
+          </div>
           <div className="interview-prep-dropdown-wrap">
-            <select id="interview-prep-chapter-select" className="interview-prep-chapter-select" aria-label="Select technical chapter" value={selectedChapter} onChange={(event) => setSelectedChapter(event.target.value)}>
-              {chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.id} · {chapter.title}</option>)}
+            <select
+              id="interview-prep-chapter-select"
+              className="interview-prep-chapter-select"
+              aria-label={tr('Select technical chapter')}
+              value={selectedChapter}
+              onChange={(event) => setSelectedChapter(event.target.value)}
+            >
+              {chapters.map((chapter) => (
+                <option key={chapter.id} value={chapter.id}>
+                  {chapter.id} · {trKey(`interview.chapter${chapter.id}.title`, chapter.title)}
+                </option>
+              ))}
             </select>
             <ChevronDown size={19} aria-hidden="true" className="interview-prep-dropdown-icon" />
           </div>
         </section>
         <section className="interview-prep-selected" aria-labelledby="interview-active-chapter-heading">
-          <span className="interview-prep-selected-label">SELECTED CHAPTER · {activeIndex + 1} OF {chapters.length}</span>
-          <h2 id="interview-active-chapter-heading">{active.id} · {active.title}</h2>
-          <p className="interview-prep-chapter-intro">{questions.length} detailed interview questions for 2–3 years of SAS engineering experience. Expand a question to read the explanation, procedure and scenario.</p>
+          <span className="interview-prep-selected-label">
+            {tr(`SELECTED CHAPTER · ${activeIndex + 1} OF ${chapters.length}`)}
+          </span>
+          <h2 id="interview-active-chapter-heading">
+            {active.id} · {trKey(`interview.chapter${active.id}.title`, active.title)}
+          </h2>
+          <p className="interview-prep-chapter-intro">
+            {tr(
+              `${questions.length} detailed interview questions for 2–3 years of SAS engineering experience. Expand a question to read the explanation, procedure and scenario.`
+            )}
+          </p>
           <div className="interview-prep-toolbar">
             <label className="interview-prep-search-wrap">
               <Search size={17} aria-hidden="true" />
-              <span className="interview-prep-sr-only">Search questions and answers in this chapter</span>
-              <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search this chapter..." aria-label="Search questions and answers in this chapter" />
+              <span className="interview-prep-sr-only">{tr('Search questions and answers in this chapter')}</span>
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={trKey('interview.ui.searchPlaceholder', 'Search this chapter...')}
+                aria-label={tr('Search questions and answers in this chapter')}
+              />
             </label>
-            <button type="button" className="interview-prep-action" onClick={toggleAll} disabled={matches.length === 0}>{allExpanded ? 'Collapse all' : 'Expand all'}</button>
+            <button type="button" className="interview-prep-action" onClick={toggleAll} disabled={matches.length === 0}>
+              {allExpanded
+                ? trKey('interview.ui.collapseAll', 'Collapse all')
+                : trKey('interview.ui.expandAll', 'Expand all')}
+            </button>
           </div>
-          <p className="interview-prep-results" role="status">Showing {matches.length} of {questions.length} questions{search.trim() ? ' matching your search' : ''}</p>
+          <p className="interview-prep-results" role="status">
+            {tr(
+              `Showing ${matches.length} of ${questions.length} questions${
+                search.trim() ? ' matching your search' : ''
+              }`
+            )}
+          </p>
           <div className="interview-prep-question-list">
-            {matches.length === 0 && <p className="interview-prep-empty">No matching questions. Try a different search term.</p>}
+            {matches.length === 0 && (
+              <p className="interview-prep-empty">
+                {trKey('interview.ui.noMatching', 'No matching questions. Try a different search term.')}
+              </p>
+            )}
             {matches.map(({ item, index }) => {
               const isOpen = openQuestions.includes(index);
               const panelId = `interview-answer-${active.id}-${index}`;
+              const qid = `q${String(index + 1).padStart(2, '0')}`;
+              const qKeyBase = `interview.chapter${active.id}.${qid}`;
               return (
                 <article className="interview-prep-qa" key={`${active.id}-${index}`}>
-                  <button type="button" className="interview-prep-question-toggle" aria-expanded={isOpen} aria-controls={panelId} onClick={() => toggleQuestion(index)}>
+                  <button
+                    type="button"
+                    className="interview-prep-question-toggle"
+                    aria-expanded={isOpen}
+                    aria-controls={panelId}
+                    onClick={() => toggleQuestion(index)}
+                  >
                     <span className="interview-prep-question-number">Q{String(index + 1).padStart(2, '0')}</span>
-                    <span className="interview-prep-question-text">{item.question}</span>
+                    <span className="interview-prep-question-text">{trKey(`${qKeyBase}.question`, item.question)}</span>
                     <ChevronDown className={isOpen ? 'is-open' : ''} size={19} aria-hidden="true" />
                   </button>
-                  {isOpen && <div id={panelId} className="interview-prep-answer">
-                    <h3>Detailed Answer</h3><p>{item.answer}</p>
-                    <h3>Step-by-Step Explanation</h3><ol>{item.steps.map((step, stepIndex) => <li key={stepIndex}>{step}</li>)}</ol>
-                    <div className="interview-prep-scenario"><h3>Practical Engineering Scenario</h3><p>{item.scenario}</p></div>
-                    <div className="interview-prep-takeaway"><strong>Interview Tip:</strong> {item.takeaway}</div>
-                  </div>}
+                  {isOpen && (
+                    <div id={panelId} className="interview-prep-answer">
+                      <h3>{trKey('interview.ui.detailedAnswer', 'Detailed Answer')}</h3>
+                      <p>{trKey(`${qKeyBase}.answer`, item.answer)}</p>
+                      <h3>{trKey('interview.ui.stepByStep', 'Step-by-Step Explanation')}</h3>
+                      <ol>
+                        {item.steps.map((step, stepIndex) => {
+                          const sid = `step${String(stepIndex + 1).padStart(2, '0')}`;
+                          return <li key={stepIndex}>{trKey(`${qKeyBase}.${sid}`, step)}</li>;
+                        })}
+                      </ol>
+                      <div className="interview-prep-scenario">
+                        <h3>{trKey('interview.ui.practicalScenario', 'Practical Engineering Scenario')}</h3>
+                        <p>{trKey(`${qKeyBase}.scenario`, item.scenario)}</p>
+                      </div>
+                      <div className="interview-prep-takeaway">
+                        <strong>{trKey('interview.ui.interviewTipColon', 'Interview Tip:')}</strong>{' '}
+                        {trKey(`${qKeyBase}.takeaway`, item.takeaway)}
+                      </div>
+                    </div>
+                  )}
                 </article>
               );
             })}
           </div>
-          <nav className="interview-prep-nav" aria-label="Chapter navigation">
-            <button type="button" className="interview-prep-action" disabled={activeIndex <= 0} onClick={() => changeChapter(activeIndex - 1)}><ChevronLeft size={16} aria-hidden="true" /> Previous chapter</button>
-            <span>{activeIndex + 1} / {chapters.length}</span>
-            <button type="button" className="interview-prep-action" disabled={activeIndex >= chapters.length - 1} onClick={() => changeChapter(activeIndex + 1)}>Next chapter <ChevronRight size={16} aria-hidden="true" /></button>
+          <nav className="interview-prep-nav" aria-label={tr('Chapter navigation')}>
+            <button
+              type="button"
+              className="interview-prep-action"
+              disabled={activeIndex <= 0}
+              onClick={() => changeChapter(activeIndex - 1)}
+            >
+              <ChevronLeft size={16} aria-hidden="true" /> {trKey('interview.ui.prevChapter', 'Previous chapter')}
+            </button>
+            <span>
+              {activeIndex + 1} / {chapters.length}
+            </span>
+            <button
+              type="button"
+              className="interview-prep-action"
+              disabled={activeIndex >= chapters.length - 1}
+              onClick={() => changeChapter(activeIndex + 1)}
+            >
+              {trKey('interview.ui.nextChapter', 'Next chapter')} <ChevronRight size={16} aria-hidden="true" />
+            </button>
           </nav>
         </section>
       </div>

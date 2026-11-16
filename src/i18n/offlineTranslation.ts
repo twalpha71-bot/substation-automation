@@ -20,6 +20,24 @@ import { IEC61850_ACADEMY_CHAPTERS, ACADEMY_GLOSSARY_TERMS } from '../data/iec61
 import { INTERVIEW_MODULES_LIST, INTERVIEW_QUESTIONS_BANK, TROUBLESHOOTING_SCENARIOS_20 } from '../data/interviewPrepData';
 import { CCNA_EXAM_DOMAINS, CCNA_TOPOLOGIES, CCNA_PACKET_FLOWS, CCNA_CHAPTERS } from '../data/ccnaAcademyData';
 import { LEARNING_MODULES } from '../data/learningData';
+import {
+  ensureLanguageLoaded,
+  getLoadedKeyTranslation,
+  getLoadedTextTranslation,
+  isLanguageCatalogLoaded,
+  REVERSE_TRANSLATION_MAP,
+  translateByKey,
+  translateDynamicPattern,
+} from './localization';
+
+export {
+  ensureLanguageLoaded,
+  getLoadedKeyTranslation,
+  getLoadedTextTranslation,
+  isLanguageCatalogLoaded,
+  translateByKey,
+  translateDynamicPattern,
+};
 
 export type SupportedLanguageCode = 'EN' | 'TE' | 'TA' | 'HI' | 'PT' | 'KO' | 'FR' | 'JA';
 
@@ -28,7 +46,7 @@ export const LANGUAGE_CODES: Record<SupportedLanguageCode, string> = {
   TE: 'te',
   TA: 'ta',
   HI: 'hi',
-  PT: 'pt',
+  PT: 'pt-BR',
   KO: 'ko',
   FR: 'fr',
   JA: 'ja',
@@ -11022,7 +11040,7 @@ export const UI_TRANSLATIONS: Record<string, Record<SupportedLanguageCode, strin
   }
 };
 
-const PHRASE_RULES: Record<Exclude<SupportedLanguageCode, 'EN'>, ReadonlyArray<readonly [string, string]>> = {
+export const PHRASE_RULES: Record<Exclude<SupportedLanguageCode, 'EN'>, ReadonlyArray<readonly [string, string]>> = {
   "TE": [
     [
       "Offline translations are available for supported interface labels. Other page content remains unchanged until translated locally.",
@@ -25656,6 +25674,28 @@ const PHRASE_RULES: Record<Exclude<SupportedLanguageCode, 'EN'>, ReadonlyArray<r
 };
 
 // Build runtime index of authored Telugu pairs from project data files
+
+// Reviewed complete UI labels for all eight supported languages.
+const INTERVIEW_UI_TRANSLATIONS: Record<string, Record<SupportedLanguageCode, string>> = {
+  "Substation Automation Interview Preparation": { EN: "Substation Automation Interview Preparation", TE: "సబ్‌స్టేషన్ ఆటోమేషన్ ఇంటర్వ్యూ ప్రిపరేషన్", TA: "துணை மின் நிலைய தானியக்க நேர்காணல் தயாரிப்பு", HI: "सबस्टेशन ऑटोमेशन साक्षात्कार की तैयारी", PT: "Preparação para entrevista de automação de subestações", KO: "변전소 자동화 면접 준비", FR: "Préparation à l’entretien en automatisation de poste", JA: "変電所自動化の面接対策" },
+  "Download PDF — All 20 Chapters": { EN: "Download PDF — All 20 Chapters", TE: "PDF డౌన్‌లోడ్ — మొత్తం 20 అధ్యాయాలు", TA: "PDF பதிவிறக்கம் — அனைத்து 20 அத்தியாயங்கள்", HI: "PDF डाउनलोड करें — सभी 20 अध्याय", PT: "Baixar PDF — Todos os 20 capítulos", KO: "PDF 다운로드 — 전체 20개 장", FR: "Télécharger le PDF — Les 20 chapitres", JA: "PDF をダウンロード — 全20章" },
+  "Technical Chapters": { EN: "Technical Chapters", TE: "టెక్నికల్ అధ్యాయాలు", TA: "தொழில்நுட்ப அத்தியாயங்கள்", HI: "तकनीकी अध्याय", PT: "Capítulos técnicos", KO: "기술 장", FR: "Chapitres techniques", JA: "技術編" },
+  "Detailed Answer": { EN: "Detailed Answer", TE: "వివరణాత్మక సమాధానం", TA: "விரிவான பதில்", HI: "विस्तृत उत्तर", PT: "Resposta detalhada", KO: "상세 답변", FR: "Réponse détaillée", JA: "詳しい回答" },
+  "Step-by-Step Explanation": { EN: "Step-by-Step Explanation", TE: "దశలవారీ వివరణ", TA: "படிப்படியான விளக்கம்", HI: "चरण-दर-चरण व्याख्या", PT: "Explicação passo a passo", KO: "단계별 설명", FR: "Explication étape par étape", JA: "手順ごとの説明" },
+  "Practical Engineering Scenario": { EN: "Practical Engineering Scenario", TE: "ప్రాక్టికల్ ఇంజనీరింగ్ ఉదాహరణ", TA: "நடைமுறை பொறியியல் சூழல்", HI: "व्यावहारिक इंजीनियरिंग परिदृश्य", PT: "Cenário prático de engenharia", KO: "실무 엔지니어링 사례", FR: "Scénario pratique d’ingénierie", JA: "実務エンジニアリングの事例" },
+  "Interview Tip": { EN: "Interview Tip", TE: "ఇంటర్వ్యూ సూచన", TA: "நேர்காணல் குறிப்பு", HI: "इंटरव्यू सुझाव", PT: "Dica para entrevista", KO: "면접 팁", FR: "Conseil pour l’entretien", JA: "面接のヒント" },
+  "Expand all": { EN: "Expand all", TE: "అన్నీ విస్తరించండి", TA: "அனைத்தையும் விரிவாக்கு", HI: "सभी खोलें", PT: "Expandir tudo", KO: "모두 펼치기", FR: "Tout développer", JA: "すべて展開" },
+  "Collapse all": { EN: "Collapse all", TE: "అన్నీ మూసివేయండి", TA: "அனைத்தையும் சுருக்கு", HI: "सभी समेटें", PT: "Recolher tudo", KO: "모두 접기", FR: "Tout réduire", JA: "すべて折りたたむ" },
+  "Search this chapter...": { EN: "Search this chapter...", TE: "ఈ అధ్యాయంలో వెతకండి...", TA: "இந்த அத்தியாயத்தில் தேடுங்கள்...", HI: "इस अध्याय में खोजें...", PT: "Pesquisar neste capítulo...", KO: "이 장에서 검색...", FR: "Rechercher dans ce chapitre...", JA: "この章を検索..." },
+  "Previous chapter": { EN: "Previous chapter", TE: "మునుపటి అధ్యాయం", TA: "முந்தைய அத்தியாயம்", HI: "पिछला अध्याय", PT: "Capítulo anterior", KO: "이전 장", FR: "Chapitre précédent", JA: "前の章" },
+  "Next chapter": { EN: "Next chapter", TE: "తర్వాతి అధ్యాయం", TA: "அடுத்த அத்தியாயம்", HI: "अगला अध्याय", PT: "Próximo capítulo", KO: "다음 장", FR: "Chapitre suivant", JA: "次の章" },
+  "SAS Fundamentals": { EN: "SAS Fundamentals", TE: "SAS ప్రాథమిక అంశాలు", TA: "SAS அடிப்படைகள்", HI: "SAS की मूल बातें", PT: "Fundamentos de SAS", KO: "SAS 기초", FR: "Fondamentaux du SAS", JA: "SAS の基礎" },
+  "Networking": { EN: "Networking", TE: "నెట్‌వర్కింగ్", TA: "வலையமைப்பு", HI: "नेटवर्किंग", PT: "Redes", KO: "네트워킹", FR: "Réseaux", JA: "ネットワーク" },
+  "Engineering Tools & Software": { EN: "Engineering Tools & Software", TE: "ఇంజనీరింగ్ టూల్స్ మరియు సాఫ్ట్‌వేర్", TA: "பொறியியல் கருவிகள் மற்றும் மென்பொருள்", HI: "इंजीनियरिंग टूल्स और सॉफ्टवेयर", PT: "Ferramentas e software de engenharia", KO: "엔지니어링 도구 및 소프트웨어", FR: "Outils et logiciels d’ingénierie", JA: "エンジニアリングツールとソフトウェア" },
+  "Final Revision & Mock Technical Interview": { EN: "Final Revision & Mock Technical Interview", TE: "చివరి రివిజన్ మరియు మాక్ టెక్నికల్ ఇంటర్వ్యూ", TA: "இறுதித் திருப்புதல் மற்றும் மாதிரி தொழில்நுட்ப நேர்காணல்", HI: "अंतिम पुनरावृत्ति और मॉक तकनीकी इंटरव्यू", PT: "Revisão final e entrevista técnica simulada", KO: "최종 복습 및 모의 기술 면접", FR: "Révision finale et entretien technique blanc", JA: "最終復習と模擬技術面接" },
+};
+Object.assign(UI_TRANSLATIONS, INTERVIEW_UI_TRANSLATIONS);
+
 const REVERSE_UI_MAP = new Map<string, string>();
 for (const [enKey, langMap] of Object.entries(UI_TRANSLATIONS)) {
   const normEn = enKey.replace(/\s+/g, ' ').trim();
@@ -25855,6 +25895,73 @@ export function normalizeLanguageCode(code?: string | null): SupportedLanguageCo
 }
 
 /**
+ * Human-reviewed full-sentence translations for interview material.
+ * Extend this table with COMPLETE sentences, never isolated word substitutions.
+ * Technical identifiers remain in English. Unreviewed sentences fall back to EN.
+ */
+const REVIEWED_SENTENCE_TRANSLATIONS: Record<string, Partial<Record<SupportedLanguageCode, string>>> = {
+  'HMI close button is disabled while the breaker is healthy: inspect Local/Remote mode, interlock conditions, permissions and SCADA command configuration.': {
+    TE: 'Breaker Healthy గా ఉన్నప్పటికీ HMI లో Close button Disabled గా కనిపిస్తే, ముందుగా Local/Remote mode ని పరిశీలించాలి. తర్వాత Interlocking conditions, User Permissions మరియు SCADA Command Configuration సరిగ్గా ఉన్నాయో తనిఖీ చేయాలి.',
+    TA: 'Breaker சரியாக இருந்தும் HMI-யில் Close button செயலிழந்திருந்தால், முதலில் Local/Remote mode-ஐச் சரிபார்க்கவும். பின்னர் Interlocking conditions, User Permissions மற்றும் SCADA Command Configuration சரியாக உள்ளனவா என்பதைச் சரிபார்க்கவும்.',
+    HI: 'Breaker सही स्थिति में होने के बावजूद यदि HMI पर Close button निष्क्रिय है, तो पहले Local/Remote mode जाँचें। इसके बाद Interlocking conditions, User Permissions और SCADA Command Configuration की जाँच करें।',
+    PT: 'Se o Breaker estiver em condições normais, mas o botão Close estiver desativado na HMI, verifique primeiro o modo Local/Remote. Depois, confira as condições de Interlocking, as permissões do usuário e a configuração de comandos do SCADA.',
+    KO: 'Breaker가 정상인데도 HMI의 Close button이 비활성화되어 있다면 먼저 Local/Remote mode를 확인하세요. 그런 다음 Interlocking 조건, 사용자 권한 및 SCADA 명령 설정을 점검하세요.',
+    FR: 'Si le Breaker est en bon état mais que le bouton Close est désactivé sur la HMI, vérifiez d’abord le mode Local/Remote. Contrôlez ensuite les conditions d’Interlocking, les autorisations utilisateur et la configuration des commandes SCADA.',
+    JA: 'Breaker が正常なのに HMI の Close button が無効になっている場合は、まず Local/Remote mode を確認します。次に、Interlocking 条件、ユーザー権限、SCADA のコマンド設定を点検します。'
+  },
+  'Never bypass interlocks to make a test pass.': {
+    TE: 'Test PASS అవ్వడం కోసం Interlocks ని ఎప్పుడూ Bypass చేయకూడదు. అవి Electrical Equipment మరియు Operators భద్రత కోసం ఉంటాయి.',
+    TA: 'Test வெற்றி பெற வேண்டும் என்பதற்காக Interlocks-ஐ ஒருபோதும் Bypass செய்யக்கூடாது. அவை Electrical Equipment மற்றும் Operators-ன் பாதுகாப்பிற்காக அமைக்கப்பட்டுள்ளன.',
+    HI: 'केवल Test पास कराने के लिए Interlocks को कभी Bypass न करें। ये Electrical Equipment और Operators की सुरक्षा के लिए होते हैं।',
+    PT: 'Nunca faça Bypass dos Interlocks apenas para que um Test seja aprovado. Eles protegem os equipamentos elétricos e os operadores.',
+    KO: 'Test를 통과시키기 위해 Interlocks를 절대로 Bypass하지 마세요. Interlocks는 전기 설비와 작업자의 안전을 위한 장치입니다.',
+    FR: 'Ne contournez jamais les Interlocks pour faire réussir un Test. Ils protègent les équipements électriques et les opérateurs.',
+    JA: 'Test を合格させるために Interlocks を Bypass してはいけません。Interlocks は電気設備と作業員の安全を守るためのものです。'
+  }
+};
+
+/** Curated offline interview translations. Add full sentences here, not word fragments. */
+const INTERVIEW_SENTENCES: Record<string, Partial<Record<SupportedLanguageCode, string>>> = {
+  'What is a Substation Automation System (SAS), and what are its main functions?': {
+    TE: 'Substation Automation System (SAS) అంటే ఏమిటి? దాని ముఖ్యమైన విధులు ఏమిటి?',
+    HI: 'Substation Automation System (SAS) क्या है और इसके मुख्य कार्य क्या हैं?',
+    TA: 'Substation Automation System (SAS) என்றால் என்ன? அதன் முக்கிய பணிகள் என்ன?',
+    PT: 'O que é um Substation Automation System (SAS) e quais são suas principais funções?',
+    FR: 'Qu’est-ce qu’un Substation Automation System (SAS) et quelles sont ses principales fonctions ?',
+    KO: 'Substation Automation System (SAS)이란 무엇이며 주요 기능은 무엇인가요?',
+    JA: 'Substation Automation System (SAS) とは何ですか。また、主な機能は何ですか。',
+  },
+  'SAS is an integrated system that monitors, controls and records substation equipment through IEDs, communication networks, station computers and gateways. Protection remains a separate safety-critical function, even when information is exchanged with SAS.': {
+    TE: 'Substation Automation System (SAS) అనేది Substation లోని Electrical Equipment ని Monitor చేయడానికి, Control చేయడానికి మరియు వాటి సమాచారాన్ని Record చేయడానికి ఉపయోగించే సమగ్ర వ్యవస్థ. ఇందులో IEDs, Communication Networks, Station Computers మరియు Gateways ముఖ్యమైన పాత్ర పోషిస్తాయి. Protection అనేది ప్రత్యేకమైన Safety-Critical Function. SAS తో సమాచారం మార్పిడి జరిగినప్పటికీ Protection వ్యవస్థ తన భద్రతా విధులను స్వతంత్రంగా నిర్వహిస్తుంది.',
+    HI: 'Substation Automation System (SAS) एक एकीकृत प्रणाली है, जो IEDs, Communication Networks, Station Computers और Gateways की सहायता से Substation के उपकरणों की निगरानी, नियंत्रण और रिकॉर्डिंग करती है। जानकारी का आदान-प्रदान SAS से होने पर भी Protection एक अलग और सुरक्षा की दृष्टि से महत्वपूर्ण कार्य बना रहता है।',
+    TA: 'Substation Automation System (SAS) என்பது IEDs, Communication Networks, Station Computers மற்றும் Gateways மூலம் Substation உபகரணங்களைக் கண்காணிக்கவும், கட்டுப்படுத்தவும், அவற்றின் தகவல்களைப் பதிவு செய்யவும் பயன்படும் ஒருங்கிணைந்த அமைப்பாகும். SAS உடன் தகவல்கள் பரிமாறப்பட்டாலும் Protection என்பது தனியான, பாதுகாப்பு சார்ந்த முக்கிய செயல்பாடாகவே இருக்கும்.',
+    PT: 'O Substation Automation System (SAS) é um sistema integrado que monitora, controla e registra os equipamentos da subestação por meio de IEDs, redes de comunicação, computadores da estação e gateways. A Protection continua sendo uma função separada e essencial para a segurança, mesmo quando troca informações com o SAS.',
+    FR: 'Le Substation Automation System (SAS) est un système intégré qui surveille, commande et enregistre les équipements du poste au moyen des IEDs, des réseaux de communication, des ordinateurs de station et des gateways. La Protection reste une fonction de sécurité distincte, même lorsque des informations sont échangées avec le SAS.',
+    KO: 'Substation Automation System (SAS)은 IEDs, 통신 네트워크, 스테이션 컴퓨터 및 Gateways를 통해 변전소 설비를 감시하고 제어하며 관련 정보를 기록하는 통합 시스템입니다. SAS와 정보를 교환하더라도 Protection은 별도의 안전 필수 기능으로 유지됩니다.',
+    JA: 'Substation Automation System (SAS) は、IEDs、通信ネットワーク、ステーションコンピューター、Gateways を通じて変電所設備を監視・制御し、情報を記録する統合システムです。SAS と情報を交換する場合でも、Protection は安全上重要な独立した機能として維持されます。',
+  },
+  'Identify primary equipment such as breakers, disconnectors and transformers and the associated secondary IEDs.': { TE: 'ముందుగా Breakers, Disconnectors, Transformers వంటి Primary Equipment ని, వాటికి సంబంధించిన IEDs ని గుర్తించాలి.' },
+  'Collect status, measurements, alarms and events from IEDs using the configured protocols.': { TE: 'IEDs నుంచి Status, Measurements, Alarms మరియు Events ని సంబంధిత Communication Protocols ద్వారా సేకరించాలి.' },
+  'Present validated data on the HMI and record events with timestamps.': { TE: 'సేకరించిన సమాచారాన్ని HMI లో చూపించి, Events ని Timestamps తో Record చేయాలి.' },
+  'Issue authorized operator controls through the configured control model and interlocks.': { TE: 'సరైన Authorization మరియు Interlocking Conditions ఉన్నప్పుడు మాత్రమే Operator Commands అనుమతించాలి.' },
+  'Forward selected operational points to the control centre through the gateway.': { TE: 'అవసరమైన Operational Signals ని Gateway ద్వారా Control Centre కి పంపించాలి.' },
+  'During FAT, change a simulated breaker auxiliary contact and confirm the IED input, SCADA point, alarm/event record and gateway indication update correctly.': { TE: 'FAT సమయంలో Simulated Breaker Auxiliary Contact స్థితిని మార్చాలి. ఆ మార్పు IED Input, SCADA Point, Alarm/Event Record మరియు Gateway Indication లో సరిగ్గా Update అవుతుందో తనిఖీ చేయాలి.' },
+  'Explain the complete signal path rather than describing SAS as only an HMI.': { TE: 'SAS అంటే HMI మాత్రమే అని చెప్పకుండా, Field Equipment నుంచి IED, SCADA మరియు Gateway వరకు పూర్తి Signal Path ని వివరించాలి.' },
+  'Explain the difference between a protection relay, BCU, RTU, gateway and SCADA server.': { TE: 'Protection Relay, BCU, RTU, Gateway మరియు SCADA Server మధ్య తేడా ఏమిటి?' },
+  'Describe the end-to-end flow of a breaker status from the yard to the HMI.': { TE: 'Switchyard నుంచి HMI వరకు Breaker Status ఎలా చేరుతుందో వివరించండి.' },
+  'What is the difference between station bus and process bus?': { TE: 'Station Bus మరియు Process Bus మధ్య తేడా ఏమిటి?' },
+  'How do you verify a newly integrated IED in the SAS?': { TE: 'SAS లో కొత్తగా integrate చేసిన IED ని ఎలా verify చేస్తారు?' },
+  'What is the difference between an alarm, event and SOE record?': { TE: 'Alarm, Event మరియు SOE Record మధ్య తేడా ఏమిటి?' },
+  'Explain local, remote and supervisory control of a circuit breaker.': { TE: 'Circuit Breaker యొక్క Local, Remote మరియు Supervisory Control గురించి వివరించండి.' },
+  'What is redundancy in SAS, and how do you test it?': { TE: 'SAS లో Redundancy అంటే ఏమిటి? దాన్ని ఎలా Test చేస్తారు?' },
+  'What checks do you perform before starting FAT for a SAS project?': { TE: 'SAS Project లో FAT ప్రారంభించే ముందు ఏ అంశాలను తనిఖీ చేస్తారు?' },
+  'A device responds to ping but shows communication failure on SCADA. What do you check?': { TE: 'Device కి Ping వస్తున్నా SCADA లో Communication Failure కనిపిస్తే ఏవి తనిఖీ చేస్తారు?' },
+  '2–3 Years Experience': { TE: '2–3 సంవత్సరాల అనుభవం', HI: '2–3 वर्ष का अनुभव', TA: '2–3 ஆண்டுகள் அனுபவம்', PT: '2–3 anos de experiência', FR: '2 à 3 ans d’expérience', KO: '경력 2~3년', JA: '実務経験2～3年' },
+  'Beginner to Advanced': { TE: 'ప్రాథమిక స్థాయి నుంచి ఉన్నత స్థాయి వరకు', HI: 'शुरुआती से उन्नत स्तर तक', TA: 'அடிப்படை முதல் மேம்பட்ட நிலை வரை', PT: 'Do básico ao avançado', FR: 'Du niveau débutant au niveau avancé', KO: '초급부터 고급까지', JA: '初級から上級まで' },
+  'Practical Troubleshooting': { TE: 'ప్రాక్టికల్ Troubleshooting', HI: 'व्यावहारिक समस्या निवारण', TA: 'நடைமுறைப் பிழை கண்டறிதல்', PT: 'Diagnóstico prático de falhas', FR: 'Dépannage pratique', KO: '실무 문제 해결', JA: '実践的なトラブルシューティング' },
+};
+
+/**
  * Synchronously translates any UI string, heading, button, table label, dialog,
  * or engineering explanation into the requested target language while keeping
  * all technical terminology, commands, formulas, and device identifiers unchanged.
@@ -25868,39 +25975,48 @@ export function translateOfflineText(rawText: string, targetLangInput: string): 
   const trimmed = rawText.trim();
   if (!trimmed) return rawText;
 
-  // 1. Check Exact UI Dictionary first
   const normKey = trimmed.replace(/\s+/g, ' ');
+
+  // 1. Check pre-translated static JSON catalog (16,310 keys across all modules & 20 chapters)
+  const catalogMatch = getLoadedTextTranslation(normKey, targetLang);
+  if (catalogMatch) {
+    return leadingWs + catalogMatch + trailingWs;
+  }
+
+  // Trigger async load if this language's static JSON catalog is not yet in memory
+  if (!isLanguageCatalogLoaded(targetLang)) {
+    void ensureLanguageLoaded(targetLang);
+  }
+
+  // 2. Check Exact UI Dictionary
   if (UI_TRANSLATIONS[normKey]?.[targetLang]) {
     return leadingWs + UI_TRANSLATIONS[normKey][targetLang] + trailingWs;
   }
 
-  // 2. If Telugu ('TE'), check authored Telugu pairs from project data files
+  // 3. Check Dynamic Number/Parameter Templates (e.g., "Showing 12 of 12 questions")
+  const dynMatch = translateDynamicPattern(normKey, targetLang);
+  if (dynMatch) {
+    return leadingWs + dynMatch + trailingWs;
+  }
+
+  // 4. If Telugu ('TE'), check authored Telugu pairs from project data files
   if (targetLang === 'TE' && AUTHORED_TE_MAP.has(normKey)) {
     return leadingWs + AUTHORED_TE_MAP.get(normKey)! + trailingWs;
   }
 
-  // 3. If purely technical (e.g. "132/33/11 kV", "BAY-132-L1", "XCBR1.Pos.stVal [ST]"), keep unchanged
+  // 5. If purely technical (e.g. "132/33/11 kV", "BAY-132-L1", "XCBR1.Pos.stVal [ST]"), keep unchanged
   if (isPureTechnicalText(normKey)) {
     return rawText;
   }
 
-  // 4. Mask protected technical tokens (__TK0__, __TK1__, ...), apply phrase translations, and restore tokens
-  const tokens: string[] = [];
-  let masked = normKey.replace(PROTECTED_TECH_REGEX, (match) => {
-    const idx = tokens.length;
-    tokens.push(match);
-    return `__TK${idx}__`;
-  });
-
-  const rules = PHRASE_RULES[targetLang as Exclude<SupportedLanguageCode, 'EN'>] || [];
-  for (const [srcPhrase, dstPhrase] of rules) {
-    const esc = srcPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const rx = new RegExp(`\\b${esc}\\b`, 'gi');
-    masked = masked.replace(rx, dstPhrase);
+  // 6. Check reviewed complete-sentence fallback table
+  const authoredSentence =
+    INTERVIEW_SENTENCES[normKey]?.[targetLang] ?? REVIEWED_SENTENCE_TRANSLATIONS[normKey]?.[targetLang];
+  if (authoredSentence) {
+    return leadingWs + authoredSentence + trailingWs;
   }
 
-  const restored = masked.replace(/__TK(\d+)__/g, (_, n) => tokens[Number(n)] ?? '');
-  return leadingWs + restored + trailingWs;
+  return rawText;
 }
 
 // DOM TreeWalker + MutationObserver for automatic synchronous translation across all pages
@@ -25930,7 +26046,7 @@ function scanNode(root: Node): void {
     const prevRendered = lastRendered.get(textNode);
     if (!originals.has(textNode) || (prevRendered !== undefined && currentVal !== prevRendered)) {
       const normCur = currentVal.replace(/\s+/g, ' ').trim();
-      const canonicalEn = REVERSE_UI_MAP.get(normCur);
+      const canonicalEn = REVERSE_UI_MAP.get(normCur) ?? REVERSE_TRANSLATION_MAP.get(normCur);
       originals.set(textNode, canonicalEn ?? currentVal);
     }
     const original = originals.get(textNode) ?? currentVal;
@@ -25964,7 +26080,11 @@ function scanNode(root: Node): void {
     for (const attr of TRANSLATABLE_ATTRS) {
       const cur = el.getAttribute(attr);
       if (cur === null) continue;
-      if (!attrMap.has(attr)) attrMap.set(attr, cur);
+      if (!attrMap.has(attr)) {
+        const normAttr = cur.replace(/\s+/g, ' ').trim();
+        const canonicalAttr = REVERSE_UI_MAP.get(normAttr) ?? REVERSE_TRANSLATION_MAP.get(normAttr);
+        attrMap.set(attr, canonicalAttr ?? cur);
+      }
       const orig = attrMap.get(attr)!;
       const nextAttr = currentLanguage === 'EN' ? orig : translateOfflineText(orig, currentLanguage);
       if (cur !== nextAttr) el.setAttribute(attr, nextAttr);
@@ -25988,6 +26108,13 @@ export function setOnlineLanguage(code: string): void {
     document.documentElement.lang = LANGUAGE_CODES[normalized];
     if (document.body) scanNode(document.body);
   }
+  if (normalized !== 'EN') {
+    void ensureLanguageLoaded(normalized).then(() => {
+      if (typeof document !== 'undefined' && document.body && currentLanguage === normalized) {
+        scanNode(document.body);
+      }
+    });
+  }
 }
 
 export function startOnlineTranslation(): void {
@@ -26001,6 +26128,12 @@ export function startOnlineTranslation(): void {
   }
   currentLanguage = initial;
   document.documentElement.lang = LANGUAGE_CODES[currentLanguage];
+
+  if (currentLanguage !== 'EN') {
+    void ensureLanguageLoaded(currentLanguage).then(() => {
+      if (document.body) scanNode(document.body);
+    });
+  }
 
   observer?.disconnect();
   observer = new MutationObserver((records) => {
@@ -26021,5 +26154,8 @@ export function startOnlineTranslation(): void {
   window.addEventListener('sas:language-change', (ev: Event) => {
     const detail = (ev as CustomEvent<string>).detail;
     setOnlineLanguage(detail);
+  });
+  window.addEventListener('sas:language-ready', () => {
+    if (document.body) scanNode(document.body);
   });
 }

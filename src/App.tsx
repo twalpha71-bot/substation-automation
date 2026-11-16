@@ -182,6 +182,7 @@ export default function App() {
   const [notifMenuOpen, setNotifMenuOpen] = useState<boolean>(false);
   const [langMenuOpen, setLangMenuOpen] = useState<boolean>(false);
   const [displayLanguage, setDisplayLanguage] = useState<SupportedLanguageCode>(() => { try { return normalizeLanguageCode(localStorage.getItem('sas-display-language')); } catch { return 'EN'; } });
+  const [, setLangCatalogTick] = useState<number>(0);
   const t = (english: string) => translateOfflineText(english, displayLanguage);
   const [authPopupMode, setAuthPopupMode] = useState<'SIGN_IN' | 'SIGN_UP' | 'FORGOT_PASSWORD' | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
@@ -217,8 +218,13 @@ export default function App() {
       const next = normalizeLanguageCode(detail);
       setDisplayLanguage((prev) => (prev === next ? prev : next));
     };
+    const onLangReady = () => setLangCatalogTick((v) => v + 1);
     window.addEventListener('sas:language-change', onExternalLangChange);
-    return () => window.removeEventListener('sas:language-change', onExternalLangChange);
+    window.addEventListener('sas:language-ready', onLangReady);
+    return () => {
+      window.removeEventListener('sas:language-change', onExternalLangChange);
+      window.removeEventListener('sas:language-ready', onLangReady);
+    };
   }, []);
 
   // Sync global language state with substation store bilingual toggle without resetting simulation
@@ -277,7 +283,7 @@ export default function App() {
 
   const navItems: { id: ActiveWorkspaceTab; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: 'HERO', label: t('Substation Workspace'), icon: <Home className="w-4 h-4" /> },
-    { id: 'SLD', label: '132/33/11kV SLD', icon: <GitBranch className="w-4 h-4" /> },
+    { id: 'SLD', label: t('132/33/11kV SLD'), icon: <GitBranch className="w-4 h-4" /> },
     { id: 'SCADA', label: t('SCADA / HMI Operator Station'), icon: <Activity className="w-4 h-4" />, badge: unackAlarms },
     { id: 'IED', label: t('IED Explorer'), icon: <Cpu className="w-4 h-4" /> },
     { id: 'IED_SIGNAL_CHAIN', label: t('IED Signal Chain & Mapping'), icon: <Cpu className="w-4 h-4" /> },
@@ -291,19 +297,19 @@ export default function App() {
     { id: 'FAULTS', label: t('Fault Injection'), icon: <AlertOctagon className="w-4 h-4" />, badge: activeFaults },
     { id: 'FATSAT', label: t('FAT / SAT Laboratory'), icon: <CheckSquare className="w-4 h-4" /> },
     { id: 'IEC61850_ACADEMY', label: t('IEC 61850 Digital Substation'), icon: <GraduationCap className="w-4 h-4" /> },
-    { id: 'TESTING_GUIDANCE' as ActiveWorkspaceTab, label: 'Testing Guidance', icon: <ClipboardCheck className="w-4 h-4" /> },
-    { id: 'OSI_MODEL', label: 'OSI Model', icon: <Network className="w-4 h-4" /> },
+    { id: 'TESTING_GUIDANCE' as ActiveWorkspaceTab, label: t('Testing Guidance'), icon: <ClipboardCheck className="w-4 h-4" /> },
+    { id: 'OSI_MODEL', label: t('OSI Model'), icon: <Network className="w-4 h-4" /> },
     { id: 'INTERVIEW_PREP', label: t('Interview Preparation'), icon: <Award className="w-4 h-4" /> },
     { id: 'CCNA_ACADEMY', label: t('CCNA Networking Academy'), icon: <Network className="w-4 h-4" /> },
     { id: 'LEARNING', label: t('Training (EN/TE)'), icon: <BookOpen className="w-4 h-4" /> },
   ];
 
   const topNavGroups = [
-    { key: 'overview', title: 'Overview', icon: Home, ids: ['HERO'] },
-    { key: 'sld', title: 'SLD & Operation', icon: GitBranch, ids: ['SLD', 'SCADA'] },
-    { key: 'ied', title: 'IED & Signals', icon: Cpu, ids: ['IED', 'IED_SIGNAL_CHAIN'] },
-    { key: 'comms', title: 'Communication', icon: Radio, ids: ['NETWORK', 'GOOSE', 'MMS', 'MODBUS_LAB', 'IEC104_LAB', 'OPCUA_LAB'] },
-    { key: 'tools', title: 'Tools & Test', icon: Settings, ids: ['SIGNALS', 'FAULTS', 'FATSAT', 'IEC61850_ACADEMY', 'TESTING_GUIDANCE', 'OSI_MODEL', 'INTERVIEW_PREP', 'CCNA_ACADEMY', 'LEARNING'] },
+    { key: 'overview', title: t('Overview'), icon: Home, ids: ['HERO'] },
+    { key: 'sld', title: t('SLD & Operation'), icon: GitBranch, ids: ['SLD', 'SCADA'] },
+    { key: 'ied', title: t('IED & Signals'), icon: Cpu, ids: ['IED', 'IED_SIGNAL_CHAIN'] },
+    { key: 'comms', title: t('Communication'), icon: Radio, ids: ['NETWORK', 'GOOSE', 'MMS', 'MODBUS_LAB', 'IEC104_LAB', 'OPCUA_LAB'] },
+    { key: 'tools', title: t('Tools & Test'), icon: Settings, ids: ['SIGNALS', 'FAULTS', 'FATSAT', 'IEC61850_ACADEMY', 'TESTING_GUIDANCE', 'OSI_MODEL', 'INTERVIEW_PREP', 'CCNA_ACADEMY', 'LEARNING'] },
   ];
   const filteredNavItems = navItems.filter(item => item.label.toLowerCase().includes(navSearch.trim().toLowerCase()));
 
@@ -578,9 +584,20 @@ export default function App() {
                       <button type="button" aria-label="Close settings" onClick={() => setSettingsMenuOpen(false)} className="rounded px-2 py-1 text-[#B5CDDF] hover:bg-[#123B60]">✕</button>
                     </div>
                     <p className="mb-2 text-xs font-semibold text-[#A8C7DD]">Display language</p>
-                    <div className="flex gap-2">
-                      <button type="button" aria-pressed={displayLanguage === 'EN'} onClick={() => handleGlobalLangSwitch('EN')} className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${displayLanguage === 'EN' ? 'border-[#00CFFF] bg-[#104563] text-white' : 'border-[#35536C] text-[#B8D2E4]'}`}>English</button>
-                      <button type="button" aria-pressed={displayLanguage === 'TE'} onClick={() => handleGlobalLangSwitch('TE')} className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${displayLanguage === 'TE' ? 'border-[#00CFFF] bg-[#104563] text-white' : 'border-[#35536C] text-[#B8D2E4]'}`}>తెలుగు</button>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {SUPPORTED_LANGUAGE_LIST.map(({ code, nativeName }) => (
+                        <button
+                          key={code}
+                          type="button"
+                          data-no-translate="true"
+                          aria-pressed={displayLanguage === code}
+                          onClick={() => handleGlobalLangSwitch(code)}
+                          className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold flex items-center justify-between ${displayLanguage === code ? 'border-[#00CFFF] bg-[#104563] text-white' : 'border-[#35536C] text-[#B8D2E4] hover:bg-[#0D2C47]'}`}
+                        >
+                          <span>{nativeName}</span>
+                          <span className="text-[10px] opacity-75">{code}</span>
+                        </button>
+                      ))}
                     </div>
                     {currentUser ? (
                       <button type="button" onClick={() => { setSettingsMenuOpen(false); openProfileSection('EDIT_PROFILE'); }} className="mt-3 w-full rounded-lg border border-[#35536C] px-3 py-2 text-left text-xs hover:bg-[#123B60]">Edit account profile</button>
