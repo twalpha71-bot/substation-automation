@@ -862,71 +862,117 @@ html{scroll-behavior:auto}.sas-app-shell{background:var(--sas-bg);color:var(--sa
 @media(max-width:1200px){.sas-protocol-neon-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:740px){.sas-protocol-neon-grid{grid-template-columns:1fr}.sas-protocol-visualization{padding:10px}.sas-protocol-visualization-title{min-width:0}.sas-protocol-neon-card{min-height:0}.sas-protocol-visualization-footer{flex-wrap:wrap}}
 
-/* Keep Wireshark and Search Menu in distinct, non-overlapping header rows. */
-@media (max-width: 2400px) {
-  .sas-app-header .sas-top-navigation { flex-wrap: wrap; align-content: center; row-gap: 8px; }
-  .sas-app-header .sas-top-groups { flex: 0 0 100%; width: 100%; min-width: 0; }
-  .sas-app-header .sas-top-search { flex: 0 0 100%; width: 100%; max-width: 340px; min-width: 0; margin-left: 0; }
-}
-@media (max-width: 1750px) {
-  .sas-app-header .sas-top-groups { flex-wrap: wrap; }
-}
 
-
-/* Single-line SCADA header — final override. No second navigation row. */
+/* Responsive SAS header: one desktop row, accessible mobile navigation.
+   Never scroll/clip the parent of an absolutely positioned dropdown. */
+.sas-app-header { overflow: visible; }
 .sas-app-header .sas-header-single-row {
-  display:flex; flex-wrap:nowrap !important; align-items:center;
-  min-height:72px; gap:clamp(5px,.55vw,12px); padding-top:8px; padding-bottom:8px;
+  display: flex; flex-wrap: nowrap; align-items: center;
+  gap: clamp(6px,.6vw,12px); min-height: 72px;
+  padding-block: 8px;
 }
-.sas-app-header .sas-top-brand { flex:0 0 auto; min-width:0; }
+.sas-app-header .sas-top-brand { flex: 0 0 auto; min-width: 0; }
 .sas-app-header .sas-top-navigation {
-  display:flex; flex:1 1 auto; flex-wrap:nowrap !important;
-  align-items:center; min-width:0; width:auto; order:initial;
-  gap:clamp(5px,.55vw,11px); padding:0 0 0 clamp(5px,.6vw,12px);
-  border-left:1px solid #147a9c; border-top:0;
+  display: flex; flex: 1 1 auto; align-items: center;
+  flex-wrap: nowrap; gap: clamp(5px,.5vw,10px);
+  min-width: 0; width: auto; order: initial;
+  border-left: 1px solid #147a9c; border-top: 0;
+  padding: 0 0 0 clamp(5px,.6vw,12px);
+  overflow: visible;
 }
 .sas-app-header .sas-top-groups {
-  display:flex; flex:1 1 auto !important; flex-wrap:nowrap !important;
-  width:auto !important; min-width:0; gap:clamp(3px,.35vw,8px);
-  overflow-x:auto; overflow-y:hidden; scrollbar-width:thin;
+  display: flex; flex: 1 1 auto; align-items: center;
+  flex-wrap: nowrap; width: auto; min-width: 0;
+  gap: clamp(3px,.35vw,8px); overflow: visible;
+}
+.sas-app-header .sas-top-group { position: relative; flex: 0 0 auto; }
+.sas-app-header .sas-top-group:has(.sas-top-dropdown) { z-index: 100; }
+.sas-app-header .sas-top-dropdown {
+  position: absolute; z-index: 110; pointer-events: auto;
+  max-width: min(380px, calc(100vw - 24px));
 }
 .sas-app-header .sas-top-group-trigger {
-  flex:0 0 auto; white-space:nowrap; min-width:0;
-  padding:8px clamp(5px,.55vw,11px);
-  font-size:clamp(10px,.67vw,13px); gap:clamp(3px,.3vw,6px);
+  flex: 0 0 auto; display: flex; align-items: center;
+  white-space: nowrap; min-width: 0;
+  padding: 8px clamp(4px,.42vw,9px);
+  font-size: clamp(10px,.64vw,12px); gap: 5px;
 }
+.sas-app-header .sas-top-group-trigger > svg { flex-shrink: 0; }
 .sas-app-header .sas-top-search {
-  position:relative; flex:0 0 clamp(130px,10.2vw,205px) !important;
-  width:clamp(130px,10.2vw,205px) !important;
-  min-width:0 !important; max-width:205px !important;
-  margin-left:0 !important;
+  position: relative; flex: 0 1 clamp(112px,10vw,195px);
+  width: clamp(112px,10vw,195px); min-width: 0;
+  max-width: 195px; margin-left: auto;
 }
-.sas-app-header .sas-top-search input { min-width:0; width:100%; padding-right:55px; }
-.sas-app-header .sas-header-actions { flex:0 0 auto; margin-left:0; }
-@media (max-width: 1050px) {
-  .sas-app-header .sas-header-single-row { flex-wrap:nowrap !important; }
-  .sas-app-header .sas-top-navigation { order:initial; flex:1 1 auto; border-left:1px solid #147a9c; padding:0 0 0 6px; }
-  .sas-app-header .sas-top-groups { flex-wrap:nowrap !important; }
-  .sas-app-header .sas-top-search { flex-basis:115px !important; width:115px !important; }
+.sas-app-header .sas-top-search input {
+  width: 100%; min-width: 0; padding-right: 49px;
 }
-@media (max-width: 750px) {
-  .sas-app-header .sas-top-brand .sas-shared-brand-title { font-size:15px; }
-  .sas-app-header .sas-top-navigation { gap:4px; }
-  .sas-app-header .sas-top-search { flex-basis:100px !important; width:100px !important; }
-  .sas-app-header .sas-top-search kbd { display:none; }
-  .sas-app-header .sas-top-search input { padding-right:8px; }
+.sas-app-header .sas-top-search-results { z-index: 120; }
+.sas-app-header .sas-header-actions { flex: 0 0 auto; margin-left: 0; }
+.sas-mobile-menu-toggle { display: none; align-items: center; justify-content: center;
+  gap: 7px; flex-shrink: 0; color: #dff7ff; background: #09283c;
+  border: 1px solid #168bff; border-radius: 10px; padding: 9px 11px;
+  font-size: 12px; font-weight: 700;
 }
-
-/* Dropdown repair: scrollable navigation clipped absolutely positioned menus.
-   Keep the one-row layout, but allow menu popovers to escape the header. */
-.sas-app-shell .sas-app-header,
-.sas-app-header .sas-header-single-row,
-.sas-app-header .sas-top-navigation,
-.sas-app-header .sas-top-groups {
-  overflow: visible !important;
+@media (min-width: 1280px) and (max-width: 1510px) {
+  .sas-app-header .sas-top-brand .sas-shared-brand-title { font-size: 17px; }
+  .sas-app-header .sas-top-brand .sas-shared-brand-icon { width: 37px; height: 37px; }
+  .sas-app-header .sas-header-single-row { gap: 5px; }
+  .sas-app-header .sas-top-groups { gap: 3px; }
+  .sas-app-header .sas-top-group-trigger { padding: 7px 4px; font-size: 10px; gap: 3px; }
+  .sas-app-header .sas-top-search { flex-basis: 110px; width: 110px; }
+  .sas-app-header .sas-top-search kbd { display: none; }
+  .sas-app-header .sas-top-search input { padding-right: 8px; }
+  .sas-app-header .sas-header-actions { gap: 3px; }
 }
-.sas-app-header .sas-top-groups { scrollbar-width: none; }
-.sas-app-header .sas-top-group { position: relative; z-index: 1; }
-.sas-app-header .sas-top-group:has(.sas-top-dropdown) { z-index: 1000; }
-.sas-app-header .sas-top-dropdown { z-index: 1100; pointer-events: auto; }
-.sas-app-header .sas-top-search:focus-within { z-index: 1001; }
+/* Use the menu when translated labels cannot safely fit on one row. */
+@media (max-width: 1279px) {
+  .sas-app-header .sas-header-single-row {
+    position: relative; flex-wrap: nowrap; min-height: 64px; gap: 8px;
+  }
+  .sas-app-header .sas-top-brand { min-width: 0; max-width: calc(100% - 160px); }
+  .sas-mobile-menu-toggle { display: inline-flex; margin-left: auto; }
+  .sas-app-header .sas-header-actions { margin-left: 0; gap: 3px; }
+  .sas-app-header .sas-top-navigation {
+    display: none; position: absolute; left: 8px; right: 8px;
+    top: calc(100% + 3px); width: auto; max-height: min(76vh,680px);
+    overflow-x: hidden; overflow-y: auto; z-index: 1500;
+    background: #061b2e; border: 1px solid #168bff;
+    border-radius: 12px; padding: 10px;
+    box-shadow: 0 18px 38px #0009;
+  }
+  .sas-app-header .sas-top-navigation.sas-nav-expanded {
+    display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+  }
+  .sas-app-header .sas-top-groups {
+    display: flex; flex-direction: column; align-items: stretch;
+    flex: 0 0 auto; width: 100%; overflow: visible; gap: 5px;
+  }
+  .sas-app-header .sas-top-group { width: 100%; }
+  .sas-app-header .sas-top-group-trigger {
+    width: 100%; display: flex; justify-content: flex-start;
+    padding: 11px 12px; font-size: 13px; white-space: normal;
+  }
+  .sas-app-header .sas-top-group-trigger > span {
+    flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere;
+    text-align: left;
+  }
+  .sas-app-header .sas-top-group-trigger > svg:last-child { margin-left: auto; }
+  .sas-app-header .sas-top-dropdown {
+    position: static; width: 100%; min-width: 0; max-width: 100%;
+    margin-top: 4px; max-height: 38vh; overflow-y: auto; box-shadow: none;
+  }
+  .sas-app-header .sas-top-search {
+    display: block; width: 100%; max-width: none; min-width: 0;
+    flex: 0 0 auto; margin: 0;
+  }
+  .sas-app-header .sas-top-search-results { left: 0; right: 0; max-width: 100%; }
+}
+@media (max-width: 600px) {
+  .sas-app-header .sas-header-single-row { padding: 8px; }
+  .sas-app-header .sas-top-brand { gap: 6px; }
+  .sas-app-header .sas-top-brand .sas-shared-brand-icon { width: 37px; height: 37px; }
+  .sas-app-header .sas-top-brand .sas-shared-brand-title { font-size: 14px; }
+  .sas-mobile-menu-toggle { padding: 8px; }
+  .sas-mobile-menu-toggle span { display: none; }
+  .sas-app-header .sas-header-actions button { padding: 6px; }
+}

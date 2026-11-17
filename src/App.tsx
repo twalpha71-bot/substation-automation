@@ -142,6 +142,14 @@ export default function App() {
   }, [activeTab, showLanding]);
 
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1280px)');
+    const sync = () => { if (mq.matches) setMobileNavOpen(false); };
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
   const [topMenuOpen, setTopMenuOpen] = useState<string | null>(null);
   // Dismiss the expanded top navigation menu when clicking anywhere outside it.
   // Pointerdown handles mouse, touch and pen input before navigation actions run.
@@ -152,8 +160,7 @@ export default function App() {
       if (!(target instanceof Node)) return;
       const element = target instanceof Element ? target : target.parentElement;
       const clickedGroup = element?.closest('.sas-top-group');
-      const clickedActiveGroup = clickedGroup?.querySelector('.sas-top-group-trigger[aria-expanded="true"]');
-      if (!clickedActiveGroup) setTopMenuOpen(null);
+      if (!clickedGroup) setTopMenuOpen(null);
     };
     document.addEventListener('pointerdown', handleOutsidePointer);
     return () => document.removeEventListener('pointerdown', handleOutsidePointer);
@@ -467,7 +474,11 @@ export default function App() {
               </span>
             </button>
 
-          <nav className="sas-top-navigation" aria-label="Engineering modules">
+          <button type="button" className="sas-mobile-menu-toggle" aria-label="Toggle navigation menu" aria-expanded={mobileNavOpen} aria-controls="sas-responsive-navigation" onClick={() => {setMobileNavOpen(v => !v);setTopMenuOpen(null);}}>
+            {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            <span>Menu</span>
+          </button>
+          <nav id="sas-responsive-navigation" className={`sas-top-navigation ${mobileNavOpen ? 'sas-nav-expanded' : ''}`} aria-label="Engineering modules">
             <div className="sas-top-groups">
               <button type="button" className="sas-top-home" title="Substation Workspace" onClick={() => navigate('HERO')}><Home className="h-4 w-4" /></button>
               {topNavGroups.map(group => {
