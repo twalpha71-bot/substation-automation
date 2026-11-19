@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { loadCustomBayConfigs, loadHiddenDefaultBayIds, toRuntimeBay } from './customBayConfig';
 import {
   AlarmRecord,
   BayEquipment,
@@ -566,7 +567,7 @@ function solveSubstationElectricalGraph(
 }
 
 const initialSolved = solveSubstationElectricalGraph(
-  INITIAL_BAYS,
+  [...INITIAL_BAYS.filter(b => !loadHiddenDefaultBayIds().includes(b.id)), ...loadCustomBayConfigs().filter(b => !INITIAL_BAYS.some(d => d.id === b.id)).map(toRuntimeBay)],
   INITIAL_TRANSFORMERS,
   INITIAL_BUSBARS,
   INITIAL_FAULT_SCENARIOS

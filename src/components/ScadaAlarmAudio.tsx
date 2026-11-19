@@ -179,12 +179,12 @@ export function ScadaAlarmAudio() {
     previousCleared.current = count;
   }, [entries, topRank, enabled, muted, play]);
   return <>
-    {!expanded && <button type="button" aria-label={`Open SCADA annunciator, ${unack.length} unacknowledged alarms`} title={`SCADA Annunciator · ${active.length} active alarms`} onClick={() => setExpanded(true)} style={{ position: 'fixed', right: 19, bottom: 84, zIndex: 9999, width: 54, height: 54, borderRadius: '50%', border: `2px solid ${unack.length ? '#ff5965' : '#00cfff'}`, background: '#06243a', color: unack.length ? '#ff5965' : '#00e5ff', boxShadow: '0 5px 20px #000a, 0 0 14px #00cfff44', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, animation: unack.length ? 'sasAnnBubblePulse 1.2s ease-in-out infinite' : 'none' }}>
+    {!expanded && <button type="button" aria-label={`Open SCADA annunciator, ${unack.length} unacknowledged alarms`} title={`SCADA Annunciator · ${active.length} active alarms`} onClick={() => setExpanded(true)} style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 9999, width: 40, height: 40, borderRadius: '50%', border: `2px solid ${unack.length ? '#ff5965' : '#00cfff'}`, background: '#06243a', color: unack.length ? '#ff5965' : '#00e5ff', boxShadow: '0 5px 20px #000a, 0 0 14px #00cfff44', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, animation: unack.length ? 'sasAnnBubblePulse 1.2s ease-in-out infinite' : 'none' }}>
       <span aria-hidden="true">🔔</span>
       {active.length > 0 && <span style={{ position: 'absolute', top: -5, right: -7, background: '#ff5965', color: '#fff', borderRadius: 12, padding: '1px 5px', fontSize: 10, fontWeight: 800, minWidth: 17 }}>{active.length}</span>}
     </button>}
     <style>{`@keyframes sasAnnBubblePulse{0%,100%{box-shadow:0 5px 20px #000a,0 0 8px #ff596566}50%{box-shadow:0 5px 20px #000a,0 0 22px #ff5965bb}}`}</style>
-    {expanded && <div aria-label="SCADA training annunciator" style={{ position: 'fixed', right: 16, bottom: 84, zIndex: 9999, width: 'min(440px, calc(100vw - 32px))', maxHeight: 'calc(100vh - 110px)', overflowY: 'auto', background: '#061b30', border: '1px solid #00cfff', borderRadius: 12, color: '#e5f8ff', boxShadow: '0 4px 22px #000b', fontSize: 11, padding: 11 }}>
+    {expanded && <div aria-label="SCADA training annunciator" style={{ position: 'fixed', right: 16, bottom: 66, zIndex: 9999, width: 'min(440px, calc(100vw - 32px))', maxHeight: 'calc(100vh - 110px)', overflowY: 'auto', background: '#061b30', border: '1px solid #00cfff', borderRadius: 12, color: '#e5f8ff', boxShadow: '0 4px 22px #000b', fontSize: 11, padding: 11 }}>
     <style>{`@keyframes sasAnnFlash{0%,49%{opacity:1}50%,100%{opacity:.25}}`}</style>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
       <strong style={{ color: '#00e5ff', fontSize: 12 }}>SCADA ANNUNCIATOR</strong>

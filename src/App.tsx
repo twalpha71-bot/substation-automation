@@ -1,3 +1,4 @@
+import { BayConfigurationManager } from './pages/BayConfigurationManager';
 import { ScadaAlarmAudio } from './components/ScadaAlarmAudio';
 import { AlarmsEventsPage } from './pages/AlarmsEventsPage';
 import { WiresharkAnalyzerPage } from './pages/WiresharkAnalyzerPage';
@@ -94,13 +95,13 @@ export default function App() {
 
   const [testingGuidanceOpen, setTestingGuidanceOpen] = useState(() => window.location.hash === '#/workspace/TESTING_GUIDANCE');
   const [showLanding, setShowLanding] = useState(false);
-  const [specialPage, setSpecialPage] = useState<'ALARMS_EVENTS' | 'WIRESHARK' | null>(null);
-  const openSpecialPage = (page: 'ALARMS_EVENTS' | 'WIRESHARK') => { setSpecialPage(page); setTestingGuidanceOpen(false); setShowLanding(false); setTopMenuOpen(null); window.history.pushState(null, '', `#/workspace/${page}`); window.scrollTo(0, 0); };
+  const [specialPage, setSpecialPage] = useState<'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | null>(null);
+  const openSpecialPage = (page: 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER') => { setSpecialPage(page); setTestingGuidanceOpen(false); setShowLanding(false); setTopMenuOpen(null); window.history.pushState(null, '', `#/workspace/${page}`); window.scrollTo(0, 0); };
   // Deep-link the active workspace: refreshing /workspace/GOOSE stays in GOOSE Lab.
   useEffect(() => {
     const restoreLocation = () => {
-      const special = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK)$/);
-      if (special) { setSpecialPage(special[1] as 'ALARMS_EVENTS' | 'WIRESHARK'); setTestingGuidanceOpen(false); setShowLanding(false); return; }
+      const special = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK|BAY_MANAGER)$/);
+      if (special) { setSpecialPage(special[1] as 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER'); setTestingGuidanceOpen(false); setShowLanding(false); return; }
       setSpecialPage(null);
       if (window.location.hash === '#/workspace/TESTING_GUIDANCE') {
         setTestingGuidanceOpen(true);
@@ -283,7 +284,26 @@ export default function App() {
 
   const unackAlarms = alarms.filter((a) => a.state === 'ACTIVE_UNACK').length;
   const activeFaults = faultScenarios.filter((f) => f.active).length;
-  const totalNotifications = unackAlarms + activeAnnouncements.length;
+  // Persist which notification items have already been viewed. Opening the bell
+  // marks the current items as read; newly arriving items restore the dot.
+  const notificationKeys = [
+    ...activeAnnouncements.map((a) => `announcement:${a.id}`),
+    ...alarms.filter((a) => a.state === 'ACTIVE_UNACK').map((a) => `alarm:${a.id}`),
+  ];
+  const [seenNotificationKeys, setSeenNotificationKeys] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem('sas:seen-notifications') || '[]');
+      return Array.isArray(saved) ? saved.filter((v): v is string => typeof v === 'string') : [];
+    } catch { return []; }
+  });
+  const hasUnreadNotifications = notificationKeys.some((key) => !seenNotificationKeys.includes(key));
+  const markNotificationsRead = () => {
+    setSeenNotificationKeys((previous) => {
+      const next = Array.from(new Set([...previous, ...notificationKeys]));
+      try { window.localStorage.setItem('sas:seen-notifications', JSON.stringify(next)); } catch { /* storage unavailable */ }
+      return next;
+    });
+  };
   const totalMw =
     (bays.find((b) => b.id === 'BAY-132-L1')?.activePowerMw || 0) +
     (bays.find((b) => b.id === 'BAY-132-L2')?.activePowerMw || 0);
@@ -360,6 +380,7 @@ export default function App() {
   const activeBreadcrumbLabel = () => {
     if (specialPage === 'ALARMS_EVENTS') return 'Alarms / Events';
     if (specialPage === 'WIRESHARK') return 'Wireshark';
+    if (specialPage === 'BAY_MANAGER') return 'Bay Configuration Manager';
     if (testingGuidanceOpen) return 'Testing Guidance';
     if (activeTab === 'HERO') return t('Substation Workspace');
     if (activeTab === 'ADMIN_DASHBOARD') return t('Admin Dashboard');
@@ -370,54 +391,9 @@ export default function App() {
   const displayFullName = currentUser ? currentUser.fullName.trim() || 'My Account' : '';
   const userInitials = currentUser ? computeUserInitials(currentUser.fullName) : '';
 
-  const languageBubble = (
-              <>
-              <style>{`
-                /* Compact floating language selector on every page. */
-                .sas-language-floating .sas-language-menu {
-                  width: min(258px, calc(100vw - 24px)) !important;
-                  min-width: 0 !important;
-                  max-height: min(340px, 58dvh) !important;
-                  padding: 5px !important;
-                  border-radius: 12px !important;
-                }
-                .sas-language-floating .sas-language-heading {
-                  padding: 5px 8px 6px !important;
-                  font-size: 10px !important;
-                }
-                .sas-language-floating .sas-language-option {
-                  min-height: 30px !important;
-                  padding: 4px 8px !important;
-                  gap: 6px !important;
-                  font-size: 11px !important;
-                  border-radius: 7px !important;
-                  line-height: 1.2 !important;
-                }
-                .sas-language-floating .sas-language-english { font-size: 9px !important; }
-                .sas-language-floating .sas-language-note {
-                  padding: 6px 8px !important;
-                  font-size: 9px !important;
-                  line-height: 1.3 !important;
-                }
-              `}</style>
-              <div ref={langRef} className="sas-header-language sas-language-floating">
-                <button type="button" className="sas-language-trigger" aria-label="Select language" aria-haspopup="menu" aria-expanded={langMenuOpen} onClick={() => setLangMenuOpen(v => !v)}>
-                  <Globe2 className="w-4 h-4" /><span className="sas-language-code">{displayLanguage}</span><ChevronDown className="w-3 h-3" />
-                </button>
-                {langMenuOpen && <div className="sas-language-menu" role="menu" aria-label="Available languages">
-                  <div className="sas-language-heading">{t('Select language')}</div>
-                  {SUPPORTED_LANGUAGE_LIST.map(({ code, label }) => <button type="button" role="menuitem" key={code} data-lang-option={code} className={`sas-language-option ${displayLanguage === code ? 'sas-language-selected' : ''}`} onClick={() => {
-                    handleGlobalLangSwitch(code);
-                  }}><span className="sas-language-native" data-no-translate="true">{label}</span><span className="sas-language-english" data-no-translate="true">{code}</span>{displayLanguage === code && <span className="sas-language-check" data-no-translate="true">✓</span>}</button>)}
-                  <div className="sas-language-note">{t('Offline translations are available for supported interface labels. Other page content remains unchanged until translated locally.')}</div>
-                </div>}
-              </div>
-              </>
-  );
 
   return (
     <div className="sas-app-shell min-h-screen bg-[#030D1B] text-[#DCEAF5] font-sans overflow-x-hidden">
-      {languageBubble}
       <ScadaAlarmAudio />
       <style>{`
         html, body { max-width: 100vw; overflow-x: hidden; }
@@ -434,12 +410,12 @@ export default function App() {
         @keyframes sasLogoHalo { 0%,100% { box-shadow: 0 0 12px #ff5a2040, inset 0 0 12px #ff8a1830; } 50% { box-shadow: 0 0 23px #ff7b2980, 0 0 34px #ff440033, inset 0 0 18px #ffb22e50; } }
         @keyframes sasTitleShimmer { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
         /* Match the opening-page Substation / AUTOMATION identity on every workspace page. */
-        .sas-shared-brand-title { background: linear-gradient(100deg,#00edff,#5b9bff 60%,#e54cfc); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sasTitleShimmer 6s ease-in-out infinite; }
+        .sas-shared-brand-title { background: linear-gradient(100deg,#00edff,#5b9bff 60%,#e54cfc); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: none; }
         .sas-shared-brand-icon { box-shadow: 0 0 24px #ff991e75; }
         @media (prefers-reduced-motion: reduce) { .sas-shared-brand-title { animation: none !important; } }
-        .sas-fire-icon { animation: sasLightningStrike 3.6s linear infinite; will-change: filter, transform; }
-        .sas-logo-halo { animation: sasLightningHalo 3.6s linear infinite; }
-        .sas-gradient-title { background: linear-gradient(110deg,#eafaff 0%,#00dcff 24%,#6d9eff 44%,#ffe29b 65%,#ff7d35 80%,#eafaff 100%); background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sasTitleShimmer 6s ease-in-out infinite; }
+        .sas-fire-icon { animation: none; }
+        .sas-logo-halo { animation: none; }
+        .sas-gradient-title { background: linear-gradient(110deg,#eafaff 0%,#00dcff 24%,#6d9eff 44%,#ffe29b 65%,#ff7d35 80%,#eafaff 100%); background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: none; }
         .sas-nav-item { transition: background .22s ease, border-color .22s ease, box-shadow .22s ease, transform .22s ease, color .22s ease; }
         .sas-nav-item:hover { transform: translateX(2px); box-shadow: inset 3px 0 #00d9ff, 0 0 13px #00cfff26; }
         .sas-nav-active { box-shadow: inset 3px 0 #00e5ff, 0 0 15px #00cfff4d, inset 0 0 20px #00bfff18 !important; }
@@ -465,8 +441,8 @@ export default function App() {
         <header className="sas-app-header sticky top-0 z-30 bg-[#061525]/95 backdrop-blur border-b border-[#18334B]">
           <div className="sas-header-single-row px-3 sm:px-5 py-2 flex items-center gap-3">
             <button type="button" onClick={() => navigate('HERO')} className="sas-top-brand flex shrink-0 items-center gap-2.5 text-left" aria-label="Substation Automation home">
-              <span className="sas-shared-brand-icon sas-logo-halo flex h-11 w-11 items-center justify-center rounded-xl border border-[#168bff] bg-[#071d38]">
-                <Zap className="sas-fire-icon h-7 w-7 fill-current text-[#aaf6ff]" />
+              <span className="sas-shared-brand-icon flex h-11 w-11 items-center justify-center rounded-xl border border-[#168bff] bg-[#071d38]">
+                <Zap className="h-7 w-7 fill-current text-[#aaf6ff]" />
               </span>
               <span>
                 <span className="sas-shared-brand-title block text-[21px] font-black leading-none">Substation</span>
@@ -499,6 +475,7 @@ export default function App() {
                           {!!item.badge && <span className="sas-top-badge">{item.badge}</span>}
                         </button>
                       )}
+                      {group.key === 'tools' && <button type="button" role="menuitem" className="sas-top-dropdown-item" onClick={() => openSpecialPage('BAY_MANAGER')}><PlusCircle className="h-4 w-4" />Bay Configuration Manager</button>}
                       {group.key === 'tools' && currentRole === 'ADMIN' &&
                         <button type="button" role="menuitem" className="sas-top-dropdown-item" onClick={() => navigate('ADMIN_DASHBOARD')}>
                           <Shield className="h-4 w-4" />Admin Dashboard
@@ -532,11 +509,11 @@ export default function App() {
                 <button
                   type="button"
                   aria-label="Notifications and announcements"
-                  onClick={() => setNotifMenuOpen((o) => !o)}
+                  onClick={() => { if (!notifMenuOpen) markNotificationsRead(); setNotifMenuOpen((o) => !o); }}
                   className="relative p-2 rounded-full border border-transparent hover:border-[#234E73] hover:bg-[#081A30] text-[#DCEAF5] transition"
                 >
                   <Bell className="w-5 h-5 text-[#DCEAF5]" />
-                  {totalNotifications > 0 && (
+                  {hasUnreadNotifications && (
                     <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-[#00CFFF]" />
                   )}
                 </button>
@@ -593,22 +570,6 @@ export default function App() {
                     <div className="mb-3 flex items-center justify-between">
                       <span className="flex items-center gap-2 text-sm font-bold"><Settings className="h-4 w-4 text-[#00CFFF]" /> Settings</span>
                       <button type="button" aria-label="Close settings" onClick={() => setSettingsMenuOpen(false)} className="rounded px-2 py-1 text-[#B5CDDF] hover:bg-[#123B60]">✕</button>
-                    </div>
-                    <p className="mb-2 text-xs font-semibold text-[#A8C7DD]">Display language</p>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {SUPPORTED_LANGUAGE_LIST.map(({ code, nativeName }) => (
-                        <button
-                          key={code}
-                          type="button"
-                          data-no-translate="true"
-                          aria-pressed={displayLanguage === code}
-                          onClick={() => handleGlobalLangSwitch(code)}
-                          className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold flex items-center justify-between ${displayLanguage === code ? 'border-[#00CFFF] bg-[#104563] text-white' : 'border-[#35536C] text-[#B8D2E4] hover:bg-[#0D2C47]'}`}
-                        >
-                          <span>{nativeName}</span>
-                          <span className="text-[10px] opacity-75">{code}</span>
-                        </button>
-                      ))}
                     </div>
                     {currentUser ? (
                       <button type="button" onClick={() => { setSettingsMenuOpen(false); openProfileSection('EDIT_PROFILE'); }} className="mt-3 w-full rounded-lg border border-[#35536C] px-3 py-2 text-left text-xs hover:bg-[#123B60]">Edit account profile</button>
@@ -792,7 +753,7 @@ export default function App() {
 
         {/* Main Workspace Container */}
         <main className="sas-workspace-main flex-1 p-2.5 sm:p-5 xl:p-6 w-full min-w-0">
-          {specialPage === 'ALARMS_EVENTS' ? <AlarmsEventsPage /> : specialPage === 'WIRESHARK' ? <WiresharkAnalyzerPage /> : testingGuidanceOpen ? <TestingGuidancePage /> : <>
+          {specialPage === 'BAY_MANAGER' ? <BayConfigurationManager /> : specialPage === 'ALARMS_EVENTS' ? <AlarmsEventsPage /> : specialPage === 'WIRESHARK' ? <WiresharkAnalyzerPage /> : testingGuidanceOpen ? <TestingGuidancePage /> : <>
           {activeTab === 'HERO' && <HeroDashboardPage />}
           {activeTab === 'OSI_MODEL' && <OsiModelPage />}
           {activeTab === 'IEC61850_ACADEMY' && <Iec61850AcademyPage />}

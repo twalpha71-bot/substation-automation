@@ -16,3 +16,7 @@ button.sas-unified-brand{cursor:pointer;border-radius:12px}button.sas-unified-br
 @media(max-width:600px){.sas-brand--opening{--brand-badge:37px;--brand-title:22px;--brand-subtitle:9px;--brand-gap:8px}.sas-brand--auth{--brand-badge:42px;--brand-title:22px;--brand-subtitle:9px}}
 @media(max-width:360px){.sas-brand--opening{--brand-badge:30px;--brand-title:19px;--brand-subtitle:8px}}
 @media(prefers-reduced-motion:reduce){.sas-thunder-badge,.sas-thunder-bolt,.sas-thunder-arcs{animation:none}.sas-thunder-arcs{display:none}}
+
+/* Keep the brand lightning symbol steady rather than flashing. */
+.sas-thunder-badge,.sas-thunder-bolt,.sas-thunder-arcs { animation: none !important; }
+.sas-thunder-arcs { display: none; }

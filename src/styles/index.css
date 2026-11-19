@@ -976,3 +976,48 @@ html{scroll-behavior:auto}.sas-app-shell{background:var(--sas-bg);color:var(--sa
   .sas-mobile-menu-toggle span { display: none; }
   .sas-app-header .sas-header-actions button { padding: 6px; }
 }
+
+/* More breathing room between the header title and navigation badges. */
+.sas-app-header .sas-header-single-row { gap: clamp(14px, 1.4vw, 24px); }
+.sas-app-header .sas-top-navigation { padding-left: clamp(12px, 1.2vw, 22px); }
+.sas-app-header .sas-top-groups { gap: clamp(7px, .65vw, 13px); }
+
+/* Polished compact engineering header — reference design */
+@media (min-width: 1200px) {
+  .sas-app-header { background: linear-gradient(180deg,#081d33 0%,#041324 100%) !important; border-bottom:1px solid #00bce8 !important; box-shadow:0 3px 18px #00bfe533,inset 0 -1px 0 #00e5ff35; border-radius:0 0 14px 14px; }
+  .sas-app-header .sas-header-single-row { min-height:82px; gap:clamp(12px,1.15vw,20px); padding-inline:clamp(14px,1.4vw,26px); }
+  .sas-app-header .sas-top-navigation { padding-left:clamp(16px,1.5vw,26px); border-left-color:#145374; }
+  .sas-app-header .sas-top-groups { gap:clamp(12px, .9vw, 16px); }
+  .sas-app-header .sas-top-group-trigger { border-radius:11px; padding:10px clamp(7px,.65vw,12px); border-color:#137ba6; background:#061c31; }
+  .sas-app-header .sas-top-group-trigger:hover { background:#0a3550; box-shadow:0 0 12px #00cfff26; }
+  .sas-app-header .sas-top-search { margin-left:auto; }
+  .sas-app-header .sas-shared-brand-icon { border-color:#00cfff; box-shadow:0 0 12px #00cfff48; }
+  .sas-app-header .sas-shared-brand-title { animation:none !important; background:linear-gradient(90deg,#00dfff,#70a9ff); background-clip:text;-webkit-background-clip:text;color:transparent; }
+}
+@media (max-width: 1199px) { .sas-app-header .sas-shared-brand-title {animation:none !important;} }
+
+/* Header readability: active Overview must remain high-contrast. */
+.sas-app-header .sas-top-group-trigger.is-active,
+.sas-app-header .sas-top-group-trigger.is-active:hover {
+  background: #00d8ed !important; color: #032334 !important;
+  border-color: #39efff !important; box-shadow: 0 0 14px #00cfff40;
+}
+.sas-app-header .sas-top-group-trigger.is-active span,
+.sas-app-header .sas-top-group-trigger.is-active svg { color: #032334 !important; opacity: 1 !important; }
+
+/* Navigation: keep Overview dark even when it is the current page. */
+.sas-app-header .sas-top-group-trigger.is-active,
+.sas-app-header .sas-top-group-trigger.is-active:hover {
+  background: #061c31 !important;
+  color: #e9f3ff !important;
+  border-color: #00bde7 !important;
+  box-shadow: inset 0 0 0 1px #00cfff22, 0 0 9px #00cfff18 !important;
+}
+.sas-app-header .sas-top-group-trigger.is-active span,
+.sas-app-header .sas-top-group-trigger.is-active svg {
+  color: #e9f3ff !important;
+  opacity: 1 !important;
+}
+.sas-app-header .sas-top-group-trigger.is-active:hover {
+  background: #0a3550 !important;
+}

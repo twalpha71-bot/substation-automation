@@ -1,10 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
+import { BayConfigurationManager } from './BayConfigurationManager';
 import { getBayProtocolBreakdown } from '../data/protocolRegistry';
 import { AlarmRecord, BayEquipment, SoeRecord } from '../types/substation';
 import {
   Area,
   AreaChart,
+  Line,
+  LineChart,
+  Legend,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
@@ -32,6 +36,8 @@ import {
   Plus,
   Power,
   RefreshCw,
+  Settings2,
+  X,
   RotateCcw,
   Search,
   ShieldAlert,
@@ -82,16 +88,34 @@ export const ScadaHmiPage: React.FC = () => {
     clearClearedAlarms,
   } = useSubstationStore();
 
+  const [bayManagerOpen, setBayManagerOpen] = useState(false);
+  useEffect(() => {
+    if (!bayManagerOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setBayManagerOpen(false); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [bayManagerOpen]);
+
   // Operator View & Collapsible Workstation Panels State
   const [primaryView, setPrimaryView] = useState<ScadaPrimaryView>('SLD');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('All Sections');
+  const [protectionFunction, setProtectionFunction] = useState('50/51 Overcurrent');
+  const [protectionConfirm, setProtectionConfirm] = useState(false);
   const [voltageFilter, setVoltageFilter] = useState<'ALL' | 132 | 33 | 11>('ALL');
   const [baySearch, setBaySearch] = useState<string>('');
   const [isOperatorFullScreen, setIsOperatorFullScreen] = useState<boolean>(false);
   const [leftDirectoryCollapsed, setLeftDirectoryCollapsed] = useState<boolean>(false);
-  const [rightInspectorCollapsed, setRightInspectorCollapsed] = useState<boolean>(true);
+  const [rightInspectorCollapsed, setRightInspectorCollapsed] = useState<boolean>(false);
   // Selection is local to the workstation; the shared store may have a bay selected by another module.
   const [operatorSelectedBayId, setOperatorSelectedBayId] = useState<string | null>(null);
+  const [engineeringDetailsOpen, setEngineeringDetailsOpen] = useState(false);
+  const [runtimePanel, setRuntimePanel] = useState<'ALARMS' | 'SOE' | 'SYSTEM'>('ALARMS');
+  const [runtimeNavOpen, setRuntimeNavOpen] = useState(true);
+  const [runtimeScreen, setRuntimeScreen] = useState<'DASHBOARD' | 'SLD' | 'TRENDS' | 'REPORTS' | 'USER'>('SLD');
+  const [trendPaused, setTrendPaused] = useState(false);
+  const [trendRange, setTrendRange] = useState('20');
+  const [trendEnabled, setTrendEnabled] = useState<string[]>(['v132Kv','v33Kv','v11Kv','totalLoadMw','freqHz']);
+  const [trendSnapshot, setTrendSnapshot] = useState<typeof trendHistory>([]);
   const [bottomDrawerCollapsed, setBottomDrawerCollapsed] = useState<boolean>(false);
 
   // SLD Zoom & Pan State (1.0 = Fit to Screen without horizontal scroll)
@@ -134,6 +158,21 @@ export const ScadaHmiPage: React.FC = () => {
     (bays.find((b) => b.id === 'BAY-132-L2')?.reactivePowerMvar || 0);
   const systemFreqHz = busbars.find((b) => b.energized)?.frequencyHz || 50.0;
   const onlineIedsCount = ieds.filter((i) => i.commHealthy).length;
+  const trendRows = (trendPaused ? trendSnapshot : trendHistory).slice(-Number(trendRange));
+  const trendChannels = [
+    {key:'v132Kv',label:'132 kV Bus A Voltage',unit:'kV',color:'#00d8ff'},
+    {key:'v33Kv',label:'33 kV Bus A Voltage',unit:'kV',color:'#22e879'},
+    {key:'v11Kv',label:'11 kV Bus A Voltage',unit:'kV',color:'#e54cf5'},
+    {key:'totalLoadMw',label:'Total Import Power',unit:'MW',color:'#ffd12a'},
+    {key:'totalLoadMvar',label:'Reactive Power',unit:'MVAr',color:'#fb923c'},
+    {key:'freqHz',label:'System Frequency',unit:'Hz',color:'#ff8a22'},
+  ] as const;
+  const exportTrendCsv = () => {
+    const header = ['time',...trendChannels.map(c=>c.key)];
+    const rows = trendRows.map(p=>header.map(k=>String(p[k as keyof typeof p] ?? '')).join(','));
+    const blob = new Blob([[header.join(','),...rows].join('\n')],{type:'text/csv;charset=utf-8'});
+    const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='substation-trends.csv'; a.click(); URL.revokeObjectURL(url);
+  };
 
   const unackCount = alarms.filter((a) => a.state === 'ACTIVE_UNACK').length;
   const criticalCount = alarms.filter((a) => a.state !== 'CLEARED' && a.severity === 'CRITICAL').length;
@@ -209,14 +248,9 @@ export const ScadaHmiPage: React.FC = () => {
 
     const success = commandBreaker(selectedBay.id, target, 'SCADA_SBO');
     if (success) {
-      setOperatorFeedback({
-        status: 'SUCCESS',
-        title: `COMMAND EXECUTED: ${selectedBay.breakerId} (${selectedBay.bayCode}) → ${target}`,
-        detail: `MMS CommandTermination+ received. XCBR1.Pos.stVal updated to ${
-          target === 'CLOSED' ? '10 (CLOSED)' : '01 (OPEN)'
-        } and electrical topology recalculated.`,
-        timestamp: ts,
-      });
+      // The shared command handler already publishes the global success toast.
+      // Do not render a second local success banner for the same operation.
+      setOperatorFeedback(null);
     } else {
       const rejectReason =
         selectedBay.quality !== 'GOOD'
@@ -1003,6 +1037,53 @@ export const ScadaHmiPage: React.FC = () => {
     );
   };
 
+  // Thin-line IEC-style switching schematic. Every bay retains its original selection handler.
+  const renderReferenceBay = (bay: BayEquipment | undefined, x: number, busY: number, endY: number, color: string, direction: 'up' | 'down', showTelemetry = true) => {
+    if (!bay) return null;
+    const top = Math.min(busY, endY);
+    const bottom = Math.max(busY, endY);
+    const span = bottom - top;
+    const cbY = top + span * 0.52;
+    const dsY = top + span * 0.23;
+    const earthY = top + span * 0.76;
+    const closed = bay.breakerState === 'CLOSED';
+    const dsClosed = bay.busDisconnectorState === 'CLOSED';
+    const esClosed = bay.earthSwitchState === 'CLOSED';
+    const selected = operatorSelectedBayId === bay.id;
+    const wire = color;
+    return <g key={bay.id} role="button" tabIndex={0} aria-label={`Inspect ${bay.bayCode}`} onClick={() => selectBayInScada(bay.id)} onKeyDown={e => { if(e.key==='Enter'||e.key===' ') {e.preventDefault();selectBayInScada(bay.id);} }} style={{cursor:'pointer'}}>
+      {selected && <rect x={x-20} y={top-5} width="40" height={span+10} rx="3" fill="#0c4261" fillOpacity="0.34" stroke="#22d3ee" strokeDasharray="4 4"/>}
+      {/* Split conductors at DS and CB: open isolators show a real visible air gap. */}
+      <path d={`M${x} ${top} V${dsY-7} M${x} ${dsY+7} V${cbY-10} M${x} ${cbY+10} V${bottom}`} stroke={wire} strokeWidth="1.8" fill="none"/>
+      <rect x={x-14} y={dsY-13} width="28" height="26" fill="transparent" stroke="none"/>
+      <circle cx={x} cy={dsY-7} r="2.5" fill={wire}/><circle cx={x} cy={dsY+7} r="2.5" fill={wire}/>
+      <path d={dsClosed?`M${x} ${dsY-7} V${dsY+7}`:`M${x} ${dsY-7} L${x+11} ${dsY+1}`} stroke={wire} strokeWidth="2.2" fill="none"/>
+      <rect x={x-9} y={cbY-10} width="18" height="20" fill={closed?wire:'#071b33'} stroke={wire} strokeWidth="1.8"/>
+      {!closed && <path d={`M${x-5} ${cbY-6} L${x+5} ${cbY+6} M${x+5} ${cbY-6} L${x-5} ${cbY+6}`} stroke={wire} strokeWidth="1.3"/>}
+      <circle cx={x} cy={earthY} r="2.5" fill={wire}/>
+      <path d={`M${x} ${earthY} h22 m0 0 v${esClosed?11:7} m-9 5 h18 m-15 4 h12 m-9 4 h6`} stroke="#cbd5e1" strokeWidth="1.4" fill="none"/>
+      <path d={esClosed?`M${x+11} ${earthY-6} L${x+22} ${earthY+7}`:`M${x+10} ${earthY-7} L${x+19} ${earthY-1}`} stroke="#cbd5e1" strokeWidth="1.5" fill="none"/>
+      <text x={x+13} y={dsY-7} fontSize="8" fill="#d7e7f6">Q1</text>
+      <text x={x+13} y={cbY+3} fontSize="8" fill="#d7e7f6">Q0</text>
+      <text x={x+24} y={earthY+5} fontSize="8" fill="#d7e7f6">Q8</text>
+      <text x={x} y={direction==='up'?top-9:bottom+13} fontSize="10" fill="#f1f7ff" fontWeight="600" textAnchor="middle">{bay.bayCode}</text>
+      {direction==='up' && <path d={`M${x-4} ${top+7} L${x} ${top} L${x+4} ${top+7}`} fill="none" stroke={wire} strokeWidth="1.6"/>}
+      {direction==='down' && <path d={`M${x-5} ${bottom-8} L${x} ${bottom} L${x+5} ${bottom-8}`} fill="none" stroke={wire} strokeWidth="1.6"/>}
+      {showTelemetry && direction==='down' && <g transform={`translate(${x-37},${bottom+18})`}><rect width="74" height="30" fill="#102b47" stroke="#577895" strokeWidth="0.8"/><text x="5" y="11" fontSize="9" fill="#e9f3ff">P [MW]</text><text x="69" y="11" fontSize="9" textAnchor="end" fill="#e9f3ff">{bay.activePowerMw.toFixed(1)}</text><path d="M4 15 H70" stroke="#577895"/><text x="69" y="26" fontSize="9" textAnchor="end" fill="#b8cde2">{bay.currentA.toFixed(0)} A</text></g>}
+    </g>;
+  };
+  const renderReferenceCoupler = (bayId: string, x: number, y: number, color: string) => {
+    const bay = bays.find(b=>b.id===bayId);
+    const closed = bay?.breakerState === 'CLOSED';
+    return <g key={bayId} role="button" tabIndex={0} aria-label={`Inspect bus coupler ${bay?.bayCode||bayId}`} onClick={()=>bay&&selectBayInScada(bay.id)} onKeyDown={e=>{if(e.key==='Enter'&&bay)selectBayInScada(bay.id);}} style={{cursor:'pointer'}}>
+      <path d={`M${x-50} ${y} H${x-12} M${x+12} ${y} H${x+50}`} stroke={color} strokeWidth="1.8" fill="none"/>
+      <circle cx={x-17} cy={y} r="2.5" fill={color}/><circle cx={x+17} cy={y} r="2.5" fill={color}/>
+      <rect x={x-11} y={y-11} width="22" height="22" fill={closed?color:'#071b33'} stroke={color} strokeWidth="1.8"/>
+      {!closed&&<path d={`M${x-7} ${y-7} l14 14 m0 -14 l-14 14`} stroke={color} strokeWidth="1.5"/>}
+      <text x={x} y={y-17} fontSize="11" fontWeight="600" fill="#e9f3ff" textAnchor="middle">{bay?.bayCode||bayId}</text>
+    </g>;
+  };
+
   const showSection = (sec: InspectorTab) =>
     inspectorTab === 'All Sections' || inspectorTab === sec;
 
@@ -1010,10 +1091,106 @@ export const ScadaHmiPage: React.FC = () => {
     <div
       className={
         isOperatorFullScreen
-          ? 'fixed inset-0 z-50 bg-[#050B14] text-[#E9F3FF] p-2.5 flex flex-col overflow-y-auto space-y-2'
-          : 'bg-[#050B14] text-[#E9F3FF] p-3 rounded-xl border border-[#142A3C] space-y-3 overflow-x-hidden'
+          ? 'sas-runtime-shell reference-sld fixed inset-0 z-50 text-[#E9F3FF] p-2 flex flex-col overflow-y-auto space-y-1'
+          : 'sas-runtime-shell reference-sld text-[#E9F3FF] p-2 border space-y-1 overflow-x-hidden'
       }
     >
+      {/* Industrial runtime shell: these controls use the existing simulation and operator views. */}
+      <style>{`
+        .sas-runtime-shell { background:linear-gradient(180deg,#061a34 0%,#071b33 40%,#041225 100%); font-family:Arial,system-ui,sans-serif; border-color:#315579; border-radius:5px; }
+        .sas-runtime-shell button { border-radius:3px; }
+        .sas-runtime-shell > div { border-radius:4px; }
+        .sas-runtime-shell .runtime-nav button { min-height:55px; }
+        .sas-runtime-shell .runtime-nav button[data-selected=true] { background:linear-gradient(#1973c5,#07529e);border-color:#4caaff; box-shadow:inset 0 1px 0 #75c6ff; }
+        .sas-runtime-shell .runtime-panel { border:1px solid #315779; background:linear-gradient(180deg,#09213e,#06172c); }
+        .sas-runtime-shell .runtime-status { background:#092542; border:1px solid #315779; }
+        .sas-runtime-shell .runtime-tab { border:1px solid #315779;background:#102e4f;color:#d7e9fa; }
+        .sas-runtime-shell .runtime-tab[data-selected=true] { background:#1767b4;color:white;border-color:#54b5ff; }
+        .sas-runtime-shell .runtime-alarm-table { border-collapse:collapse;width:100%;font-size:11px; }
+        .sas-runtime-shell .runtime-alarm-table th { background:#143451;text-align:left;padding:7px;border:1px solid #34516a; }
+        .sas-runtime-shell .runtime-alarm-table td { padding:7px;border-bottom:1px solid #304a65; }
+        /* Severity coloring applies only to active alarm rows, never to SOE. */
+        .sas-runtime-shell .runtime-alarm-table tr[data-alarm-active=true][data-severity=CRITICAL] { background:#a71925; color:#fff; border-left:4px solid #ff6874; }
+        .sas-runtime-shell .runtime-alarm-table tr[data-alarm-active=true][data-severity=MAJOR] { background:#ad5708; color:#fff; border-left:4px solid #ffb65e; }
+        .sas-runtime-shell .runtime-alarm-table tr[data-alarm-active=true][data-severity=MINOR],
+        .sas-runtime-shell .runtime-alarm-table tr[data-alarm-active=true][data-severity=WARNING] { background:#a58509; color:#fff; border-left:4px solid #ffe569; }
+        .sas-runtime-shell .runtime-alarm-table tr[data-alarm-active=true][data-severity=CRITICAL] td,
+        .sas-runtime-shell .runtime-alarm-table tr[data-alarm-active=true][data-severity=MAJOR] td,
+        .sas-runtime-shell .runtime-alarm-table tr[data-alarm-active=true][data-severity=MINOR] td,
+        .sas-runtime-shell .runtime-alarm-table tr[data-alarm-active=true][data-severity=WARNING] td { color:#fff; border-bottom-color:rgba(255,255,255,.22); }
+        .sas-runtime-shell .runtime-alarm-table tr[data-alarm-active=false] { background:#0b233c; color:#a9bacd; }
+
+        .reference-sld .reference-hide-on-sld { display:none; }
+        .reference-sld .reference-manager { position:relative; z-index:2; }
+        .reference-sld .reference-manager button { padding:4px 8px; font-size:10px; box-shadow:none; border-width:1px; }
+        .reference-sld .reference-directory-extra { display:none; }
+        .reference-sld .runtime-nav button { min-height:60px; }
+        .reference-sld .runtime-panel { border-radius:3px; }
+        .reference-sld .reference-workstation-toolbar { display:none; }
+        .reference-sld .reference-sld-workspace { grid-template-columns: 13% minmax(0,1fr) 22%; gap:6px; min-height:580px; }
+        .reference-sld .reference-sld-workspace > div, .reference-sld .reference-sld-workspace > aside { grid-column:auto !important; min-width:0; max-height:650px; border-color:#477398; background:#061a31; }
+        .reference-sld .reference-sld-workspace > aside { grid-column:3 !important; grid-row:1; width:100%; overflow-y:auto; }
+        .reference-sld .reference-sld-workspace > div:nth-child(2) { grid-column:2 !important; grid-row:1; }
+        .reference-sld .reference-sld-workspace > div:first-child { grid-column:1 !important; grid-row:1; }
+        .reference-sld .reference-sld-workspace > div:nth-child(2) > div:first-child { justify-content:center; }
+        .reference-sld .reference-sld-workspace > div:nth-child(2) > div:first-child span { font-size:14px; }
+        /* Keep alternative view content visible; only the SLD legend is hidden by its own class. */
+        .reference-sld .reference-sld-workspace .reference-iec-legend { display:none; }
+        .reference-sld .reference-sld-workspace .sld-main-svg { min-width:600px; }
+        .reference-sld .reference-sld-workspace aside svg { min-width:0 !important; max-width:100%; flex-shrink:0; }
+        .reference-sld .reference-sld-workspace > aside { overflow-x:hidden; }
+        .reference-sld .reference-sld-workspace > div:nth-child(2) > div:nth-child(3) { height:570px; padding:0; }
+        .reference-sld .reference-sld-workspace > div:last-child { padding:8px; gap:6px; }
+        @media(max-width:1100px){.reference-sld .reference-sld-workspace{grid-template-columns:180px minmax(650px,1fr) 285px;overflow-x:auto;}}
+      `}</style>
+      <div className="runtime-panel flex flex-wrap items-center justify-between gap-3 px-3 py-2">
+        <div className="flex items-center gap-3"><div className="rounded border border-blue-500 bg-[#164b81] p-2"><GitBranch className="h-6 w-6 text-white"/></div>
+          <div><div className="text-base font-bold text-white">Substation Automation System</div><div className="text-[11px] text-slate-300">132 / 33 / 11 kV Substation — SCADA / HMI Runtime</div></div></div>
+        <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold">
+          <span className="rounded bg-red-800 px-2 py-1 text-white">A {alarms.filter(a => a.severity === 'CRITICAL' && a.state !== 'CLEARED').length}</span>
+          <span className="rounded bg-amber-600 px-2 py-1 text-white">W {alarms.filter(a => a.severity === 'MAJOR' && a.state !== 'CLEARED').length}</span>
+          <span className="rounded bg-blue-600 px-2 py-1 text-white">I {alarms.filter(a => a.severity === 'MINOR' && a.state !== 'CLEARED').length}</span>
+          <span className="border-l border-[#355777] pl-3 font-mono text-slate-200">{new Date().toLocaleString()}</span>
+          <span className="border-l border-[#355777] pl-3 text-white">● Operator</span>
+        </div>
+      </div>
+      <nav className="runtime-nav grid grid-cols-4 gap-1 sm:grid-cols-9" aria-label="Runtime navigation">
+        {([
+          ['Dashboard',Layers],['SLD',GitBranch],['Bay Control',Settings2],['Alarms',AlertTriangle],
+          ['Events (SOE)',Bell],['Trends',Activity],['Reports',Layers],['Engineering',Cpu],['User',Eye]
+        ] as const).map(([label,Icon])=><button key={label} type="button"
+          data-selected={(runtimeScreen==='DASHBOARD' && label==='Dashboard') || (runtimeScreen==='TRENDS' && label==='Trends') || (runtimeScreen==='SLD' && ((label==='SLD' && primaryView==='SLD') || (label==='Bay Control' && primaryView==='BAY_MATRIX') || (label==='Alarms' && primaryView==='ALARMS_SOE' && runtimePanel==='ALARMS') || (label==='Events (SOE)' && primaryView==='ALARMS_SOE' && runtimePanel==='SOE'))) || (runtimeScreen==='REPORTS' && (engineeringDetailsOpen ? label==='Engineering' : label==='Reports')) || (runtimeScreen==='USER' && label==='User')}
+          onClick={()=>{setEngineeringDetailsOpen(false);if(label==='Dashboard')setRuntimeScreen('DASHBOARD');else if(label==='Trends')setRuntimeScreen('TRENDS');else if(label==='Reports')setRuntimeScreen('REPORTS');else if(label==='User')setRuntimeScreen('USER');else {setRuntimeScreen('SLD');if(label==='Bay Control')setPrimaryView('BAY_MATRIX');else if(label==='Alarms'||label==='Events (SOE)'){setPrimaryView('ALARMS_SOE');setRuntimePanel(label==='Alarms'?'ALARMS':'SOE');}else setPrimaryView('SLD');}if(label==='Engineering'){setEngineeringDetailsOpen(true);setRuntimeScreen('REPORTS');}}}
+          className="flex flex-col items-center justify-center gap-1 border border-[#355c7e] bg-[#102b4b] px-1 py-2 text-[11px] font-semibold text-slate-100 hover:bg-[#164674]">
+          <Icon className="h-5 w-5"/><span>{label}</span></button>)}
+      </nav>
+      {runtimeScreen==='DASHBOARD' && <section className="runtime-panel p-4 md:p-5 space-y-4 min-h-[480px]" aria-label="Substation dashboard">
+        <div className="flex flex-wrap justify-between items-center gap-3 border-b border-[#315779] pb-3"><div><h2 className="text-lg font-bold text-white">Substation Dashboard</h2><p className="text-xs text-slate-300">132 / 33 / 11 kV — Live training simulation overview</p></div><button type="button" className="runtime-tab px-4 py-2 text-xs font-bold" onClick={()=>{setRuntimeScreen('SLD');setPrimaryView('SLD');}}>Open Single Line Diagram</button></div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[['IEDs Online',`${onlineIedsCount} / ${ieds.length}`,'text-green-400'],['Station Import',`${totalImportMw.toFixed(1)} MW`,'text-cyan-300'],['Reactive Power',`${totalImportMvar.toFixed(1)} MVAr`,'text-blue-300'],['System Frequency',`${systemFreqHz.toFixed(2)} Hz`,'text-green-400']].map(([label,value,color])=><div key={label} className="rounded border border-[#315779] bg-[#0c2a49] p-4"><div className="text-xs text-slate-300">{label}</div><div className={`mt-2 text-xl font-bold ${color}`}>{value}</div></div>)}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="border border-[#315779] bg-[#09213b] rounded p-4 space-y-3"><h3 className="font-bold text-cyan-300">Station Equipment</h3><div className="flex justify-between text-sm border-b border-[#315779] pb-2"><span>Configured Bays</span><strong>{bays.length}</strong></div><div className="flex justify-between text-sm border-b border-[#315779] pb-2"><span>Closed Circuit Breakers</span><strong className="text-green-400">{bays.filter(b=>b.breakerState==='CLOSED').length}</strong></div><div className="flex justify-between text-sm"><span>Open Circuit Breakers</span><strong>{bays.filter(b=>b.breakerState==='OPEN').length}</strong></div><button type="button" className="runtime-tab px-3 py-2 text-xs" onClick={()=>{setRuntimeScreen('SLD');setPrimaryView('BAY_MATRIX');}}>View Bay Control</button></div>
+          <div className="border border-[#315779] bg-[#09213b] rounded p-4 space-y-3"><h3 className="font-bold text-cyan-300">Alarms & Events</h3><div className="flex justify-between text-sm border-b border-[#315779] pb-2"><span>Active Critical</span><strong className="text-red-400">{alarms.filter(a=>a.severity==='CRITICAL' && a.state!=='CLEARED').length}</strong></div><div className="flex justify-between text-sm border-b border-[#315779] pb-2"><span>Active Major</span><strong className="text-amber-400">{alarms.filter(a=>a.severity==='MAJOR' && a.state!=='CLEARED').length}</strong></div><div className="flex justify-between text-sm"><span>Active Minor</span><strong className="text-yellow-300">{alarms.filter(a=>a.severity==='MINOR' && a.state!=='CLEARED').length}</strong></div><button type="button" className="runtime-tab px-3 py-2 text-xs" onClick={()=>{setRuntimeScreen('SLD');setPrimaryView('ALARMS_SOE');setRuntimePanel('ALARMS');}}>View Alarms</button></div>
+        </div>
+      </section>}
+      {runtimeScreen==='USER' && <section className="runtime-panel p-6 min-h-[350px]"><h2 className="text-lg font-bold mb-3">Operator Session</h2><p className="text-sm text-slate-300">SCADA simulation operator workstation · use the website profile menu for account settings.</p></section>}
+      {runtimeScreen==='TRENDS' && <section className="grid grid-cols-1 lg:grid-cols-[180px_minmax(0,1fr)_250px] gap-2 min-h-[570px]">
+        <aside className="runtime-panel p-3 text-xs"><h3 className="font-bold border-b border-[#315779] pb-2">Project</h3><div className="mt-3 font-semibold">▾ 132_33_11kV_SAS</div>{['Overview','Single Line Diagram','Bay Control','Alarms','Events (SOE)','Trends','Reports'].map(label=><button key={label} type="button" onClick={()=>{setRuntimeScreen(label==='Trends'?'TRENDS':label==='Reports'?'REPORTS':'SLD');if(label==='Single Line Diagram')setPrimaryView('SLD');if(label==='Bay Control')setPrimaryView('BAY_MATRIX');if(label==='Alarms'||label==='Events (SOE)'){setPrimaryView('ALARMS_SOE');setRuntimePanel(label==='Alarms'?'ALARMS':'SOE');}}} className={`block w-full text-left px-2 py-2 mt-1 border ${label==='Trends'?'bg-[#1266b9] border-[#48b7ff]':'bg-[#09213b] border-transparent hover:bg-[#164674]'}`}>{label}</button>)}</aside>
+        <div className="runtime-panel min-w-0 flex flex-col"><div className="px-4 py-2 bg-[#0c3157] border-b border-[#315779] font-bold text-center">132 / 33 / 11 kV — LIVE TRENDS</div>
+          <div className="flex flex-wrap gap-2 items-center px-3 py-2 text-xs border-b border-[#315779]">
+            <label>Samples <select className="bg-[#102b4b] border border-[#355c7e] p-1" value={trendRange} onChange={e=>setTrendRange(e.target.value)}><option value="10">Last 10</option><option value="20">Last 20</option></select></label>
+            <button className="runtime-tab px-3 py-1" onClick={()=>{if(!trendPaused)setTrendSnapshot([...trendHistory]);setTrendPaused(!trendPaused);}}>{trendPaused?'▶ Resume Live':'Ⅱ Pause'}</button>
+            <span className={trendPaused?'text-amber-300':'text-green-400'}>{trendPaused?'● PAUSED':'● LIVE'}</span>
+            <button className="runtime-tab px-3 py-1 ml-auto" onClick={exportTrendCsv}>↓ Export CSV</button>
+          </div>
+          <div className="flex-1 min-h-[340px] p-3"><ResponsiveContainer width="100%" height="100%"><LineChart data={trendRows} margin={{top:15,right:15,left:0,bottom:5}}><CartesianGrid stroke="#1b4163" strokeDasharray="3 4"/><XAxis dataKey="time" stroke="#b9d6ee" tick={{fontSize:10}}/><YAxis yAxisId="voltage" stroke="#00d8ff" tick={{fontSize:10}} domain={[0,150]}/><YAxis yAxisId="other" orientation="right" stroke="#ffd12a" tick={{fontSize:10}}/><Tooltip contentStyle={{background:'#061a34',border:'1px solid #4aa7e0',color:'#fff'}}/><Legend wrapperStyle={{fontSize:11}}/>{trendChannels.filter(c=>trendEnabled.includes(c.key)).map(c=><Line key={c.key} yAxisId={c.key.startsWith('v')?'voltage':'other'} type="monotone" dataKey={c.key} name={c.label} stroke={c.color} strokeWidth={2} dot={false} isAnimationActive={false}/>)}</LineChart></ResponsiveContainer></div>
+          <div className="overflow-x-auto border-t border-[#315779]"><table className="runtime-alarm-table"><thead><tr><th>Parameter</th><th>Current</th><th>Min</th><th>Max</th><th>Average</th></tr></thead><tbody>{trendChannels.filter(c=>trendEnabled.includes(c.key)).map(c=>{const vals=trendRows.map(p=>Number(p[c.key]));const current=vals[vals.length-1]??0;return <tr key={c.key}><td style={{color:c.color}}>{c.label}</td><td>{current.toFixed(2)} {c.unit}</td><td>{Math.min(...(vals.length?vals:[0])).toFixed(2)}</td><td>{Math.max(...(vals.length?vals:[0])).toFixed(2)}</td><td>{(vals.reduce((a,b)=>a+b,0)/(vals.length||1)).toFixed(2)}</td></tr>})}</tbody></table></div>
+        </div>
+        <aside className="runtime-panel p-3 text-xs"><h3 className="font-bold border-b border-[#315779] pb-2">Trend Variables</h3><div className="space-y-3 mt-3">{trendChannels.map(c=><label key={c.key} className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={trendEnabled.includes(c.key)} onChange={e=>setTrendEnabled(old=>e.target.checked?[...old,c.key]:old.filter(k=>k!==c.key))}/><span style={{color:c.color}}>━</span>{c.label}</label>)}</div><h3 className="font-bold border-b border-[#315779] pb-2 mt-8">Current Values</h3>{trendChannels.map(c=><div key={c.key} className="flex justify-between gap-2 py-2 border-b border-[#1b4163]"><span>{c.label}</span><b style={{color:c.color}}>{Number(trendHistory[trendHistory.length-1]?.[c.key]??0).toFixed(2)} {c.unit}</b></div>)}</aside>
+      </section>}
+      {runtimeScreen==='REPORTS' && !engineeringDetailsOpen && <section className="runtime-panel p-5 min-h-[350px]"><h2 className="font-bold text-xl mb-3">Station Reports</h2><p className="text-sm text-slate-300 mb-4">Export the current simulated station measurements and historical trend samples.</p><button className="runtime-tab px-4 py-2" onClick={exportTrendCsv}>Download Trend Measurements (CSV)</button></section>}
+      <div style={{display:runtimeScreen==='SLD'?'contents':'none'}}>
       {/* ==================== 1. TOP SCADA SYSTEM STATUS & TELEMETRY HEADER (#081A30) ==================== */}
       <div className="px-3.5 py-2 rounded-lg bg-[#081A30] border border-[#142A3C] flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2.5">
@@ -1066,24 +1243,6 @@ export const ScadaHmiPage: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setBottomDrawerCollapsed((c) => !c)}
-            className={`px-2 py-1 rounded border font-semibold flex items-center gap-1 ${
-              !bottomDrawerCollapsed
-                ? 'bg-[#142A3C] text-[#00CFFF] border-[#00CFFF]/40'
-                : 'bg-[#050B14] text-slate-400 border-[#142A3C]'
-            }`}
-            title="Toggle Bottom Alarm/SOE/Transformer Console"
-          >
-            Bottom Console
-            {bottomDrawerCollapsed ? (
-              <ChevronUp className="w-3 h-3" />
-            ) : (
-              <ChevronDown className="w-3 h-3" />
-            )}
-          </button>
-
-          <button
-            type="button"
             onClick={toggleSimulationRunning}
             className={`px-2.5 py-1 rounded font-semibold border ${
               simulationRunning
@@ -1114,7 +1273,7 @@ export const ScadaHmiPage: React.FC = () => {
 
       {/* ==================== 2. DEDICATED INDUSTRIAL ALARM BANNER ==================== */}
       <div
-        className={`px-3.5 py-2 rounded-lg border flex flex-wrap items-center justify-between gap-2 ${
+        className={`reference-hide-on-sld px-3.5 py-2 rounded-lg border flex flex-wrap items-center justify-between gap-2 ${
           unackCount > 0
             ? 'bg-[#FF5C65]/15 border-[#FF5C65] text-[#E9F3FF]'
             : 'bg-[#0B1D30] border-[#142A3C] text-[#E9F3FF]'
@@ -1179,8 +1338,40 @@ export const ScadaHmiPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Bay engineering access: directly below the alarm banner. */}
+      <div className="reference-manager flex justify-end">
+        <button type="button" onClick={() => setBayManagerOpen(true)}
+          className="inline-flex items-center gap-2 rounded-lg border-2 border-[#00E5FF] bg-[#05263c] px-4 py-2 text-xs font-bold text-white shadow-[0_0_12px_rgba(0,229,255,0.65)] transition hover:bg-[#07506A] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">
+          <Settings2 className="h-4 w-4" /> Bay Configuration Manager
+        </button>
+      </div>
+
+      {bayManagerOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-[#010713]/85 p-3 backdrop-blur-[5px] sm:p-6"
+          role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setBayManagerOpen(false); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="bay-manager-dialog-title"
+            className="flex max-h-[88vh] w-full max-w-[970px] flex-col overflow-hidden rounded-2xl border-2 border-[#00E5FF] bg-[#031423] shadow-[0_0_8px_#00E5FF,0_0_25px_rgba(0,229,255,0.65)]">
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-cyan-900/70 bg-[#071D32] px-5 py-3">
+              <div className="flex items-center gap-3">
+                <Settings2 className="h-7 w-7 rounded-full text-[#00E5FF]" />
+                <div><h2 id="bay-manager-dialog-title" className="text-lg font-extrabold text-white">Bay Configuration Manager</h2>
+                  <p className="text-xs text-slate-400">Create, edit, delete and manage substation bays in the current workspace.</p></div>
+              </div>
+              <span className="hidden rounded-md border border-[#16799b] px-3 py-1.5 text-xs font-bold text-[#44e9ff] sm:inline-flex"><Layers className="mr-1.5 h-4 w-4"/> Workspace: 132/33/11 kV Main</span>
+              <button type="button" aria-label="Close Bay Configuration Manager" onClick={() => setBayManagerOpen(false)}
+                className="rounded-lg border border-cyan-800 p-2 text-slate-200 hover:bg-[#12334C] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"><X className="h-5 w-5" /></button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4"><BayConfigurationManager /></div>
+            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-cyan-900/70 bg-[#071D32] px-5 py-3">
+              <span className="text-[11px] text-slate-400">Training simulation only — configuration changes may not appear in fixed-layout SLD/3D views</span>
+              <button type="button" onClick={() => setBayManagerOpen(false)} className="rounded-lg border border-cyan-700 px-4 py-1.5 text-sm text-slate-100 hover:bg-[#12334C]">Close</button>
+            </footer>
+          </section>
+        </div>
+      )}
+
       {/* 132 kV Bus Transfer Controller — educational simulation only */}
-      <div className="rounded-lg border border-[#1E3A5F] bg-[#081A30] p-3 space-y-2">
+      {primaryView === 'BAY_MATRIX' && <div className="rounded-lg border border-[#1E3A5F] bg-[#081A30] p-3 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-xs font-bold tracking-wider text-[#00CFFF]">132 kV BUS TRANSFER CONTROLLER · CB-132</div>
           <div className="flex gap-2 items-center">
@@ -1200,7 +1391,7 @@ export const ScadaHmiPage: React.FC = () => {
           {busTransferStatus}: {busTransferMessage}
         </div>
         <div className="text-[10px] text-slate-400">Dead-bus transfer only · healthy alternate source · failed incomer OPEN · CILO1 / 43LR permissives · no automatic paralleling</div>
-      </div>
+      </div>}
 
 
       {/* Operator Command Execution / Rejection Feedback Banner */}
@@ -1229,13 +1420,13 @@ export const ScadaHmiPage: React.FC = () => {
       )}
 
       {/* ==================== 3. MAIN THREE-COLUMN OPERATOR WORKSPACE (COLLAPSIBLE LEFT / CENTER / COLLAPSIBLE RIGHT) ==================== */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-2.5 flex-1 min-h-0 items-start">
+      <div className="reference-sld-workspace grid grid-cols-1 xl:grid-cols-12 gap-1.5 flex-1 min-h-0 items-stretch">
         {/* COLLAPSIBLE LEFT COLUMN (2 Cols): View Navigation, Voltage-Level Filter & Bay Directory */}
         {!leftDirectoryCollapsed && (
-          <div className="xl:col-span-2 min-w-0 bg-[#0B1D30] border border-[#142A3C] rounded-lg p-2.5 flex flex-col gap-2.5 xl:max-h-[670px] overflow-hidden">
+          <div className="xl:col-span-2 min-w-0 bg-[#0B1D30] border border-[#142A3C] rounded-lg p-2.5 flex flex-col gap-2.5 xl:max-h-[710px] overflow-hidden">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Operator Views
+                Project · 132_33_11kV_SAS
               </span>
               <button
                 type="button"
@@ -1250,16 +1441,16 @@ export const ScadaHmiPage: React.FC = () => {
             <div className="space-y-1">
               {(
                 [
-                  ['SLD', '1. Main SCADA SLD'],
-                  ['BAY_MATRIX', '2. Bay Status Matrix'],
-                  ['TRANSFORMERS', '3. Transformer Monitoring'],
-                  ['ALARMS_SOE', '4. Alarm & SOE Console'],
+                  ['SLD', 'Single Line Diagram'],
+                  ['BAY_MATRIX', 'Bay Control'],
+                  ['TRANSFORMERS', 'Transformer'],
+                  ['ALARMS_SOE', 'Alarms & Events (SOE)'],
                 ] as [ScadaPrimaryView, string][]
               ).map(([viewKey, label]) => (
                 <button
                   key={viewKey}
                   type="button"
-                  onClick={() => setPrimaryView(viewKey)}
+                  onClick={() => { setRuntimeScreen('SLD'); setPrimaryView(viewKey); }}
                   className={`w-full text-left px-2.5 py-1.5 rounded text-xs font-semibold border transition ${
                     primaryView === viewKey
                       ? 'bg-[#168BFF] text-white border-[#00CFFF]'
@@ -1271,8 +1462,14 @@ export const ScadaHmiPage: React.FC = () => {
               ))}
             </div>
 
+            <div className="space-y-1 border-t border-[#284866] pt-2" aria-label="Additional project screens">
+              <button type="button" onClick={() => { setRuntimeScreen('TRENDS'); }} className="w-full text-left px-2.5 py-1.5 rounded text-xs font-semibold border border-[#284866] bg-[#09213b] text-slate-200 hover:bg-[#164674]">Trends</button>
+              <button type="button" onClick={() => { setRuntimeScreen('REPORTS'); setEngineeringDetailsOpen(false); }} className="w-full text-left px-2.5 py-1.5 rounded text-xs font-semibold border border-[#284866] bg-[#09213b] text-slate-200 hover:bg-[#164674]">Reports</button>
+              <button type="button" onClick={() => { setRuntimeScreen('REPORTS'); setEngineeringDetailsOpen(true); }} className="w-full text-left px-2.5 py-1.5 rounded text-xs font-semibold border border-[#284866] bg-[#09213b] text-slate-200 hover:bg-[#164674]">Engineering</button>
+            </div>
+
             {/* Voltage-Level Selection */}
-            <div className="space-y-1 pt-2 border-t border-[#142A3C]">
+            <div className="reference-directory-extra space-y-1 pt-2 border-t border-[#142A3C]">
               <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Voltage Filter
               </div>
@@ -1295,7 +1492,7 @@ export const ScadaHmiPage: React.FC = () => {
             </div>
 
             {/* Quick Equipment Search & Bay List */}
-            <div className="space-y-1.5 pt-2 border-t border-[#142A3C] flex-1 flex flex-col min-h-0">
+            <div className="reference-directory-extra space-y-1.5 pt-2 border-t border-[#142A3C] flex-1 flex flex-col min-h-0">
               <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Bay Directory ({filteredDirectoryBays.length})
               </div>
@@ -1413,7 +1610,7 @@ export const ScadaHmiPage: React.FC = () => {
 
           {/* Compact IEC Symbol & Status Colour Legend Bar */}
           {primaryView === 'SLD' && (
-            <div className="px-3 py-1.5 bg-[#050B14] border-b border-[#142A3C] flex flex-wrap items-center justify-between gap-2 text-[10.5px]">
+            <div className="reference-iec-legend px-3 py-1.5 bg-[#050B14] border-b border-[#142A3C] flex flex-wrap items-center justify-between gap-2 text-[10.5px]">
               <div className="flex flex-wrap items-center gap-3">
                 <span className="font-bold text-slate-400 uppercase">IEC Legend:</span>
                 <span className="flex items-center gap-1">
@@ -1450,332 +1647,49 @@ export const ScadaHmiPage: React.FC = () => {
           {/* Primary Center View Content — Argon Dark-SCADA 132/33/11 kV Interactive SLD Structure */}
           {primaryView === 'SLD' && (
             <div
-              className="overflow-auto relative flex items-center justify-center p-1.5 h-[460px] sm:h-[530px] xl:h-[590px]"
+              className="overflow-auto relative flex items-center justify-center p-1.5 h-[540px] sm:h-[620px] xl:h-[680px]"
               style={{
-                background: 'linear-gradient(180deg, #080E18 0%, #0D1625 50%, #080E18 100%)',
+                background: '#071b33',
               }}
             >
-              <svg
-                viewBox="0 0 1200 646"
-                preserveAspectRatio="xMidYMid meet"
-                className="w-full h-full min-w-[660px] select-none block"
-                style={{
-                  transform: `scale(${sldZoom}) translate(${sldPanX}px, ${sldPanY}px)`,
-                  transformOrigin: 'center center',
-                }}
-              >
-                <defs>
-                  <pattern id="scadaMinorGrid" width="20" height="20" patternUnits="userSpaceOnUse">
-                    <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#101D30" strokeWidth="0.6" />
-                  </pattern>
-                  <pattern id="scadaMajorGrid" width="100" height="100" patternUnits="userSpaceOnUse">
-                    <rect width="100" height="100" fill="url(#scadaMinorGrid)" />
-                    <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#162840" strokeWidth="1.0" />
-                  </pattern>
-
-                  <linearGradient id="scadaCbFrameGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#3B4D63" />
-                    <stop offset="50%" stopColor="#1E2B3C" />
-                    <stop offset="100%" stopColor="#0E1622" />
-                  </linearGradient>
-
-                  <radialGradient id="scadaTxCoreAura" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stopColor="#00D2FF" stopOpacity="0.35" />
-                    <stop offset="55%" stopColor="#00E676" stopOpacity="0.14" />
-                    <stop offset="100%" stopColor="#080E18" stopOpacity="0" />
-                  </radialGradient>
-
-                  <filter id="scadaGlowCyan" filterUnits="userSpaceOnUse" x="-50" y="-50" width="1300" height="900">
-                    <feGaussianBlur stdDeviation="2.5" result="blur" />
-                    <feMerge>
-                      <feMergeNode in="blur" />
-                      <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                  </filter>
-                  <filter id="scadaGlowGreen" filterUnits="userSpaceOnUse" x="-50" y="-50" width="1300" height="900">
-                    <feGaussianBlur stdDeviation="2.5" result="blur" />
-                    <feMerge>
-                      <feMergeNode in="blur" />
-                      <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                  </filter>
-                  <filter id="scadaGlowAmber" filterUnits="userSpaceOnUse" x="-50" y="-50" width="1300" height="900">
-                    <feGaussianBlur stdDeviation="2.5" result="blur" />
-                    <feMerge>
-                      <feMergeNode in="blur" />
-                      <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                  </filter>
-                </defs>
-
-                <rect width="1200" height="646" fill="url(#scadaMajorGrid)" />
-
-                {/* ==================== TIER 1: 132 kV TRANSMISSION SWITCHYARD ==================== */}
-                <text
-                  x="28"
-                  y="24"
-                  fill="#00D2FF"
-                  fontSize="12.5"
-                  fontWeight="bold"
-                  letterSpacing="0.04em"
-                >
-                  132 kV TRANSMISSION SWITCHYARD (DOUBLE-SECTION BUSBAR WITH BUS COUPLER CB-132)
-                </text>
-
-                {bays.find((b) => b.id === 'BAY-132-L1') &&
-                  renderScadaVerticalBay(
-                    bays.find((b) => b.id === 'BAY-132-L1')!,
-                    215,
-                    116,
-                    28,
-                    'INTO_BUS_FROM_TOP',
-                    '#00D2FF'
-                  )}
-                {bays.find((b) => b.id === 'BAY-132-L2') &&
-                  renderScadaVerticalBay(
-                    bays.find((b) => b.id === 'BAY-132-L2')!,
-                    985,
-                    116,
-                    28,
-                    'INTO_BUS_FROM_TOP',
-                    '#00D2FF'
-                  )}
-
-                {/* 132 kV BUS SECTION A */}
-                {bus132A.energized && (
-                  <line x1="48" y1="116" x2="544" y2="116" stroke="#00D2FF" strokeWidth="9" opacity="0.22" />
-                )}
-                <line
-                  x1="48"
-                  y1="116"
-                  x2="544"
-                  y2="116"
-                  stroke={bus132A.energized ? '#00D2FF' : '#334458'}
-                  strokeWidth="4.5"
-                  strokeLinecap="round"
-                  filter={bus132A.energized ? 'url(#scadaGlowCyan)' : undefined}
-                />
-                <text x="82" y="106" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-                  132 kV BUS SECTION A ({bus132A.voltageKvLive.toFixed(1)} kV • {bus132A.frequencyHz.toFixed(2)} Hz)
-                </text>
-
-                {/* 132 kV BUS SECTION B */}
-                {bus132B.energized && (
-                  <line x1="656" y1="116" x2="1152" y2="116" stroke="#00D2FF" strokeWidth="9" opacity="0.22" />
-                )}
-                <line
-                  x1="656"
-                  y1="116"
-                  x2="1152"
-                  y2="116"
-                  stroke={bus132B.energized ? '#00D2FF' : '#334458'}
-                  strokeWidth="4.5"
-                  strokeLinecap="round"
-                  filter={bus132B.energized ? 'url(#scadaGlowCyan)' : undefined}
-                />
-                <text x="825" y="106" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-                  132 kV BUS SECTION B ({bus132B.voltageKvLive.toFixed(1)} kV • {bus132B.frequencyHz.toFixed(2)} Hz)
-                </text>
-
-                {renderScadaCouplerSvg('BAY-132-BC', 600, 116, '#00D2FF', true)}
-
-                {bays.find((b) => b.id === 'BAY-132-T1') &&
-                  renderScadaVerticalBay(
-                    bays.find((b) => b.id === 'BAY-132-T1')!,
-                    382,
-                    116,
-                    190,
-                    'DOWN_FROM_BUS',
-                    '#00D2FF'
-                  )}
-                {bays.find((b) => b.id === 'BAY-132-T2') &&
-                  renderScadaVerticalBay(
-                    bays.find((b) => b.id === 'BAY-132-T2')!,
-                    818,
-                    116,
-                    190,
-                    'DOWN_FROM_BUS',
-                    '#00D2FF'
-                  )}
-
-                {renderScadaMainPowerTransformer(txT1, 382, 212, 'LEFT', 'BAY-132-T1')}
-                {renderScadaMainPowerTransformer(txT2, 818, 212, 'RIGHT', 'BAY-132-T2')}
-
-                {/* ==================== TIER 2: 33 kV DISTRIBUTION SECTION ==================== */}
-                {bays.find((b) => b.id === 'BAY-33-INC1') &&
-                  renderScadaVerticalBay(
-                    bays.find((b) => b.id === 'BAY-33-INC1')!,
-                    382,
-                    314,
-                    238,
-                    'INTO_BUS_FROM_TOP',
-                    '#00E676'
-                  )}
-                {bays.find((b) => b.id === 'BAY-33-INC2') &&
-                  renderScadaVerticalBay(
-                    bays.find((b) => b.id === 'BAY-33-INC2')!,
-                    818,
-                    314,
-                    238,
-                    'INTO_BUS_FROM_TOP',
-                    '#00E676'
-                  )}
-
-                {bus33A.energized && (
-                  <line x1="42" y1="314" x2="544" y2="314" stroke="#00E676" strokeWidth="9" opacity="0.20" />
-                )}
-                <line
-                  x1="42"
-                  y1="314"
-                  x2="544"
-                  y2="314"
-                  stroke={bus33A.energized ? '#00E676' : '#334458'}
-                  strokeWidth="4.5"
-                  strokeLinecap="round"
-                  filter={bus33A.energized ? 'url(#scadaGlowGreen)' : undefined}
-                />
-                <text x="48" y="304" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-                  33 kV BUS SECTION A ({bus33A.voltageKvLive.toFixed(2)} kV)
-                </text>
-
-                {bus33B.energized && (
-                  <line x1="656" y1="314" x2="1158" y2="314" stroke="#00E676" strokeWidth="9" opacity="0.20" />
-                )}
-                <line
-                  x1="656"
-                  y1="314"
-                  x2="1158"
-                  y2="314"
-                  stroke={bus33B.energized ? '#00E676' : '#334458'}
-                  strokeWidth="4.5"
-                  strokeLinecap="round"
-                  filter={bus33B.energized ? 'url(#scadaGlowGreen)' : undefined}
-                />
-                <text x="892" y="304" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-                  33 kV BUS SECTION B ({bus33B.voltageKvLive.toFixed(2)} kV)
-                </text>
-
-                {renderScadaCouplerSvg('BAY-33-BC', 600, 314, '#00E676', false)}
-
-                {bay33BusA.map((bay, idx) => {
-                  const span = 355 / Math.max(1, bay33BusA.length - 1);
-                  const bx = 76 + idx * span;
-                  return renderScadaVerticalBay(bay, bx, 314, 386, 'DOWN_FROM_BUS', '#00E676', {
-                    showTelemetryCard: true,
-                  });
-                })}
-
-                {bay33BusB.map((bay, idx) => {
-                  const span = 365 / Math.max(1, bay33BusB.length - 1);
-                  const bx = 685 + idx * span;
-                  return renderScadaVerticalBay(bay, bx, 314, 386, 'DOWN_FROM_BUS', '#00E676', {
-                    showTelemetryCard: true,
-                  });
-                })}
-
-                {/* ==================== TIER 3: 33/11 kV STEP-DOWN TRANSFORMERS & 11 kV SWITCHGEAR BOARD ==================== */}
-                {[
-                  { tx: txDt1, x: 431, y: 448, incId: 'BAY-11-INC1', dashed: true },
-                  { tx: txDt2, x: 769, y: 448, incId: 'BAY-11-INC2', dashed: false },
-                ].map(({ tx, x, y, incId, dashed }) => {
-                  const hvCol = tx.energized ? '#00E676' : '#334458';
-                  const lvCol = tx.energized ? '#FFAB00' : '#334458';
-                  const incBay = bays.find((b) => b.id === incId);
-                  return (
-                    <g key={tx.id}>
-                      <circle
-                        cx={x}
-                        cy={y - 7}
-                        r={11.5}
-                        fill="#091526"
-                        stroke={hvCol}
-                        strokeWidth={2.4}
-                        filter={tx.energized ? 'url(#scadaGlowGreen)' : undefined}
-                      />
-                      <circle
-                        cx={x}
-                        cy={y + 7}
-                        r={11.5}
-                        fill="#091526"
-                        stroke={lvCol}
-                        strokeWidth={2.4}
-                        filter={tx.energized ? 'url(#scadaGlowAmber)' : undefined}
-                      />
-                      <text
-                        x={x - 18}
-                        y={y + 4}
-                        textAnchor="end"
-                        fill="#E8F3FF"
-                        fontSize="10"
-                        fontWeight="bold"
-                      >
-                        {tx.id} (33/11kV 16MVA - {tx.activePowerMw.toFixed(1)}MW)
-                      </text>
-                      {incBay &&
-                        renderScadaVerticalBay(
-                          incBay,
-                          x,
-                          532,
-                          y + 15,
-                          'INTO_BUS_FROM_TOP',
-                          '#FFAB00',
-                          { dashedHighlight: dashed }
-                        )}
-                    </g>
-                  );
-                })}
-
-                {bus11A.energized && (
-                  <line x1="42" y1="532" x2="544" y2="532" stroke="#FFAB00" strokeWidth="9" opacity="0.20" />
-                )}
-                <line
-                  x1="42"
-                  y1="532"
-                  x2="544"
-                  y2="532"
-                  stroke={bus11A.energized ? '#FFAB00' : '#334458'}
-                  strokeWidth="4.5"
-                  strokeLinecap="round"
-                  filter={bus11A.energized ? 'url(#scadaGlowAmber)' : undefined}
-                />
-                <text x="48" y="522" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-                  11 kV SWITCHGEAR BUS A ({bus11A.voltageKvLive.toFixed(2)} kV)
-                </text>
-
-                {bus11B.energized && (
-                  <line x1="656" y1="532" x2="1158" y2="532" stroke="#FFAB00" strokeWidth="9" opacity="0.20" />
-                )}
-                <line
-                  x1="656"
-                  y1="532"
-                  x2="1158"
-                  y2="532"
-                  stroke={bus11B.energized ? '#FFAB00' : '#334458'}
-                  strokeWidth="4.5"
-                  strokeLinecap="round"
-                  filter={bus11B.energized ? 'url(#scadaGlowAmber)' : undefined}
-                />
-                <text x="890" y="522" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-                  11 kV SWITCHGEAR BUS B ({bus11B.voltageKvLive.toFixed(2)} kV)
-                </text>
-
-                {renderScadaCouplerSvg('BAY-11-BC', 600, 532, '#FFAB00', false)}
-
-                {bay11BusA.map((bay, idx) => {
-                  const span = 385 / Math.max(1, bay11BusA.length - 1);
-                  const bx = 66 + idx * span;
-                  return renderScadaVerticalBay(bay, bx, 532, 598, 'DOWN_FROM_BUS', '#FFAB00', {
-                    showTelemetryCard: true,
-                  });
-                })}
-
-                {bay11BusB.map((bay, idx) => {
-                  const span = 365 / Math.max(1, bay11BusB.length - 1);
-                  const bx = 685 + idx * span;
-                  return renderScadaVerticalBay(bay, bx, 532, 598, 'DOWN_FROM_BUS', '#FFAB00', {
-                    showTelemetryCard: true,
-                  });
-                })}
+              <svg viewBox="0 0 1200 820" preserveAspectRatio="xMidYMid meet" className="w-full h-full min-w-[660px] select-none block" style={{ transform: `scale(${sldZoom}) translate(${sldPanX}px, ${sldPanY}px)`, transformOrigin: 'center center' }}>
+                <rect width="1200" height="820" fill="#071b33" />
+                <text x="600" y="32" fill="#e9f3ff" fontSize="22" fontWeight="bold" textAnchor="middle">132 / 33 / 11 kV SUBSTATION – SINGLE LINE DIAGRAM</text>
+                <g fontFamily="Arial, sans-serif" fontSize="13" fill="#e9f3ff" fontWeight="bold">
+                  <text x="32" y="153">132 kV</text><text x="88" y="165">132 kV BUS SECTION A</text><text x="965" y="165">132 kV BUS SECTION B</text>
+                  <text x="88" y="180" fontSize="11">({bus132A.voltageKvLive.toFixed(1)} kV / 50.00 Hz)</text><text x="965" y="180" fontSize="11">({bus132B.voltageKvLive.toFixed(1)} kV / 50.00 Hz)</text>
+                  <text x="88" y="392">33 kV BUS SECTION A</text><text x="965" y="392">33 kV BUS SECTION B</text>
+                  <text x="88" y="407" fontSize="11">({bus33A.voltageKvLive.toFixed(2)} kV)</text><text x="965" y="407" fontSize="11">({bus33B.voltageKvLive.toFixed(2)} kV)</text>
+                  <text x="88" y="652">11 kV SWITCHGEAR BUS A</text><text x="950" y="652">11 kV SWITCHGEAR BUS B</text>
+                </g>
+                <g strokeLinecap="round" strokeWidth="1.8" fill="none">
+                  <path d="M65 195 H550 M650 195 H1135" stroke="#ed3b42" />
+                  <path d="M65 425 H550 M650 425 H1135" stroke="#18bd48" />
+                  <path d="M65 675 H550 M650 675 H1135" stroke="#d3aa00" />
+                </g>
+                {renderReferenceCoupler('BAY-132-BC', 600, 195, '#ed3b42')}
+                {renderReferenceCoupler('BAY-33-BC', 600, 425, '#18bd48')}
+                {renderReferenceCoupler('BAY-11-BC', 600, 675, '#d3aa00')}
+                {renderReferenceBay(bays.find(b => b.id === 'BAY-132-L1'), 300, 195, 90, '#ed3b42', 'up')}
+                {renderReferenceBay(bays.find(b => b.id === 'BAY-132-L2'), 900, 195, 90, '#ed3b42', 'up')}
+                {[{x:420,id:'BAY-132-T1',inc:'BAY-33-INC1',tx:txT1},{x:780,id:'BAY-132-T2',inc:'BAY-33-INC2',tx:txT2}].map((item,i) => <g key={item.id}>
+                  {renderReferenceBay(bays.find(b=>b.id===item.id),item.x,195,260,'#ed3b42','down',false)}
+                  <line x1={item.x} y1="260" x2={item.x} y2="425" stroke="#18bd48" strokeWidth="1.8" />
+                  <circle cx={item.x-9} cy="314" r="18" fill="none" stroke="#e0b100" strokeWidth="3"/><circle cx={item.x+9} cy="314" r="18" fill="none" stroke="#20a35e" strokeWidth="3"/>
+                  <text x={item.x+33} y="309" fontSize="11" fill="#e9f3ff">{i===0?'T1':'T2'} · 132/33 kV</text>
+                  <text x={item.x+33} y="325" fontSize="10" fill="#b8cde2">50 MVA · {item.tx?.loadPercent?.toFixed(1) || '0.0'}%</text>
+                  {renderReferenceBay(bays.find(b=>b.id===item.inc),item.x,425,365,'#18bd48','up',false)}
+                </g>)}
+                {bay33BusA.map((b,i)=>renderReferenceBay(b,105+i*(405/Math.max(1,bay33BusA.length-1)),425,505,'#18bd48','down',false))}
+                {bay33BusB.map((b,i)=>renderReferenceBay(b,695+i*(405/Math.max(1,bay33BusB.length-1)),425,505,'#18bd48','down',false))}
+                {[{x:420,tx:txDt1,id:'BAY-11-INC1'},{x:780,tx:txDt2,id:'BAY-11-INC2'}].map((item,i)=><g key={item.id}>
+                  <line x1={item.x} y1="425" x2={item.x} y2="675" stroke="#d3aa00" strokeWidth="1.8"/>
+                  <circle cx={item.x-8} cy="585" r="15" fill="none" stroke="#d3aa00" strokeWidth="3"/><circle cx={item.x+8} cy="585" r="15" fill="none" stroke="#20a35e" strokeWidth="3"/>
+                  <text x={item.x+30} y="583" fontSize="10" fill="#e9f3ff">{i===0?'DT1':'DT2'} · 33/11 kV</text>
+                  {renderReferenceBay(bays.find(b=>b.id===item.id),item.x,675,622,'#d3aa00','up',false)}
+                </g>)}
+                {bay11BusA.map((b,i)=>renderReferenceBay(b,100+i*(380/Math.max(1,bay11BusA.length-1)),675,765,'#d3aa00','down',false))}
+                {bay11BusB.map((b,i)=>renderReferenceBay(b,700+i*(380/Math.max(1,bay11BusB.length-1)),675,765,'#d3aa00','down',false))}
               </svg>
             </div>
           )}
@@ -1959,466 +1873,54 @@ export const ScadaHmiPage: React.FC = () => {
           )}
         </div>
 
-        {/* COLLAPSIBLE RIGHT COLUMN (4 Cols): Independently Scrollable Compact Equipment Inspector */}
-        {!rightInspectorCollapsed && (
-          <div className="xl:col-span-3 min-w-0 bg-[#0B1D30] border border-[#142A3C] rounded-lg p-3 flex flex-col gap-2.5 xl:max-h-[670px] overflow-y-auto">
-            {/* Selected Equipment Header */}
-            <div className="flex items-start justify-between gap-2 border-b border-[#142A3C] pb-2">
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="px-2 py-0.5 rounded bg-[#00CFFF]/15 text-[#00CFFF] border border-[#00CFFF]/40 text-[10px] font-bold font-mono">
-                    {selectedBay.bayCode}
-                  </span>
-                  <span className="text-[11px] text-slate-400">
-                    {selectedBay.voltageKv} kV • Bus {selectedBay.busSection} • {selectedBay.iedId}
-                  </span>
-                </div>
-                <h3 className="text-sm font-bold text-[#E9F3FF] mt-0.5">{selectedBay.name}</h3>
-              </div>
-
-              <div className="flex flex-col items-end gap-1">
-                <span
-                  className={`px-2 py-0.5 rounded text-xs font-bold border font-mono ${
-                    selectedBay.breakerState === 'CLOSED'
-                      ? 'bg-[#EF4444]/20 text-[#EF4444] border-[#EF4444]/50'
-                      : 'bg-[#22C55E]/20 text-[#22C55E] border-[#22C55E]/50'
-                  }`}
-                >
-                  {selectedBay.breakerId}: {selectedBay.breakerState}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setRightInspectorCollapsed(true)}
-                  className="text-[10px] text-slate-400 hover:text-white"
-                >
-                  Hide Inspector ▶
-                </button>
-              </div>
+        {/* Reference-style compact Bay Details inspector. All controls use the existing store and SBO confirmation. */}
+        {!rightInspectorCollapsed && <aside className="xl:col-span-3 min-w-0 bg-[#071c35] border border-[#477398] rounded flex flex-col min-h-0 overflow-y-auto overflow-x-hidden h-[590px] text-[11px]">
+          <div className="flex justify-between items-center bg-[#12385d] border-b border-[#497da8] px-2 py-1.5 shrink-0"><strong className="text-[13px] whitespace-nowrap min-w-0">Bay Details - {selectedBay.bayCode}</strong><button type="button" aria-label="Hide Bay Details" onClick={()=>setRightInspectorCollapsed(true)}><X className="w-4 h-4"/></button></div>
+          <div className="grid grid-cols-4 gap-1 p-1 shrink-0">{(['Overview','Measurements','Controls','IEC 61850'] as InspectorTab[]).map(tab=><button type="button" key={tab} onClick={()=>setInspectorTab(tab)} className={`px-1 py-2 text-[10px] font-bold border border-[#436789] ${inspectorTab===tab?'bg-[#166bc4] text-white':'bg-[#0d2a49]'}`}>{tab==='IEC 61850'?'Interlocks':tab}</button>)}</div>
+          {(inspectorTab==='All Sections'||inspectorTab==='Overview') && <div className="px-2 py-1.5 shrink-0">
+            <div className="grid grid-cols-[minmax(0,1fr)_48px] gap-1 items-center"><div className="min-w-0 space-y-0.5">{[['Bay ID',selectedBay.bayCode],['Bay Name',selectedBay.name],['Bay Type',selectedBay.bayType.replace(/_/g,' ')],['Voltage',`${selectedBay.voltageKv} kV`],['Bus Section',selectedBay.busSection],['IED',selectedBay.iedId]].map(([label,value])=><div key={label} className="grid grid-cols-[62px_minmax(0,1fr)] gap-1 text-[10px] leading-4"><span className="text-slate-300">{label}</span><span className="font-semibold break-words min-w-0 leading-4">: {value}</span></div>)}</div><svg viewBox="0 0 65 95" className="w-[46px] h-[74px] block"><path d="M32 3V91" stroke="#2bf17c" strokeWidth="3"/><rect x="20" y="32" width="24" height="24" fill="#08233d" stroke="#2bf17c" strokeWidth="3"/><path d="M24 36L40 52M40 36L24 52" stroke="#2bf17c" strokeWidth="2"/><path d="M25 68L32 80L39 68" fill="none" stroke="#2bf17c" strokeWidth="3"/></svg></div>
+          </div>}
+          {(inspectorTab==='All Sections'||inspectorTab==='Overview'||inspectorTab==='Measurements') && <div className="mx-2 mb-1 border border-[#37658b] rounded overflow-hidden shrink-0"><div className="bg-[#123b62] px-2 py-1 font-bold text-[11px]">Live Measurements</div><div className="grid grid-cols-3 text-center">{[['I-A',`${selectedBay.currentA.toFixed(1)} A`],['I-B',`${selectedBay.currentA.toFixed(1)} A`],['I-C',`${selectedBay.currentA.toFixed(1)} A`],['P',`${selectedBay.activePowerMw.toFixed(1)} MW`],['Q',`${selectedBay.reactivePowerMvar.toFixed(1)} MVAr`],['PF',selectedBay.powerFactor.toFixed(2)]].map(([k,v])=><div key={k} className="bg-[#0a2542] border border-[#234765] px-1 py-0.5"><span className="block text-slate-300">{k}</span><strong className="text-[#45f583]">{v}</strong></div>)}</div></div>}
+          {(inspectorTab==='All Sections'||inspectorTab==='Overview'||inspectorTab==='Controls') && <div className="mx-2 mb-1 border border-[#37658b] rounded overflow-hidden shrink-0"><div className="bg-[#123b62] px-2 py-1 font-bold text-[11px]">Equipment Status</div>{[['Circuit Breaker (CB)',selectedBay.breakerState],['Disconnector (DS-1)',selectedBay.busDisconnectorState],['Disconnector (DS-2)',selectedBay.lineDisconnectorState],['Earth Switch (ES)',selectedBay.earthSwitchState]].map(([k,v])=><div key={k} className="flex justify-between items-center px-2 py-0.5 border-b border-[#234765] leading-4"><span><span className={`inline-block w-2.5 h-2.5 rounded-full mr-2 ${v==='CLOSED'?'bg-green-400':'bg-slate-400'}`}/>{k}</span><strong className={`px-2 rounded ${v==='CLOSED'?'bg-green-800 text-green-100':'bg-slate-700'}`}>{v}</strong></div>)}</div>}
+          {(inspectorTab==='All Sections'||inspectorTab==='Controls') && <div className="mx-2 mb-1 border border-[#37658b] rounded overflow-hidden shrink-0"><div className="bg-[#123b62] px-2 py-1 font-bold text-[11px]">Control (SBO)</div><div className="grid grid-cols-2 gap-1 p-1.5"><button type="button" onClick={()=>handleSelectSbo('CLOSED')} className="bg-green-700 border border-green-400 py-1 font-bold">CB CLOSE</button><button type="button" onClick={()=>handleSelectSbo('OPEN')} className="bg-red-700 border border-red-400 py-1 font-bold">CB OPEN</button>{pendingSboCommand && <><button type="button" onClick={handleConfirmOperate} className="col-span-2 bg-blue-600 border border-blue-300 py-2 font-bold">CONFIRM {pendingSboCommand} (SBO)</button><button type="button" onClick={()=>setPendingSboCommand(null)} className="col-span-2 bg-slate-700 py-1">Cancel Selection</button></>}{[['BUS_Q1','DS CLOSE','CLOSED'],['BUS_Q1','DS OPEN','OPEN'],['EARTH_Q8','ES CLOSE','CLOSED'],['EARTH_Q8','ES OPEN','OPEN']].map(([device,label,target])=><button key={`${device}${target}`} type="button" onClick={()=>commandDisconnector(selectedBay.id,device as 'BUS_Q1'|'EARTH_Q8',target as 'CLOSED'|'OPEN')} className="bg-[#244667] border border-[#6083a6] py-1 font-semibold">{label}</button>)}</div></div>}
+          {(inspectorTab==='All Sections'||inspectorTab==='Controls') && <div className="mx-2 mb-2 border border-[#37658b] rounded overflow-hidden shrink-0" aria-label="Protection Testing Simulator">
+            <div className="bg-[#123b62] px-2 py-1 font-bold text-[11px] flex items-center justify-between"><span>Protection Testing (Simulation)</span><span className={selectedBay.protectionTripActive?'text-red-300':'text-green-300'}>{selectedBay.protectionTripActive?'TRIP ACTIVE':'READY'}</span></div>
+            <div className="p-2 space-y-2 text-[11px]">
+              <label className="block text-slate-200" htmlFor="protection-function">Protection function</label>
+              <select id="protection-function" value={protectionFunction} onChange={e=>{setProtectionFunction(e.target.value);setProtectionConfirm(false);}} className="w-full min-w-0 bg-[#092440] border border-[#6083a6] rounded px-2 py-1.5 text-white">
+                <option value="50/51 Overcurrent">50/51 — Phase Overcurrent</option>
+                <option value="50N/51N Earth Fault">50N/51N — Earth Fault</option>
+                {(selectedBay.bayType.includes('TRANSFORMER') || Boolean(selectedBay.connectedTransformerId)) && <option value="87T Transformer Differential">87T — Transformer Differential</option>}
+                <option value="50BF Breaker Failure">50BF — Breaker Failure (Trip Scenario)</option>
+                <option value="86 Lockout">86 — Lockout (Trip Scenario)</option>
+              </select>
+              <div className="text-slate-300">Bay: <strong className="text-white">{selectedBay.bayCode}</strong> · CB: <strong className="text-white">{selectedBay.breakerState}</strong> · Lockout: <strong className="text-white">{selectedBay.autoRecloseStatus}</strong></div>
+              {selectedBay.activeTripFunctions.length>0 && <div className="text-red-300 break-words">Active: {selectedBay.activeTripFunctions.join(', ')}</div>}
+              {protectionConfirm && <div className="border border-amber-600 bg-amber-950/40 rounded p-2 space-y-2"><p>Confirm simulated protection trip for {selectedBay.bayCode}? This will open the CB and create Alarm/SOE records.</p><div className="grid grid-cols-2 gap-1"><button type="button" className="bg-red-700 border border-red-400 rounded py-1.5 font-bold" onClick={()=>{triggerProtectionTrip(selectedBay.id,protectionFunction);setProtectionConfirm(false);setRuntimePanel('ALARMS');}}>CONFIRM TRIP</button><button type="button" className="bg-[#244667] border border-[#6083a6] rounded py-1.5" onClick={()=>setProtectionConfirm(false)}>Cancel</button></div></div>}
+              <div className="grid grid-cols-2 gap-1"><button type="button" disabled={selectedBay.protectionTripActive} className="bg-red-800 border border-red-500 rounded py-1.5 font-bold disabled:opacity-40" onClick={()=>setProtectionConfirm(true)}>Simulate Trip</button><button type="button" disabled={!selectedBay.protectionTripActive} className="bg-[#244667] border border-[#6083a6] rounded py-1.5 font-bold disabled:opacity-40" onClick={()=>{resetProtectionTrip(selectedBay.id);setProtectionConfirm(false);}}>Reset Protection</button></div>
+              <p className="text-[10px] text-slate-400">Training only. 50BF and 86 use the existing generic trip/lockout simulation, not a full breaker-failure timing sequence.</p>
             </div>
+          </div>}
+          {(inspectorTab==='IEC 61850') && <div className="m-2 p-3 bg-[#0b2b45] border border-[#3b6b90] space-y-2"><h3 className="font-bold">Control Interlocks</h3><p>43LR Mode: <strong>{selectedBay.localRemote}</strong></p><p>Quality: <strong>{selectedBay.quality}</strong></p><p className="text-green-300">{selectedBay.interlockReason || 'Check CSWI1 / CILO1 permissives before operating.'}</p><button type="button" onClick={()=>setBayLocalRemote(selectedBay.id,selectedBay.localRemote==='REMOTE'?'LOCAL':'REMOTE')} className="px-3 py-2 border border-[#6083a6] bg-[#244667]">Switch to {selectedBay.localRemote==='REMOTE'?'LOCAL':'REMOTE'}</button></div>}
+        </aside>}
 
-            {/* Section Filter Tabs */}
-            <div className="flex flex-wrap gap-1 bg-[#050B14] p-1 rounded border border-[#142A3C]">
-              {(
-                [
-                  'All Sections',
-                  'Overview',
-                  'Measurements',
-                  'Controls',
-                  'IEC 61850',
-                  'Alarms',
-                  'SOE',
-                ] as InspectorTab[]
-              ).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setInspectorTab(tab)}
-                  className={`py-0.5 px-2 rounded text-[10px] font-bold transition ${
-                    inspectorTab === tab
-                      ? 'bg-[#00CFFF] text-slate-950'
-                      : 'text-slate-300 hover:text-white'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-
-            {/* 1. COMPACT SECTION: EQUIPMENT OVERVIEW */}
-            {showSection('Overview') && (
-              <div className="p-2.5 rounded bg-[#050B14] border border-[#142A3C] space-y-1.5 text-xs">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[#00CFFF]">
-                  1. Equipment Overview
-                </div>
-                <div className="grid grid-cols-4 gap-1.5 text-center font-mono text-[11px]">
-                  <div className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <div className="text-[9.5px] text-slate-400 font-sans">Position</div>
-                    <div
-                      className={`font-bold ${
-                        selectedBay.breakerState === 'CLOSED' ? 'text-[#EF4444]' : 'text-[#22C55E]'
-                      }`}
-                    >
-                      {selectedBay.breakerState}
-                    </div>
-                  </div>
-                  <div className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <div className="text-[9.5px] text-slate-400 font-sans">43LR Mode</div>
-                    <div className="font-bold text-[#00CFFF]">{selectedBay.localRemote}</div>
-                  </div>
-                  <div className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <div className="text-[9.5px] text-slate-400 font-sans">Quality</div>
-                    <div
-                      className={`font-bold ${
-                        selectedBay.quality === 'GOOD' ? 'text-[#22C55E]' : 'text-[#FFB547]'
-                      }`}
-                    >
-                      {selectedBay.quality}
-                    </div>
-                  </div>
-                  <div className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <div className="text-[9.5px] text-slate-400 font-sans">Op Counter</div>
-                    <div className="font-bold text-[#E9F3FF]">#{selectedBay.opCounter}</div>
-                  </div>
-                </div>
-                {selectedIed && (
-                  <div className="flex items-center justify-between text-[10.5px] font-mono text-slate-300 pt-1">
-                    <span>
-                      IED: <strong className="text-[#E9F3FF]">{selectedIed.name}</strong> ({selectedIed.model})
-                    </span>
-                    <span className="text-[#00CFFF]">{selectedIed.ipAddressLanA}</span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 2. COMPACT SECTION: ELECTRICAL MEASUREMENTS */}
-            {showSection('Measurements') && (
-              <div className="p-2.5 rounded bg-[#050B14] border border-[#142A3C] space-y-1.5 text-xs font-mono">
-                <div className="flex items-center justify-between font-sans">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#00CFFF]">
-                    2. Electrical Measurements (MMXU1)
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-400">
-                    CT:{selectedBay.ctRatio} • VT:{selectedBay.vtRatio}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-1.5 text-center text-[11px]">
-                  <div className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <span className="text-[9.5px] text-slate-400 block font-sans">Active P</span>
-                    <strong className="text-[#00CFFF]">{selectedBay.activePowerMw.toFixed(2)} MW</strong>
-                  </div>
-                  <div className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <span className="text-[9.5px] text-slate-400 block font-sans">Reactive Q</span>
-                    <strong className="text-[#E9F3FF]">{selectedBay.reactivePowerMvar.toFixed(2)} MVAr</strong>
-                  </div>
-                  <div className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <span className="text-[9.5px] text-slate-400 block font-sans">Apparent S</span>
-                    <strong className="text-[#E9F3FF]">{selectedBay.apparentPowerMva.toFixed(2)} MVA</strong>
-                  </div>
-                  <div className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <span className="text-[9.5px] text-slate-400 block font-sans">Ia / Ib / Ic</span>
-                    <strong className="text-[#E9F3FF]">{selectedBay.currentA.toFixed(1)} A</strong>
-                  </div>
-                  <div className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <span className="text-[9.5px] text-slate-400 block font-sans">Vab / Vbc / Vca</span>
-                    <strong className="text-[#22C55E]">{selectedBay.voltageAbKv.toFixed(2)} kV</strong>
-                  </div>
-                  <div className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <span className="text-[9.5px] text-slate-400 block font-sans">PF / Freq</span>
-                    <strong className="text-[#FFB547]">
-                      {selectedBay.powerFactor.toFixed(3)} • {selectedBay.frequencyHz.toFixed(2)}Hz
-                    </strong>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 3. COMPACT SECTION: CONTROL AND INTERLOCKING */}
-            {showSection('Controls') && (
-              <div className="p-2.5 rounded bg-[#050B14] border border-[#142A3C] space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#00CFFF]">
-                    3. Control &amp; Interlocking (CSWI1 / CILO1)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setBayLocalRemote(
-                        selectedBay.id,
-                        selectedBay.localRemote === 'REMOTE' ? 'LOCAL' : 'REMOTE'
-                      )
-                    }
-                    className="px-2 py-0.5 rounded bg-[#142A3C] hover:bg-[#168BFF] text-[#E9F3FF] border border-[#00CFFF]/40 font-semibold text-[10.5px]"
-                  >
-                    Switch to {selectedBay.localRemote === 'REMOTE' ? 'LOCAL' : 'REMOTE'}
-                  </button>
-                </div>
-
-                {/* Supervision Badges */}
-                <div className="grid grid-cols-4 gap-1 font-mono text-[10px] text-center">
-                  <div className="p-1 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <span className="text-slate-400 block">Spring</span>
-                    <strong className={selectedBay.springCharged ? 'text-[#22C55E]' : 'text-[#FF5C65]'}>
-                      {selectedBay.springCharged ? 'CHG' : 'DIS'}
-                    </strong>
-                  </div>
-                  <div className="p-1 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <span className="text-slate-400 block">74TC</span>
-                    <strong className={selectedBay.tcsHealthy ? 'text-[#22C55E]' : 'text-[#FF5C65]'}>
-                      {selectedBay.tcsHealthy ? 'OK' : 'FAIL'}
-                    </strong>
-                  </div>
-                  <div className="p-1 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <span className="text-slate-400 block">110V DC</span>
-                    <strong className={selectedBay.dcSupplyHealthy ? 'text-[#22C55E]' : 'text-[#FF5C65]'}>
-                      {selectedBay.dcSupplyHealthy ? 'OK' : 'FAIL'}
-                    </strong>
-                  </div>
-                  <div className="p-1 rounded bg-[#0B1D30] border border-[#142A3C]">
-                    <span className="text-slate-400 block">SF6 Gas</span>
-                    <strong className={selectedBay.sf6PressureNormal ? 'text-[#22C55E]' : 'text-[#FF5C65]'}>
-                      {selectedBay.sf6PressureNormal ? 'OK' : 'ALM'}
-                    </strong>
-                  </div>
-                </div>
-
-                {/* CILO Permissive Reason */}
-                <div
-                  className={`p-2 rounded border text-[10.5px] ${
-                    selectedBay.interlockPermissive
-                      ? 'bg-[#22C55E]/10 border-[#22C55E]/40 text-emerald-200'
-                      : 'bg-[#FFB547]/10 border-[#FFB547]/40 text-amber-200'
-                  }`}
-                >
-                  {selectedBay.interlockReason}
-                </div>
-
-                {/* SBO Select Buttons */}
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handleSelectSbo('CLOSED')}
-                    className={`py-1.5 px-2 rounded font-bold text-xs border transition ${
-                      pendingSboCommand === 'CLOSED'
-                        ? 'bg-[#EF4444] text-white border-white'
-                        : 'bg-[#EF4444]/20 hover:bg-[#EF4444]/30 text-[#EF4444] border-[#EF4444]/50'
-                    }`}
-                  >
-                    1. SELECT CLOSE (52-ON)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectSbo('OPEN')}
-                    className={`py-1.5 px-2 rounded font-bold text-xs border transition ${
-                      pendingSboCommand === 'OPEN'
-                        ? 'bg-[#22C55E] text-slate-950 border-white'
-                        : 'bg-[#22C55E]/20 hover:bg-[#22C55E]/30 text-[#22C55E] border-[#22C55E]/50'
-                    }`}
-                  >
-                    1. SELECT OPEN (52-OFF)
-                  </button>
-                </div>
-
-                {pendingSboCommand && (
-                  <div className="p-2 rounded bg-[#142A3C] border border-[#00CFFF] space-y-1.5">
-                    <div className="text-[10.5px] font-mono text-[#00CFFF]">
-                      CONFIRMATION REQUIRED: Operate({pendingSboCommand}) on{' '}
-                      <strong>{selectedBay.breakerId}</strong>?
-                    </div>
-                    <div className="flex gap-1.5">
-                      <button
-                        type="button"
-                        onClick={handleConfirmOperate}
-                        className="flex-1 py-1 rounded bg-[#00CFFF] hover:bg-[#168BFF] text-slate-950 font-bold text-xs"
-                      >
-                        2. CONFIRM &amp; OPERATE ({pendingSboCommand})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPendingSboCommand(null)}
-                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Disconnectors Q1, Q9 & Earth Switch Q8 */}
-                <div className="grid grid-cols-3 gap-1.5 text-[10.5px]">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      commandDisconnector(
-                        selectedBay.id,
-                        'BUS_Q1',
-                        selectedBay.busDisconnectorState === 'CLOSED' ? 'OPEN' : 'CLOSED'
-                      )
-                    }
-                    className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C] hover:border-[#00CFFF] text-center"
-                  >
-                    <span className="text-slate-400 block text-[9.5px]">Bus DS Q1</span>
-                    <strong
-                      className={
-                        selectedBay.busDisconnectorState === 'CLOSED' ? 'text-[#EF4444]' : 'text-[#22C55E]'
-                      }
-                    >
-                      {selectedBay.busDisconnectorState}
-                    </strong>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      commandDisconnector(
-                        selectedBay.id,
-                        'LINE_Q9',
-                        selectedBay.lineDisconnectorState === 'CLOSED' ? 'OPEN' : 'CLOSED'
-                      )
-                    }
-                    className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C] hover:border-[#00CFFF] text-center"
-                  >
-                    <span className="text-slate-400 block text-[9.5px]">Line DS Q9</span>
-                    <strong
-                      className={
-                        selectedBay.lineDisconnectorState === 'CLOSED' ? 'text-[#EF4444]' : 'text-[#22C55E]'
-                      }
-                    >
-                      {selectedBay.lineDisconnectorState}
-                    </strong>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      commandDisconnector(
-                        selectedBay.id,
-                        'EARTH_Q8',
-                        selectedBay.earthSwitchState === 'CLOSED' ? 'OPEN' : 'CLOSED'
-                      )
-                    }
-                    className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C] hover:border-[#FFB547] text-center"
-                  >
-                    <span className="text-slate-400 block text-[9.5px]">Earth Sw Q8</span>
-                    <strong
-                      className={
-                        selectedBay.earthSwitchState === 'CLOSED' ? 'text-[#FFB547]' : 'text-slate-400'
-                      }
-                    >
-                      {selectedBay.earthSwitchState}
-                    </strong>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* 4. COMPACT SECTION: PROTECTION AND LOCKOUT */}
-            {(showSection('Controls') || showSection('Overview')) && (
-              <div className="p-2.5 rounded bg-[#050B14] border border-[#142A3C] space-y-1.5 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#00CFFF]">
-                    4. Protection &amp; Lockout (PTRC1 / RREC1)
-                  </span>
-                  <span
-                    className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-bold ${
-                      selectedBay.protectionTripActive
-                        ? 'bg-[#FF5C65] text-white animate-pulse'
-                        : 'bg-[#22C55E]/15 text-[#22C55E]'
-                    }`}
-                  >
-                    {selectedBay.protectionTripActive ? '86 LOCKOUT ACTIVE' : 'PROTECTION NORMAL'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-[10.5px] font-mono text-slate-300">
-                  <span>Active Trip: {selectedBay.activeTripFunctions.join(', ') || 'None'}</span>
-                  <span>AR (79): {selectedBay.autoRecloseStatus}</span>
-                </div>
-                <div className="flex gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      triggerProtectionTrip(
-                        selectedBay.id,
-                        selectedBay.voltageKv === 132 && selectedBay.bayType === 'LINE_INCOMER'
-                          ? '21 Distance Zone 1'
-                          : selectedBay.bayType === 'TRANSFORMER_HV'
-                          ? '87T Transformer Differential'
-                          : '50/51 Overcurrent'
-                      )
-                    }
-                    className="flex-1 py-1 px-2 rounded bg-[#FF5C65]/20 hover:bg-[#FF5C65]/30 text-[#FF5C65] border border-[#FF5C65]/40 font-semibold text-xs"
-                  >
-                    Trigger Protection Trip
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => resetProtectionTrip(selectedBay.id)}
-                    className="py-1 px-2.5 rounded bg-[#142A3C] hover:bg-slate-700 text-[#E9F3FF] border border-slate-600 font-semibold text-xs flex items-center gap-1"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    Reset 86
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* 5. COMPACT SECTION: IEC 61850 DIAGNOSTICS */}
-            {showSection('IEC 61850') && (
-              <div className="p-2.5 rounded bg-[#050B14] border border-[#142A3C] space-y-1 text-[10.5px] font-mono">
-                <div className="text-[10px] font-sans font-bold uppercase tracking-wider text-[#00CFFF]">
-                  5. IEC 61850 Diagnostics ({selectedBay.iedId})
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">XCBR1.Pos.stVal:</span>
-                  <span className="text-[#E9F3FF] font-bold">
-                    {selectedBay.breakerState === 'CLOSED' ? '10 (on/closed)' : '01 (off/open)'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">CSWI1.Pos (ctlModel):</span>
-                  <span className="text-[#00CFFF]">sbo-with-enhanced-security</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">CILO1.EnaCls.stVal:</span>
-                  <span className={selectedBay.interlockPermissive ? 'text-[#22C55E]' : 'text-[#FF5C65]'}>
-                    {String(selectedBay.interlockPermissive)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">PTRC1.Tr.general:</span>
-                  <span className={selectedBay.protectionTripActive ? 'text-[#FF5C65]' : 'text-[#22C55E]'}>
-                    {String(selectedBay.protectionTripActive)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">XSWI1.Pos / XSWI2.Pos:</span>
-                  <span className="text-[#E9F3FF]">
-                    Q1:{selectedBay.busDisconnectorState} Q9:{selectedBay.lineDisconnectorState} Q8:{selectedBay.earthSwitchState}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">MMXU1 (TotW / PPV / A):</span>
-                  <span className="text-[#22C55E]">
-                    {selectedBay.activePowerMw.toFixed(1)}MW | {selectedBay.voltageAbKv.toFixed(1)}kV | {selectedBay.currentA.toFixed(0)}A
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* 6. COMPACT SECTION: RECENT EVENTS & ALARMS */}
-            {(showSection('Alarms') || showSection('SOE')) && (
-              <div className="p-2.5 rounded bg-[#050B14] border border-[#142A3C] space-y-1.5 text-[10.5px]">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#00CFFF]">
-                    6. Recent Bay Events &amp; Alarms ({selectedBayAlarms.length})
-                  </span>
-                  <span className="font-mono text-[9.5px] text-slate-400">
-                    Click any row to inspect full IEC 61850 ref
-                  </span>
-                </div>
-                <div className="space-y-1 max-h-32 overflow-y-auto font-mono">
-                  {selectedBaySoe.slice(0, 5).map((s) => (
-                    <div
-                      key={s.id}
-                      onClick={() => setInspectedSoeEvent(s)}
-                      className="p-1.5 rounded bg-[#0B1D30] border border-[#142A3C] hover:border-[#00CFFF] cursor-pointer"
-                    >
-                      <div className="flex justify-between text-[9.5px] text-slate-400">
-                        <span className="text-[#00CFFF]">{s.timestampMs.split('T')[1]}</span>
-                        <span>{s.cause}</span>
-                      </div>
-                      <div className="font-sans text-[#E9F3FF] truncate">{s.eventDescription}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
+      <section className="runtime-panel overflow-hidden" aria-label="Runtime alarms and events">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#355777] p-2">
+          <div className="flex gap-1">{(['ALARMS','SOE','SYSTEM'] as const).map(tab=><button key={tab} type="button" data-selected={runtimePanel===tab} onClick={()=>setRuntimePanel(tab)} className="runtime-tab px-3 py-1.5 text-xs font-bold">{tab==='ALARMS'?`⚠ Alarms (${alarms.length})`:tab==='SOE'?'Events (SOE)':'System Messages'}</button>)}</div>
+          <div className="flex gap-1"><button type="button" className="runtime-tab px-2 py-1 text-xs" onClick={acknowledgeAllAlarms}>✓ Acknowledge All</button><button type="button" className="runtime-tab px-2 py-1 text-xs" onClick={clearClearedAlarms}>Purge Cleared</button></div>
+        </div>
+        <div className="max-h-40 overflow-auto">
+          {runtimePanel==='ALARMS' && <table className="runtime-alarm-table"><thead><tr><th>Time</th><th>Severity</th><th>State</th><th>Bay / Equipment</th><th>Description</th></tr></thead><tbody>{alarms.length ? alarms.slice(0,20).map((a,i)=><tr key={a.id || i} data-severity={a.severity} data-alarm-active={a.state !== 'CLEARED' && !String(a.state).startsWith('CLEARED_')}><td className="font-mono">{String(a.timestamp).slice(11,23)}</td><td>{a.severity}</td><td>{a.state}</td><td>{a.bayId}</td><td>{a.signalName}</td></tr>):<tr><td colSpan={5} className="text-center text-green-300">No active alarm records</td></tr>}</tbody></table>}
+          {runtimePanel==='SOE' && <table className="runtime-alarm-table"><thead><tr><th>Time</th><th>Bay / IED</th><th>Event</th></tr></thead><tbody>{soeLog.slice(0,20).map((e,i)=><tr key={i}><td>{String(e.timestampMs).slice(11,23)}</td><td>{e.bayId}</td><td>{e.eventDescription}</td></tr>)}</tbody></table>}
+          {runtimePanel==='SYSTEM' && <div className="p-3 text-xs text-green-300">System runtime online · {onlineIedsCount}/{ieds.length} IEDs online · Simulation only</div>}
+        </div>
+      </section>
       {/* ==================== 4. COLLAPSIBLE BOTTOM CONSOLE: TRANSFORMER MONITORING + ALARM/SOE CONSOLE WITH EVENT DETAIL INSPECTOR ==================== */}
-      {!bottomDrawerCollapsed && (
+      {false && !bottomDrawerCollapsed && (
         <div className="space-y-3 border-t border-[#1E3A5F] pt-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 px-1"><h3 className="text-sm font-bold tracking-wide text-[#00CFFF]">OPERATIONS CONSOLE</h3><span className="text-[11px] text-slate-400">Transformer telemetry · Alarms · SOE · Trends</span></div>
+          <div className="reference-workstation-toolbar flex flex-wrap items-center justify-between gap-2 px-1"><h3 className="text-sm font-bold tracking-wide text-[#00CFFF]">OPERATIONS CONSOLE</h3><span className="text-[11px] text-slate-400">Transformer telemetry · Alarms · SOE · Trends</span></div>
           {/* Transformer Monitoring Panels (T1, T2, DT1, DT2) with Crisp Tabular Alignment */}
           <div className="bg-[#0B1D30] border border-[#142A3C] rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between">
@@ -2789,6 +2291,9 @@ export const ScadaHmiPage: React.FC = () => {
         </div>
       )}
 
+
+      </div>
+      {runtimeScreen==='REPORTS' && engineeringDetailsOpen && <section className="runtime-panel p-3 space-y-3"><div className="flex justify-between items-center"><h2 className="text-sm font-bold text-[#00CFFF]">Engineering · Protocol Diagnostics & RCC Forwarding</h2><button type="button" className="runtime-tab px-3 py-1 text-xs" onClick={()=>setBayManagerOpen(true)}>Bay Configuration Manager</button></div>
       {/* SECTION 4: SCADA / HMI MULTI-PROTOCOL COMMUNICATION STATUS & SIGNAL SOURCE */}
       {(() => {
         const bayIdx = Math.max(0, bays.findIndex((b) => b.id === selectedBay.id));
@@ -2897,6 +2402,11 @@ export const ScadaHmiPage: React.FC = () => {
         );
       })()}
 
+      </section>}
+      <footer className="runtime-status flex flex-wrap items-center justify-between gap-3 px-3 py-2 text-[11px] font-semibold">
+        <div className="flex flex-wrap gap-4"><span className="text-green-400">● System Healthy</span><span>IEDs Online: <b className="text-green-400">{onlineIedsCount}/{ieds.length}</b></span><span>Comms: <b className="text-green-400">OK</b></span><span>Import: <b className="text-green-400">{totalImportMw.toFixed(1)} MW</b></span><span>Frequency: <b className="text-green-400">{systemFreqHz.toFixed(2)} Hz</b></span></div>
+        <span className="text-slate-300">Project: 132_33_11kV_SAS · Training simulation</span>
+      </footer>
     </div>
   );
 };

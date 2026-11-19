@@ -53,7 +53,7 @@ export const SldWorkspacePage: React.FC = () => {
 
   // SLD-only selection: no default highlight and no forced bay on initial render.
   const [inspectedBayId, setInspectedBayId] = useState<string | null>(null);
-  const [deviceDetailsTab, setDeviceDetailsTab] = useState<'Overview' | 'Signals' | 'Interlock' | 'Control'>('Overview');
+  const [deviceDetailsTab, setDeviceDetailsTab] = useState<'Overview' | 'Measurements' | 'Protection' | 'IEC 61850' | 'Controls' | 'SOE'>('Overview');
   const inspectedBay = bays.find(b => b.id === inspectedBayId);
   const inspectSldBay = (id: string) => {
     if (inspectedBayId === id) { setInspectedBayId(null); return; }
@@ -2360,40 +2360,56 @@ export const SldWorkspacePage: React.FC = () => {
             <div className="my-3 rounded-lg border border-cyan-900 bg-[#0a253a] p-3">
               <div className="flex justify-between gap-2"><div><strong className="text-base">{inspectedBay.bayCode}</strong><div className="mt-1 text-slate-400">{inspectedBay.name}</div><div className="text-cyan-300">{inspectedBay.voltageKv} kV • Bus {inspectedBay.busSection}</div></div><span className="h-fit rounded border border-green-700 bg-green-950 px-2 py-1 text-green-400">{inspectedBay.quality}</span></div>
             </div>
-            <div className="grid grid-cols-4 gap-1 mb-3">
-              {(['Overview','Signals','Interlock','Control'] as const).map(tab => <button key={tab} type="button" onClick={() => setDeviceDetailsTab(tab)} className={`rounded border px-1 py-2 text-[10px] ${deviceDetailsTab === tab ? 'border-cyan-400 bg-cyan-500 text-slate-950 font-bold' : 'border-cyan-900 text-cyan-200'}`}>{tab}</button>)}
+            <div className="grid grid-cols-3 gap-1 mb-3">
+              {(['Overview','Measurements','Protection','IEC 61850','Controls','SOE'] as const).map(tab => <button key={tab} type="button" onClick={() => setDeviceDetailsTab(tab)} className={`rounded border px-1 py-2 text-[10px] ${deviceDetailsTab === tab ? 'border-cyan-400 bg-cyan-500 text-slate-950 font-bold' : 'border-cyan-900 text-cyan-200'}`}>{tab}</button>)}
             </div>
-            <div className="rounded-lg border border-cyan-800 bg-[#071728] p-3 space-y-2">
+            <div className="rounded-lg border border-cyan-800 bg-[#071728] p-3 space-y-2 max-h-[65vh] overflow-y-auto">
               {deviceDetailsTab === 'Overview' && <>
-                <h4 className="font-bold text-cyan-300">Breaker Overview</h4>
-                <div>Status: <strong>{inspectedBay.breakerState}</strong></div>
+                <h4 className="font-bold text-cyan-300">Equipment Status</h4>
+                {([['Circuit Breaker (Q0)',inspectedBay.breakerState],['Bus Disconnector (Q1)',inspectedBay.busDisconnectorState],['Earth Switch (Q8)',inspectedBay.earthSwitchState]] as const).map(([label,value]) => <div key={label} className="flex justify-between gap-2 border-b border-slate-700 py-1"><span>{label}</span><strong className={value === 'CLOSED' ? 'text-green-300' : 'text-amber-300'}>{value}</strong></div>)}
+                <div className="flex justify-between"><span>Line Disconnector (Q2)</span><span className="text-slate-400">NOT AVAILABLE</span></div>
                 <div>Control Mode: {inspectedBay.localRemote}</div>
-                <div>Voltage: {inspectedBay.voltageAbKv.toFixed(2)} kV</div>
-                <div>Current: {inspectedBay.currentA.toFixed(1)} A</div>
-                <div>Power: {inspectedBay.activePowerMw.toFixed(2)} MW</div>
+                <div>Quality: {inspectedBay.quality}</div>
+                <div>Interlock: <strong className={inspectedBay.interlockPermissive ? 'text-green-300' : 'text-amber-300'}>{inspectedBay.interlockPermissive ? 'PERMISSIVE' : 'BLOCKED'}</strong></div>
+                <p className="text-slate-400">{inspectedBay.interlockReason || 'No active blocking reason reported.'}</p>
+              </>}
+              {deviceDetailsTab === 'Measurements' && <>
+                <h4 className="font-bold text-cyan-300">Live Simulation Measurements</h4>
+                {([['Voltage AB',`${inspectedBay.voltageAbKv.toFixed(2)} kV`],['Current (aggregate)',`${inspectedBay.currentA.toFixed(1)} A`],['Active Power',`${inspectedBay.activePowerMw.toFixed(2)} MW`]] as const).map(([label,value]) => <div key={label} className="flex justify-between gap-2 border-b border-slate-700 py-1"><span>{label}</span><strong>{value}</strong></div>)}
+                <p className="text-amber-300">Individual IA/IB/IC, VBC/VCA, MVAr, PF and frequency are not available in this page's current Bay data. No synthetic readings are shown.</p>
                 <div>Quality: {inspectedBay.quality}</div>
               </>}
-              {deviceDetailsTab === 'Signals' && <>
-                <h4 className="font-bold text-cyan-300">IED / IEC 61850 Signals</h4>
-                <div>IED: {inspectedBay.iedId}</div>
-                <div>XCBR.Pos.stVal: {inspectedBay.breakerState}</div>
-                <div>MMXU.A.phsA: {inspectedBay.currentA.toFixed(1)} A</div>
-                <div>MMXU.PPV.phsAB: {inspectedBay.voltageAbKv.toFixed(2)} kV</div>
-                <div>Quality: {inspectedBay.quality}</div>
+              {deviceDetailsTab === 'Protection' && <>
+                <h4 className="font-bold text-cyan-300">Protection Monitoring</h4>
+                <div className="flex justify-between"><span>Trip indication</span><strong className={inspectedBay.protectionTripActive ? 'text-red-400' : 'text-green-400'}>{inspectedBay.protectionTripActive ? 'ACTIVE' : 'NOT ACTIVE'}</strong></div>
+                <div className="flex justify-between"><span>86 Lockout</span><strong>{inspectedBay.protectionTripActive ? 'CHECK LOCKOUT' : 'READY / NO ACTIVE TRIP'}</strong></div>
+                <h5 className="font-semibold text-slate-200 pt-2">Associated protection alarms</h5>
+                {alarms.filter(a => a.bayId === inspectedBay.id && a.state !== 'CLEARED').slice(0,8).map(a => <div key={a.id} className="rounded border border-red-900/60 bg-red-950/30 p-2"><strong className="text-red-300">{a.severity}</strong> · {a.signalName} · {a.state}</div>)}
+                {!alarms.some(a => a.bayId === inspectedBay.id && a.state !== 'CLEARED') && <p className="text-slate-400">No active bay protection alarms.</p>}
+                <p className="text-amber-300">Individual 50/51, 50N/51N, 87T and 50BF states are not exposed by this page's current bay data. See the configured protection simulation for test operations.</p>
               </>}
-              {deviceDetailsTab === 'Interlock' && <>
-                <h4 className="font-bold text-cyan-300">Interlock Status</h4>
-                <div className={inspectedBay.interlockPermissive ? 'text-green-400' : 'text-amber-400'}>{inspectedBay.interlockPermissive ? 'PERMISSIVE' : 'BLOCKED'}</div>
-                <p>{inspectedBay.interlockReason || 'No active blocking reason reported.'}</p>
+              {deviceDetailsTab === 'IEC 61850' && <>
+                <h4 className="font-bold text-cyan-300">IEC 61850 — Simulated Signals</h4>
+                <div>IED: <strong>{inspectedBay.iedId}</strong></div>
+                {([['XCBR1.Pos.stVal',inspectedBay.breakerState],['XSWI1.Pos.stVal',inspectedBay.busDisconnectorState],['XSWI (Earth Switch)',inspectedBay.earthSwitchState],['PTRC1.Tr.general',inspectedBay.protectionTripActive ? 'TRUE' : 'FALSE'],['MMXU1.A (aggregate)',`${inspectedBay.currentA.toFixed(1)} A`],['MMXU1.PPV.phsAB',`${inspectedBay.voltageAbKv.toFixed(2)} kV`]] as const).map(([label,value]) => <div key={label} className="flex justify-between gap-2 border-b border-slate-700 py-1"><span className="break-all">{label}</span><strong className="text-right">{value}</strong></div>)}
+                <p>Quality: {inspectedBay.quality}</p>
+                <p className="text-slate-400">Logical-node names are illustrative mappings of store fields, not verified CID/SCD object references. Individual timestamps are unavailable here.</p>
               </>}
-              {deviceDetailsTab === 'Control' && <>
-                <h4 className="font-bold text-cyan-300">Breaker Control (Training Simulation)</h4>
+              {deviceDetailsTab === 'Controls' && <>
+                <h4 className="font-bold text-cyan-300">Equipment Controls (Training)</h4>
                 <div>Authority: {inspectedBay.localRemote}</div>
+                <div>Interlock: {inspectedBay.interlockPermissive ? 'PERMISSIVE' : `BLOCKED — ${inspectedBay.interlockReason || 'Check conditions'}`}</div>
                 <div className="grid grid-cols-2 gap-2 pt-2">
-                  <button type="button" disabled={inspectedBay.localRemote !== 'REMOTE' || !inspectedBay.interlockPermissive} onClick={() => commandBreaker(inspectedBay.id, 'CLOSED')} className="rounded border border-green-500 bg-green-950 px-2 py-2 font-bold text-green-300 disabled:opacity-40">Close</button>
-                  <button type="button" disabled={inspectedBay.localRemote !== 'REMOTE'} onClick={() => commandBreaker(inspectedBay.id, 'OPEN')} className="rounded border border-red-500 bg-red-950 px-2 py-2 font-bold text-red-300 disabled:opacity-40">Open</button>
+                  <button type="button" disabled={inspectedBay.localRemote !== 'REMOTE' || !inspectedBay.interlockPermissive || inspectedBay.protectionTripActive} onClick={() => commandBreaker(inspectedBay.id, 'CLOSED')} className="rounded border border-green-500 bg-green-950 px-2 py-2 font-bold text-green-300 disabled:opacity-40">CB CLOSE</button>
+                  <button type="button" disabled={inspectedBay.localRemote !== 'REMOTE'} onClick={() => commandBreaker(inspectedBay.id, 'OPEN')} className="rounded border border-red-500 bg-red-950 px-2 py-2 font-bold text-red-300 disabled:opacity-40">CB OPEN</button>
                 </div>
-                <p className="text-slate-400">Commands use the existing store interlock and SOE logic. For select-before-operate, use the full bay control below.</p>
+                <p className="text-slate-400">Existing store command/interlock logic is preserved. For DS/ES switching and advanced SBO, use the existing Engineering/Bay Control interface; no unverified control actions were added.</p>
+                <button type="button" onClick={() => setWorkspaceTab('ENGINEERING')} className="w-full rounded border border-cyan-700 px-2 py-2 text-cyan-200">Open Engineering Controls</button>
+              </>}
+              {deviceDetailsTab === 'SOE' && <>
+                <h4 className="font-bold text-cyan-300">Bay SOE History</h4>
+                {soeLog.filter(e => e.bayId === inspectedBay.id).slice(0,20).map(e => <div key={e.id} className="border-b border-slate-700 py-2"><div className="text-slate-400">{new Date(e.timestampMs).toLocaleString()}</div><div>{e.eventDescription}</div><div className="text-cyan-300">{e.valueChange}</div></div>)}
+                {!soeLog.some(e => e.bayId === inspectedBay.id) && <p className="text-slate-400">No SOE events recorded for this bay.</p>}
               </>}
             </div>
           </aside>
