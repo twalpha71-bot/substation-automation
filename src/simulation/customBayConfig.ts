@@ -3,6 +3,9 @@ import type { BayEquipment } from '../types/substation';
 export type BayKind = 'LINE_INCOMER' | 'TRANSFORMER_HV' | 'TRANSFORMER_LV_INCOMER' | 'BUS_COUPLER' | 'OUTGOING_FEEDER' | 'DIST_TX_FEEDER' | 'SPARE_FEEDER';
 export type BayConfig = { id: string; name: string; voltageKv: 132 | 33 | 11; busSection: 'A' | 'B' | 'COUPLE'; bayType: BayKind; breakerId: string; iedId: string; vendor: string; ctRatio: string; vtRatio: string; nominalLoadMw: number; breakerState: 'OPEN' | 'CLOSED'; createdAt: string };
 export const KEY = 'sas:custom-bay-config:v1';
+export const normalizeBayId = (id: string) => id.trim().toUpperCase().replace(/^BAY-/, '');
+export const runtimeBayId = (id: string) => `BAY-${normalizeBayId(id)}`;
+export const voltageVtRatio = (kv: 132 | 33 | 11) => `${kv * 1000}/110`;
 export const blank = (): BayConfig => ({ id: '', name: '', voltageKv: 33, busSection: 'A', bayType: 'OUTGOING_FEEDER', breakerId: '', iedId: '', vendor: 'Schneider Electric', ctRatio: '600/1', vtRatio: '33000/110', nominalLoadMw: 0, breakerState: 'OPEN', createdAt: new Date().toISOString() });
 // Training-only bay definitions. All generated equipment is simulated, never connected to physical IEDs.
 export function toRuntimeBay(b: BayConfig): BayEquipment {
@@ -10,9 +13,10 @@ export function toRuntimeBay(b: BayConfig): BayEquipment {
     || INITIAL_BAYS.find(x => x.voltageKv === b.voltageKv)
     || INITIAL_BAYS[0];
   return {
-    ...template, id: b.id, bayCode: b.id, name: b.name,
+    ...template, id: runtimeBayId(b.id), bayCode: normalizeBayId(b.id), name: b.name,
     voltageKv: b.voltageKv, busSection: b.busSection, bayType: b.bayType,
-    breakerId: b.breakerId || `CB-${b.id}`, iedId: b.iedId || `IED-${b.id}`,
+    breakerId: b.breakerId || `CB-${normalizeBayId(b.id)}`, iedId: b.iedId || `IED-${normalizeBayId(b.id)}`,
+    configuredVendor: b.vendor,
     secondaryIedId: undefined, connectedTransformerId: undefined,
     breakerState: b.breakerState, lineDisconnectorState: 'CLOSED',
     busDisconnectorState: 'CLOSED', earthSwitchState: 'OPEN',
@@ -31,7 +35,7 @@ export function loadCustomBayConfigs(): BayConfig[] {
   if (typeof localStorage === 'undefined') return [];
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.filter(validRow) : [];
+    return Array.isArray(parsed) ? parsed.filter(validRow).map(b => ({ ...b, id: normalizeBayId(b.id) })) : [];
   } catch { return []; }
 }
 

@@ -168,7 +168,7 @@ function formatTimeShort(): string {
 }
 
 // Deterministic Electrical Connectivity & Power-Flow Solver
-function solveSubstationElectricalGraph(
+export function solveSubstationElectricalGraph(
   baysInput: BayEquipment[],
   txInput: PowerTransformer[],
   busInput: BusbarSection[],

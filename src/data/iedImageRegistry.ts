@@ -12,7 +12,7 @@ export const iedImages = {
   GE_D60: 'assets/ieds/ge-d60.webp',
   GE_T60: 'assets/ieds/ge-t60.webp',
   // Station-Level Infrastructure High-Resolution Assets
-  INDUSTRIAL_SWITCH: 'assets/devices/industrial-switch.jpg',
+  INDUSTRIAL_SWITCH: 'assets/devices/hirschmann-rsp35.png',
   STATION_GATEWAY: 'assets/devices/station-gateway.jpg',
   PTP_CLOCK: 'assets/devices/ptp-clock.jpg',
   SCADA_SERVER: 'assets/devices/scada-server.jpg',
@@ -21,9 +21,33 @@ export const iedImages = {
   OPERATOR_CONSOLE: 'assets/devices/operator-console.jpg',
 } as const;
 
+/**
+ * Centralized exact Vendor:Model mapping for all 12 distinct transparent front-panel IED models
+ * covering all configured bays in the Multi-Vendor IED Explorer.
+ */
+export const deviceImages: Record<string, string> = {
+  'Siemens:SIPROTEC 5 7SA87': iedImages.SIEMENS_7SA87,
+  'Siemens:SIPROTEC 5 7UT86': iedImages.SIEMENS_7UT86,
+  'Siemens:SIPROTEC 5 7SJ85': iedImages.SIEMENS_7SJ85,
+  'Schneider Electric:MiCOM P143': iedImages.SCHNEIDER_P143,
+  'Schneider Electric:MiCOM P633': iedImages.SCHNEIDER_P633,
+  'Schneider Electric:MiCOM C264': iedImages.SCHNEIDER_C264,
+  'ABB / Hitachi Energy:Relion REF615': iedImages.ABB_REF615,
+  'ABB / Hitachi Energy:Relion RET615': iedImages.ABB_RET615,
+  'ABB / Hitachi Energy:Relion REC615': iedImages.ABB_REC615,
+  'GE Vernova:Multilin 850': iedImages.GE_850,
+  'GE Vernova:Multilin D60': iedImages.GE_D60,
+  'GE Vernova:Multilin T60': iedImages.GE_T60,
+};
+
 export type IedImageKey = keyof typeof iedImages;
 
 export function getIedImageByModel(vendor: string, model: string): string {
+  const exactKey = `${(vendor || '').trim()}:${(model || '').trim()}`;
+  if (deviceImages[exactKey]) {
+    return deviceImages[exactKey];
+  }
+
   const v = (vendor || '').toLowerCase();
   const m = (model || '').toLowerCase();
 

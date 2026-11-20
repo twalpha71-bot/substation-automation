@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Download, Upload, Plus, Pencil, Trash2, Save, Layers, List, RotateCcw, Activity, Settings2, RadioTower, CloudUpload } from 'lucide-react';
-import { useSubstationStore } from '../simulation/useSubstationStore';
+import { useSubstationStore, solveSubstationElectricalGraph } from '../simulation/useSubstationStore';
 import { INITIAL_BAYS } from '../data/substationData';
-import { blank, KEY, loadCustomBayConfigs, loadHiddenDefaultBayIds, saveHiddenDefaultBayIds, toRuntimeBay, validRow, kinds, type BayConfig, type BayKind } from '../simulation/customBayConfig';
+import { blank, KEY, loadCustomBayConfigs, loadHiddenDefaultBayIds, saveHiddenDefaultBayIds, toRuntimeBay, validRow, kinds, normalizeBayId, runtimeBayId, voltageVtRatio, type BayConfig, type BayKind } from '../simulation/customBayConfig';
 import { buildMultiVendorIeds, buildNetworkLinks } from '../data/iedData';
 import { instantiateSignalsForSubstation } from '../data/signalCatalogue';
 
@@ -12,17 +12,19 @@ function syncRuntime(rows: BayConfig[], hiddenDefaultIds: string[]) {
   const old = new Map(store.bays.filter(b => b.isUserCreated).map(b => [b.id, b]));
   const bays = [...defaults, ...rows.map(b => {
     const created = toRuntimeBay(b);
-    const previous = old.get(b.id);
+    const previous = old.get(created.id);
     // Preserve telemetry only while the engineering definition is unchanged.
     return previous && previous.iedId === created.iedId && previous.breakerId === created.breakerId
       ? { ...created, breakerState: previous.breakerState, currentA: previous.currentA,
           currentB: previous.currentB, currentC: previous.currentC, activePowerMw: previous.activePowerMw,
           energized: previous.energized } : created;
   })];
-  const validIds = new Set(bays.map(b => b.id));
+  const solved = solveSubstationElectricalGraph(bays, store.transformers, store.busbars, store.faultScenarios);
+  const validIds = new Set(solved.bays.map(b => b.id));
   useSubstationStore.setState({
-    bays, ieds: buildMultiVendorIeds(bays), networkLinks: buildNetworkLinks(bays),
-    signals: instantiateSignalsForSubstation(bays, store.transformers),
+    bays: solved.bays, busbars: solved.busbars, transformers: solved.transformers,
+    ieds: buildMultiVendorIeds(solved.bays), networkLinks: buildNetworkLinks(solved.bays),
+    signals: instantiateSignalsForSubstation(solved.bays, solved.transformers),
     selectedBayId: validIds.has(store.selectedBayId) ? store.selectedBayId : defaults[0]?.id || '',
     alarms: store.alarms.filter(a => !a.bayId || validIds.has(a.bayId)),
   });
@@ -43,11 +45,18 @@ export function BayConfigurationManager() {
   const selectedExisting = defaultShown.find(b => b.id === selectedBayId);
   const selectedCustom = shown.find(b => b.id === selectedBayId);
   const selectedBay = selectedExisting || selectedCustom;
-  const runtimeBay = useSubstationStore(s => s.bays.find(b => b.id === selectedBayId));
+  const runtimeBay = useSubstationStore(s => s.bays.find(b => b.id === runtimeBayId(selectedBayId)));
   const update = <K extends keyof BayConfig>(key: K, value: BayConfig[K]) => setDraft(s => ({ ...s, [key]: value }));
-  function save(e: React.FormEvent) { e.preventDefault(); const b = { ...draft, id: draft.id.trim().toUpperCase(), name: draft.name.trim(), breakerId: draft.breakerId.trim(), iedId: draft.iedId.trim() }; if (!validRow(b)) { setMessage('Enter a valid Bay ID, name, equipment and load.'); return; } if (INITIAL_BAYS.some(r => r.id === b.id) || rows.some(r => r.id === b.id && r.id !== editing)) { setMessage('Bay ID already exists. Choose a unique ID.'); return; } setRows(old => editing ? old.map(r => r.id === editing ? b : r) : [...old, b]); setDraft(blank()); setEditing(null); setMessage(`Saved ${b.id} locally.`); }
+  function save(e: React.FormEvent) { e.preventDefault(); const b = { ...draft, id: normalizeBayId(draft.id), name: draft.name.trim(), breakerId: draft.breakerId.trim(), iedId: draft.iedId.trim() }; if (!validRow(b)) { setMessage('Enter a valid Bay ID, name, equipment and load.'); return; } if (INITIAL_BAYS.some(r => r.id === runtimeBayId(b.id)) || rows.some(r => r.id === b.id && r.id !== editing)) { setMessage('Bay ID already exists. Choose a unique ID.'); return; } if (b.busSection === 'COUPLE' && b.bayType !== 'BUS_COUPLER') { setMessage('COUPLE bus section is only valid for BUS COUPLER bays.'); return; }
+    if (b.busSection !== 'COUPLE' && b.bayType === 'BUS_COUPLER') { setMessage('BUS COUPLER requires COUPLE bus section.'); return; }
+    if (b.bayType === 'BUS_COUPLER') { setMessage('Adding bus couplers requires dedicated bus topology engineering and is not supported by automatic integration.'); return; }
+    if (b.bayType === 'LINE_INCOMER' && b.voltageKv !== 132) { setMessage('Automatic LINE INCOMER placement is supported at 132 kV only.'); return; }
+    if (b.bayType === 'BUS_COUPLER' && rows.some(r => r.id !== editing && r.voltageKv === b.voltageKv && r.bayType === 'BUS_COUPLER')) { setMessage('Only one bus coupler per voltage level is supported by this simulation.'); return; }
+    if (b.bayType === 'TRANSFORMER_HV' || b.bayType === 'TRANSFORMER_LV_INCOMER' || b.bayType === 'DIST_TX_FEEDER') { setMessage('Transformer bays require transformer connectivity engineering; automatic creation is not yet supported.'); return; }
+    if ([...INITIAL_BAYS, ...rows.filter(r => r.id !== editing)].some(r => r.breakerId === (b.breakerId || `CB-${b.id}`) || r.iedId === (b.iedId || `IED-${b.id}`))) { setMessage('Breaker ID and IED ID must be unique.'); return; }
+    setRows(old => editing ? old.map(r => r.id === editing ? b : r) : [...old, b]); setDraft(blank()); setEditing(null); setMessage(`Saved ${b.id} locally.`); }
   function exportJson() { const blob = new Blob([JSON.stringify({ version: 2, bays: rows, hiddenDefaultBayIds: hiddenDefaults }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'sas-bay-config.json'; a.click(); URL.revokeObjectURL(url); }
-  async function importJson(file?: File) { if (!file) return; try { const data = JSON.parse(await file.text()); if (!Array.isArray(data.bays) || !data.bays.every(validRow) || new Set(data.bays.map((b: BayConfig) => b.id)).size !== data.bays.length) throw Error('Invalid or duplicate Bay entries'); if (!window.confirm(`Replace ${rows.length} saved custom bays with ${data.bays.length} imported bays?`)) return; setRows(data.bays); setHiddenDefaults(Array.isArray(data.hiddenDefaultBayIds) ? data.hiddenDefaultBayIds.filter((id: unknown) => typeof id === 'string' && INITIAL_BAYS.some(b => b.id === id)) : []); setMessage('Configuration imported successfully.'); } catch (e) { setMessage(`Import failed: ${e instanceof Error ? e.message : 'Invalid JSON'}`); } }
+  async function importJson(file?: File) { if (!file) return; try { const data = JSON.parse(await file.text()); if (!Array.isArray(data.bays) || !data.bays.every(validRow) || new Set(data.bays.map((b: BayConfig) => normalizeBayId(b.id))).size !== data.bays.length) throw Error('Invalid or duplicate Bay entries'); if (!window.confirm(`Replace ${rows.length} saved custom bays with ${data.bays.length} imported bays?`)) return; setRows(data.bays.map((b: BayConfig) => ({ ...b, id: normalizeBayId(b.id) }))); setHiddenDefaults(Array.isArray(data.hiddenDefaultBayIds) ? data.hiddenDefaultBayIds.filter((id: unknown) => typeof id === 'string' && INITIAL_BAYS.some(b => b.id === id)) : []); setMessage('Configuration imported successfully.'); } catch (e) { setMessage(`Import failed: ${e instanceof Error ? e.message : 'Invalid JSON'}`); } }
   const inputClass = 'mt-1 w-full min-w-0 rounded-md border border-[#145576] bg-[#06192b] px-2.5 py-1.5 text-[12px] text-slate-100 outline-none focus:border-[#00dcff] focus:shadow-[0_0_8px_rgba(0,220,255,0.25)]';
   const actionClass = 'inline-flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition hover:brightness-125';
   const tabClass = (active: boolean) => `inline-flex min-w-0 items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs font-bold transition ${active ? 'border-[#00E5FF] bg-gradient-to-b from-[#13D5EF] to-[#009DC2] text-white shadow-[0_0_12px_rgba(0,220,255,0.55)]' : 'border-[#1A6A8B] bg-[#06192b] text-slate-200 hover:border-cyan-400'}`;
@@ -66,9 +75,9 @@ export function BayConfigurationManager() {
       {activeTab === 'configuration' && <form onSubmit={save} className="space-y-2 rounded-lg border border-[#00a8d5] bg-[#041a2b] p-3 shadow-[inset_0_0_16px_rgba(0,207,255,0.05)]">
         <h3 className="flex items-center gap-2 text-sm font-extrabold text-[#52E6FF]"><Plus className="h-5 w-5"/> {editing ? `Edit Bay — ${editing}` : 'Add / Edit Bay'}</h3>
         <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-          <label>Bay ID <span className="text-red-400">*</span><input required className={inputClass} placeholder="33-F04" value={draft.id} onChange={e => update('id', e.target.value)}/></label>
+          <label>Bay ID <span className="text-red-400">*</span><input required className={inputClass} placeholder="33-F04" value={draft.id} onChange={e => { const id = e.target.value; setDraft(d => ({ ...d, id, breakerId: !d.breakerId || d.breakerId === `CB-${normalizeBayId(d.id)}` ? `CB-${normalizeBayId(id)}` : d.breakerId, iedId: !d.iedId || d.iedId === `IED-${normalizeBayId(d.id)}` ? `IED-${normalizeBayId(id)}` : d.iedId })); }}/></label>
           <label>Bay Name <span className="text-red-400">*</span><input required className={inputClass} placeholder="33 kV Feeder 04" value={draft.name} onChange={e => update('name', e.target.value)}/></label>
-          <label>Voltage Level <span className="text-red-400">*</span><select className={inputClass} value={draft.voltageKv} onChange={e => update('voltageKv', Number(e.target.value) as BayConfig['voltageKv'])}>{[132,33,11].map(v => <option key={v} value={v}>{v} kV</option>)}</select></label>
+          <label>Voltage Level <span className="text-red-400">*</span><select className={inputClass} value={draft.voltageKv} onChange={e => { const kv = Number(e.target.value) as BayConfig['voltageKv']; setDraft(d => ({ ...d, voltageKv: kv, vtRatio: voltageVtRatio(kv) })); }}>{[132,33,11].map(v => <option key={v} value={v}>{v} kV</option>)}</select></label>
           <label>Bus Section <span className="text-red-400">*</span><select className={inputClass} value={draft.busSection} onChange={e => update('busSection', e.target.value as BayConfig['busSection'])}>{['A','B','COUPLE'].map(v => <option key={v}>{v}</option>)}</select></label>
           <label className="col-span-2">Bay Type <span className="text-red-400">*</span><select className={inputClass} value={draft.bayType} onChange={e => update('bayType', e.target.value as BayKind)}>{kinds.map(v => <option key={v} value={v}>{v.replaceAll('_',' ')}</option>)}</select></label>
           <label>Breaker ID<input className={inputClass} placeholder="52-F04" value={draft.breakerId} onChange={e => update('breakerId', e.target.value)}/></label>
@@ -108,6 +117,6 @@ export function BayConfigurationManager() {
         {hiddenDefaults.length > 0 && <p className="text-xs text-amber-300">{hiddenDefaults.length} default bay(s) hidden. Use Restore Deleted to bring them back.</p>}
       </section>}
     </div>}
-    <div className="rounded-md border border-[#175777] bg-[#061b2d] px-3 py-2 text-[11px] text-slate-400">ⓘ Changes update the training simulation store and IEC 61850 signal models. Fixed-layout 2D/3D diagrams may require additional integration; no physical equipment is controlled.</div>
+    <div className="rounded-md border border-[#175777] bg-[#061b2d] px-3 py-2 text-[11px] text-slate-400">ⓘ Changes update the training simulation store and IEC 61850 signal models. Configured line incomers and outgoing feeders synchronize with the 2D SLD, IED list, simulated IEC 61850 signals and operator controls. 3D assets and physical IED communication are not automatically configured.</div>
   </div>;
 }

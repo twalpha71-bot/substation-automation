@@ -29,11 +29,14 @@ const IED_INSPECTOR_TABS = [
 type InspectorTab = (typeof IED_INSPECTOR_TABS)[number];
 
 const RelayThumbnail: React.FC<{ vendor: string; model: string }> = ({ vendor, model }) => (
-  <div style={{ width: "110px", height: "90px", flexShrink: 0 }} className="h-[90px] w-[110px] shrink-0 rounded-lg border border-[#2c4d66] bg-[#07111f] p-1 flex items-center justify-center overflow-hidden">
+  <div
+    style={{ width: '96px', height: '84px', flexShrink: 0 }}
+    className="h-[84px] w-[96px] shrink-0 rounded-lg border border-[#1E466E]/70 bg-transparent p-1.5 flex items-center justify-center overflow-hidden"
+  >
     <img
       src={getIedImageByModel(vendor, model)}
       alt={`${vendor} ${model}`}
-      className="ied-device-image"
+      className="max-w-full max-h-full w-auto h-auto object-contain drop-shadow-[0_4px_8px_rgba(0,0,0,0.65)]"
       loading="lazy"
       decoding="async"
     />
@@ -882,6 +885,17 @@ export const IedExplorerPage: React.FC = () => {
                 </button>
                 <button
                   type="button"
+                  onClick={() => {
+                    setZoomLevel(1);
+                    setPanOffset({ x: 0, y: 0 });
+                  }}
+                  className="px-2 py-1 rounded bg-[#04101E] border border-[#245071] text-xs font-bold text-[#77E7FF] hover:border-[#00D9FF] flex items-center gap-1"
+                  title="Fit Device to View"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" /> Fit
+                </button>
+                <button
+                  type="button"
                   onClick={() => setZoomModalOpen(false)}
                   className="px-3 py-1 rounded-lg bg-[#102A45] border border-[#2D5A88] text-xs font-bold text-white hover:border-[#00D9FF] flex items-center gap-1 ml-1"
                 >
@@ -913,13 +927,16 @@ export const IedExplorerPage: React.FC = () => {
                 alt={zoomTarget.title}
                 draggable={false}
                 style={{
-                  width: `${Math.round(zoomLevel * 440)}px`,
-                  height: `${Math.round(zoomLevel * 440)}px`,
+                  maxWidth: '82%',
+                  maxHeight: '86%',
+                  width: 'auto',
+                  height: 'auto',
                   objectFit: 'contain',
-                  objectPosition: 'center',
-                  marginLeft: `${panOffset.x}px`,
-                  marginTop: `${panOffset.y}px`,
+                  transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel})`,
+                  transformOrigin: 'center center',
+                  transition: isDragging ? 'none' : 'transform 120ms ease-out',
                 }}
+                className="drop-shadow-[0_12px_28px_rgba(0,0,0,0.85)]"
               />
               <div className="absolute bottom-3 left-3 rounded-lg bg-[#030D1B]/90 border border-[#1E466E] px-3 py-1.5 text-[11px] font-mono text-[#9BC0DF]">
                 Zoom: {(zoomLevel * 100).toFixed(0)}% • Drag image to pan • Scroll wheel or buttons (1x–4x) to inspect LCD, LEDs &amp; keypad

@@ -1014,6 +1014,10 @@ export function getVendorLdPrefix(vendor: VendorName, category: SasSignalTemplat
 }
 
 export function getVendorForBay(bay: BayEquipment): { vendor: VendorName; iedModel: string } {
+  if (bay.isUserCreated && bay.configuredVendor && ['Siemens', 'Schneider Electric', 'ABB / Hitachi Energy', 'GE Vernova'].includes(bay.configuredVendor)) {
+    const vendor = bay.configuredVendor as VendorName;
+    return { vendor, iedModel: 'Unspecified model (training configuration)' };
+  }
   if (bay.voltageKv === 132) {
     if (bay.bayType === 'LINE_INCOMER') {
       return bay.busSection === 'A'

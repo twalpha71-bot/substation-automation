@@ -65,6 +65,7 @@ export interface BayEquipment {
   quality: DataQuality;
   lastUpdated: string;
   isUserCreated?: boolean;
+  configuredVendor?: string;
   connectedTransformerId?: string;
 }
 

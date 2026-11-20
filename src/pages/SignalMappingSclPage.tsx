@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { FIFTY_SAS_SIGNAL_TEMPLATES, getVendorForBay } from '../data/signalCatalogue';
-import { getIedImageByModel, iedImages } from '../data/iedImageRegistry';
+import { SignalChainDashboard } from '../components/SignalChainDashboard';
 import { SCL_FILE_SAMPLES } from '../data/sclSamples';
 import {
   Activity,
@@ -22,14 +22,6 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-
-const STAGE_IMAGES = {
-  STAGE1_CB_AUX: "assets/substation/substation_hero_opt.jpg",
-  STAGE2_DI_CARD: iedImages.SCHNEIDER_C264,
-  STAGE3_SIPROTEC: iedImages.SIEMENS_7SJ85,
-  STAGE5_SWITCH: iedImages.INDUSTRIAL_SWITCH,
-  STAGE6_SCADA_HMI: iedImages.SCADA_WORKSTATION,
-};
 
 type SignalChainFaultMode =
   | 'NONE'
@@ -221,7 +213,19 @@ function parseSclXmlString(fileName: string, fileType: string, xmlString: string
 }
 
 export const SignalMappingSclPage: React.FC = () => {
-  const { signals, bays, selectedBayId, setSelectedBayId } = useSubstationStore();
+  const {
+    signals,
+    bays,
+    ieds,
+    networkLinks,
+    gooseControlBlocks,
+    networkRedundancyMode,
+    selectedBayId,
+    setSelectedBayId,
+    commandBreaker,
+    triggerProtectionTrip,
+    resetProtectionTrip,
+  } = useSubstationStore();
 
   // Top 3 Workspace Tabs
   const [viewMode, setViewMode] = useState<'CATALOGUE_50' | 'INSTANTIATED_BAY' | 'SCL_WORKSPACE'>('CATALOGUE_50');
@@ -287,8 +291,8 @@ export const SignalMappingSclPage: React.FC = () => {
       }
       return kpiBay;
     }
-    return bays.find((b) => b.id === 'BAY-132-L1') || bays[0];
-  }, [viewMode, selectedPointId, signals, bays, kpiBay]);
+    return bays.find((b) => b.id === selectedBayId) || bays.find((b) => b.id === 'BAY-132-L1') || bays[0];
+  }, [viewMode, selectedPointId, selectedBayId, signals, bays, kpiBay]);
 
   const selectedTemplate = useMemo(() => {
     return FIFTY_SAS_SIGNAL_TEMPLATES.find((t) => t.catalogNumber === selectedCatalogNo) || FIFTY_SAS_SIGNAL_TEMPLATES[0];
@@ -518,7 +522,8 @@ export const SignalMappingSclPage: React.FC = () => {
     return {
       row,
       bay,
-      vendorName: bay.id === 'BAY-132-L1' ? 'Siemens SIPROTEC 5' : `${vendorInfo.vendor} ${vendorInfo.iedModel}`,
+      vendorName: `${vendorInfo.vendor} ${vendorInfo.iedModel}`,
+      iedModel: vendorInfo.iedModel,
       iedName,
       lnPart,
       doPart,
@@ -880,377 +885,22 @@ export const SignalMappingSclPage: React.FC = () => {
       </div>
 
       {/* 2. MAIN END-TO-END SAS SIGNAL CHAIN TRACE PANEL */}
-      <div
-        style={{
-          backgroundColor: '#051324',
-          borderColor: '#1B4369',
-          boxShadow: '0 6px 24px rgba(0, 0, 0, 0.45)',
-        }}
-        className="rounded-xl border p-3 space-y-2"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-xs sm:text-sm font-extrabold tracking-wider text-white uppercase">
-            END-TO-END SAS SIGNAL CHAIN TRACE — SIGNAL #{activeChain.row.catalogNumber}:{' '}
-            {activeChain.row.signalName.toUpperCase()}
-          </h2>
-          <span
-            style={{
-              backgroundColor: chainFaultMode === 'NONE' ? '#072E22' : '#3B0D15',
-              borderColor: chainFaultMode === 'NONE' ? '#22C55E' : '#FF5C65',
-              color: chainFaultMode === 'NONE' ? '#4ADE80' : '#FDA4AF',
-            }}
-            className="px-3 py-1 rounded-full border text-[11px] font-extrabold tracking-wide"
-          >
-            ● {activeChain.overallQuality}
-          </span>
-        </div>
-
-        {/* Outer Glowing Cyan Frame with Overlapping Center Header Badge */}
-        <div
-          style={{
-            position: 'relative',
-            marginTop: '12px',
-            borderRadius: '14px',
-            border: '1.5px solid #00DFFF',
-            background: 'linear-gradient(180deg, rgba(6, 28, 48, 0.85) 0%, rgba(4, 15, 28, 0.95) 100%)',
-            boxShadow: '0 0 18px rgba(0, 223, 255, 0.18), inset 0 0 18px rgba(0, 223, 255, 0.08)',
-            padding: '20px 10px 12px 10px',
-          }}
-        >
-          {/* Overlapping Center Pill */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '-12px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              backgroundColor: '#062138',
-              border: '1.5px solid #00DFFF',
-              boxShadow: '0 0 12px rgba(0, 223, 255, 0.35)',
-              borderRadius: '9999px',
-              padding: '2px 18px',
-              color: '#E9F3FF',
-              fontSize: '11px',
-              fontWeight: 800,
-              letterSpacing: '0.06em',
-            }}
-          >
-            IEC 61850 IED SIGNAL CHAIN
-          </div>
-
-          {/* 6 Horizontal Equipment Stage Cards + Green Chevrons */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 22px 1fr 22px 1.22fr 22px 1.05fr 22px 1.15fr 22px 1fr',
-              alignItems: 'stretch',
-              gap: '4px',
-            }}
-            className="min-w-[880px] overflow-x-auto"
-          >
-            {/* STAGE 1: Field I/O (Hardwired) */}
-            <div
-              onClick={() => setSelectedStageIndex(selectedStageIndex === 0 ? null : 0)}
-              style={{
-                background: 'linear-gradient(180deg, #0A2E46 0%, #051628 100%)',
-                border: selectedStageIndex === 0 ? '2px solid #FFFFFF' : '1.5px solid #00DFFF',
-                borderRadius: '10px',
-                padding: '8px',
-              }}
-              className="cursor-pointer flex flex-col items-center justify-between text-center transition hover:brightness-110"
-            >
-              <div>
-                <div className="text-[11px] font-extrabold text-white">Field I/O</div>
-                <div className="text-[10.5px] font-bold text-[#DCEAF5]">(Hardwired)</div>
-              </div>
-              <img
-                src={STAGE_IMAGES.STAGE1_CB_AUX}
-                alt="CB Auxiliary Contact 52a/52b"
-                style={{ width: '136px', height: '82px', objectFit: 'contain' }}
-                className="my-1 rounded"
-              />
-              <div className="space-y-0.5">
-                <div className="text-[10.5px] font-bold text-white leading-tight">{activeChain.fieldIoTitle}</div>
-                <div className="text-[9.5px] text-[#B8D4EA] font-mono">
-                  {activeChain.bay.id === 'BAY-132-L1' ? 'LINE-1 (132 kV)' : `${activeChain.bay.bayCode} (${activeChain.bay.voltageKv} kV)`}
-                </div>
-                <div className="text-[9.5px] text-[#8BB3D4]">
-                  {activeChain.bay.id === 'BAY-132-L1' ? 'Incoming Line' : activeChain.bay.name}
-                </div>
-              </div>
-            </div>
-
-            {/* Chevron 1 -> 2 */}
-            <div className="flex items-center justify-center text-[#22C55E] font-black text-xl drop-shadow-[0_0_6px_#22C55E]">
-              »
-            </div>
-
-            {/* STAGE 2: Input Module (DI Card) */}
-            <div
-              onClick={() => setSelectedStageIndex(selectedStageIndex === 1 ? null : 1)}
-              style={{
-                background: 'linear-gradient(180deg, #0A2E46 0%, #051628 100%)',
-                border:
-                  activeChain.stageStates[1] === 'ERR'
-                    ? '2px solid #FF5C65'
-                    : selectedStageIndex === 1
-                    ? '2px solid #FFFFFF'
-                    : '1.5px solid #00DFFF',
-                borderRadius: '10px',
-                padding: '8px',
-              }}
-              className="cursor-pointer flex flex-col items-center justify-between text-center transition hover:brightness-110"
-            >
-              <div>
-                <div className="text-[11px] font-extrabold text-white">Input Module</div>
-                <div className="text-[10.5px] font-bold text-[#DCEAF5]">(DI Card)</div>
-              </div>
-              <img
-                src={STAGE_IMAGES.STAGE2_DI_CARD}
-                alt="Digital Input Module"
-                style={{ width: '136px', height: '82px', objectFit: 'contain' }}
-                className="my-1 rounded"
-              />
-              <div className="space-y-0.5">
-                <div className="text-[10px] font-bold text-white leading-tight">{activeChain.diModuleTitle}</div>
-                <div className="text-[10px] text-[#DCEAF5] font-mono">{activeChain.diChannelLabel}</div>
-              </div>
-            </div>
-
-            {/* Chevron 2 -> 3 */}
-            <div className="flex items-center justify-center text-[#22C55E] font-black text-xl drop-shadow-[0_0_6px_#22C55E]">
-              »
-            </div>
-
-            {/* STAGE 3: IED Signal Chain (Protection & Control IED) */}
-            <div
-              onClick={() => setSelectedStageIndex(selectedStageIndex === 2 ? null : 2)}
-              style={{
-                background: 'linear-gradient(180deg, #0A2E46 0%, #051628 100%)',
-                border:
-                  activeChain.stageStates[2] !== 'OK'
-                    ? '2px solid #FFB547'
-                    : selectedStageIndex === 2
-                    ? '2px solid #FFFFFF'
-                    : '1.5px solid #00DFFF',
-                borderRadius: '10px',
-                padding: '8px',
-              }}
-              className="cursor-pointer flex flex-col items-center justify-between text-center transition hover:brightness-110"
-            >
-              <div>
-                <div className="text-[11px] font-extrabold text-white">IED Signal Chain</div>
-                <div className="text-[10px] font-bold text-[#DCEAF5]">(Protection &amp; Control IED)</div>
-              </div>
-              <img
-                src={getIedImageByModel(activeChain.vendorName, activeChain.vendorName)}
-                alt="Protection & Control IED"
-                style={{ width: '136px', height: '82px', objectFit: 'contain' }}
-                className="my-1 rounded"
-              />
-              <div className="w-full space-y-1">
-                <div className="text-[10.5px] font-extrabold text-white">{activeChain.vendorName}</div>
-                <div className="text-[10px] font-mono font-bold text-[#DCEAF5]">{activeChain.iedName}</div>
-                <div
-                  style={{
-                    backgroundColor: '#041322',
-                    border: '1px solid #1E5A78',
-                    borderRadius: '6px',
-                    padding: '3px 5px',
-                  }}
-                  className="text-[8.8px] text-[#DCEAF5] leading-tight"
-                >
-                  <div>
-                    Acquire <span className="text-[#22C55E] font-bold">›</span> Filter{' '}
-                    <span className="text-[#22C55E] font-bold">›</span> Debounce{' '}
-                    <span className="text-[#22C55E] font-bold">›</span> Time-stamp
-                  </div>
-                  <div className="font-bold text-[#77E7FF] mt-0.5">Map to IEC 61850 ({activeChain.fc})</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Chevron 3 -> 4 */}
-            <div className="flex items-center justify-center text-[#22C55E] font-black text-xl drop-shadow-[0_0_6px_#22C55E]">
-              »
-            </div>
-
-            {/* STAGE 4: IEC 61850 Dataset & Logical Node */}
-            <div
-              onClick={() => setSelectedStageIndex(selectedStageIndex === 3 ? null : 3)}
-              style={{
-                background: 'linear-gradient(180deg, #0A2E46 0%, #051628 100%)',
-                border:
-                  activeChain.stageStates[3] === 'ERR'
-                    ? '2px solid #FF5C65'
-                    : selectedStageIndex === 3
-                    ? '2px solid #FFFFFF'
-                    : '1.5px solid #00DFFF',
-                borderRadius: '10px',
-                padding: '8px 10px',
-              }}
-              className="cursor-pointer flex flex-col justify-between transition hover:brightness-110"
-            >
-              <div className="text-center">
-                <div className="text-[11px] font-extrabold text-white">IEC 61850 Dataset</div>
-                <div className="text-[10.5px] font-bold text-[#DCEAF5]">&amp; Logical Node</div>
-              </div>
-              <div className="my-auto space-y-1 font-mono text-[10px] text-left pl-1">
-                <div className="flex items-center gap-1.5 text-white font-bold">
-                  <Folder className="w-3.5 h-3.5 text-[#FACC15] fill-[#FACC15]/30 shrink-0" />
-                  <span>LD: {activeChain.iedName}</span>
-                </div>
-                <div className="pl-4 text-[#DCEAF5] font-bold">LN: {activeChain.lnPart}</div>
-                <div className="pl-3 flex items-center gap-1.5 text-white font-bold">
-                  <Folder className="w-3.5 h-3.5 text-[#FACC15] fill-[#FACC15]/30 shrink-0" />
-                  <span>DO: {activeChain.doPart}</span>
-                </div>
-                <div className="pl-6 flex items-center gap-1 text-[#77E7FF]">
-                  <FileText className="w-3 h-3 text-[#8BB3D4] shrink-0" />
-                  <span>
-                    DA: {activeChain.daPart} ({activeChain.fc})
-                  </span>
-                </div>
-                <div className="pl-6 flex items-center gap-1 text-[#DCEAF5]">
-                  <FileText className="w-3 h-3 text-[#8BB3D4] shrink-0" />
-                  <span>DA: q</span>
-                </div>
-                <div className="pl-6 flex items-center gap-1 text-[#DCEAF5]">
-                  <FileText className="w-3 h-3 text-[#8BB3D4] shrink-0" />
-                  <span>DA: t</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Chevron 4 -> 5 */}
-            <div className="flex items-center justify-center text-[#22C55E] font-black text-xl drop-shadow-[0_0_6px_#22C55E]">
-              »
-            </div>
-
-            {/* STAGE 5: Communication (Report / GOOSE) */}
-            <div
-              onClick={() => setSelectedStageIndex(selectedStageIndex === 4 ? null : 4)}
-              style={{
-                background: 'linear-gradient(180deg, #0A2E46 0%, #051628 100%)',
-                border:
-                  activeChain.stageStates[4] === 'ERR'
-                    ? '2px solid #FF5C65'
-                    : selectedStageIndex === 4
-                    ? '2px solid #FFFFFF'
-                    : '1.5px solid #00DFFF',
-                borderRadius: '10px',
-                padding: '8px',
-              }}
-              className="cursor-pointer flex flex-col items-center justify-between text-center transition hover:brightness-110"
-            >
-              <div>
-                <div className="text-[11px] font-extrabold text-white">Communication</div>
-                <div className="text-[10.5px] font-bold text-[#DCEAF5]">(Report / GOOSE)</div>
-              </div>
-              <img
-                src={STAGE_IMAGES.STAGE5_SWITCH}
-                alt="Industrial Ethernet Switch"
-                style={{ width: '136px', height: '82px', objectFit: 'contain' }}
-                className="my-1.5 rounded"
-              />
-              <div className="space-y-0.5 font-mono text-[9.5px]">
-                <div className="text-white font-bold">GOOSE: {activeChain.gooseCbName}</div>
-                <div className="text-[#77E7FF] font-bold">Report: {activeChain.reportCbName}</div>
-                <div className="text-[#B8D4EA] font-sans text-[9.5px]">(Eth. LAN A/B – PRP)</div>
-              </div>
-            </div>
-
-            {/* Chevron 5 -> 6 */}
-            <div className="flex items-center justify-center text-[#22C55E] font-black text-xl drop-shadow-[0_0_6px_#22C55E]">
-              »
-            </div>
-
-            {/* STAGE 6: SCADA / HMI */}
-            <div
-              onClick={() => setSelectedStageIndex(selectedStageIndex === 5 ? null : 5)}
-              style={{
-                background: 'linear-gradient(180deg, #0A2E46 0%, #051628 100%)',
-                border:
-                  activeChain.stageStates[5] !== 'OK'
-                    ? '2px solid #FF5C65'
-                    : selectedStageIndex === 5
-                    ? '2px solid #FFFFFF'
-                    : '1.5px solid #00DFFF',
-                borderRadius: '10px',
-                padding: '8px',
-              }}
-              className="cursor-pointer flex flex-col items-center justify-between text-center transition hover:brightness-110"
-            >
-              <div>
-                <div className="text-[11px] font-extrabold text-white">SCADA / HMI</div>
-              </div>
-              <img
-                src={STAGE_IMAGES.STAGE6_SCADA_HMI}
-                alt="Dual-Monitor SCADA HMI"
-                style={{ width: '136px', height: '82px', objectFit: 'contain' }}
-                className="my-1 rounded"
-              />
-              <div className="space-y-0.5">
-                <div className="text-[9.5px] font-mono font-bold text-white break-all">{activeChain.scadaTag}</div>
-                <div className="text-[11px] font-bold text-[#DCEAF5]">
-                  Status:{' '}
-                  <span
-                    style={{
-                      color:
-                        chainFaultMode !== 'NONE'
-                          ? '#FF5C65'
-                          : activeChain.displayVal === 'OPEN'
-                          ? '#00E5FF'
-                          : '#22C55E',
-                    }}
-                    className="font-extrabold uppercase"
-                  >
-                    {chainFaultMode !== 'NONE' ? 'INVALID / ALM' : activeChain.displayVal}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Interactive Stage Inspector Drawer when any of the 6 stages (or Signal Path steps) is clicked */}
-          {selectedStageIndex !== null && (
-            <div
-              style={{ backgroundColor: '#03101F', borderColor: '#00DFFF' }}
-              className="mt-2.5 p-2.5 rounded-lg border flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono"
-            >
-              <div>
-                <span className="text-[#00DFFF] font-bold">
-                  STAGE #{selectedStageIndex + 1} DIAGNOSTIC INSPECTOR:{' '}
-                </span>
-                <span className="text-white">
-                  {selectedStageIndex === 0 &&
-                    `Field Process Interface • ${activeChain.fieldIoTitle} on ${activeChain.bay.name} • Wetting Voltage: 110V DC Healthy`}
-                  {selectedStageIndex === 1 &&
-                    `IED Binary/Analog Input Card (${activeChain.diModuleTitle} • ${activeChain.diChannelLabel}) • Hardware Opto-Debounce: 3.0 ms • State: ${
-                      activeChain.stageStates[1] === 'OK' ? 'ENERGIZED (OK)' : 'INPUT FAULT'
-                    }`}
-                  {selectedStageIndex === 2 &&
-                    `Protection & Control IED (${activeChain.vendorName} • ${activeChain.iedName}) • Time-Stamp Source: IEEE 1588v2 PTP (±38 ns) • FC Mapping: [${activeChain.fc}]`}
-                  {selectedStageIndex === 3 &&
-                    `IEC 61850-7-4 Object Reference: ${activeChain.iedName}/${activeChain.lnPart}.${activeChain.doPart}.${activeChain.daPart} • CDC: ${activeChain.cdcShort} • DataSet: LLN0.${activeChain.row.defaultDataset}`}
-                  {selectedStageIndex === 4 &&
-                    `Station Bus Redundancy: IEC 62439-3 PRP Dual-LAN (LAN A 192.168.10.0/24 + LAN B 192.168.20.0/24) • GOOSE: ${activeChain.gooseCbName} • Report: ${activeChain.reportCbName}`}
-                  {selectedStageIndex === 5 &&
-                    `SCADA Server A (192.168.10.10) & Operator HMI WS (192.168.10.20) • Tag: ${activeChain.scadaTag} • Value: ${activeChain.displayVal} • Updated: ${liveClockStr}`}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedStageIndex(null)}
-                className="px-2 py-0.5 rounded bg-[#08223A] text-[#77E7FF] hover:text-white font-sans font-bold"
-              >
-                Close ✕
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
+      <SignalChainDashboard
+        activeChain={activeChain}
+        ied={ieds.find((x) => x.id === activeChain.bay.iedId)}
+        networkLinks={networkLinks}
+        gooseControlBlocks={gooseControlBlocks}
+        networkRedundancyMode={networkRedundancyMode}
+        tracedPoint={tracedPoint}
+        chainFaultMode={chainFaultMode}
+        setChainFaultMode={setChainFaultMode}
+        selectedStageIndex={selectedStageIndex}
+        setSelectedStageIndex={setSelectedStageIndex}
+        liveClockStr={liveClockStr}
+        onToggleBreaker={(bayId, target) => commandBreaker(bayId, target, 'SCADA_SBO')}
+        onTriggerTrip={triggerProtectionTrip}
+        onResetTrip={resetProtectionTrip}
+      />
 
       {/* SECTION 12: MULTI-PROTOCOL MAPPING SELECTOR & END-TO-END CROSS-PROTOCOL TRACE */}
       <div
