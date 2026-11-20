@@ -1,6 +1,7 @@
 import { BayConfigurationManager } from './BayConfigurationManager';
 import { MultifunctionMeter } from '../components/MultifunctionMeter';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { getBayProtocolBreakdown } from '../data/protocolRegistry';
 import { BayEquipment, VendorName } from '../types/substation';
@@ -59,7 +60,28 @@ export const SldWorkspacePage: React.FC = () => {
     commandBreaker,
     commandDisconnector,
     setBayLocalRemote,
-  } = useSubstationStore();
+  } = useSubstationStore(useShallow(state => ({
+    bays: state.bays,
+    busbars: state.busbars,
+    transformers: state.transformers,
+    selectedBayId: state.selectedBayId,
+    sldTheme: state.sldTheme,
+    setSelectedBayId: state.setSelectedBayId,
+    setSldTheme: state.setSldTheme,
+    stepTransformerOltc: state.stepTransformerOltc,
+    addConfigurableFeederBay: state.addConfigurableFeederBay,
+    removeConfigurableFeederBay: state.removeConfigurableFeederBay,
+    busTransferModes: state.busTransferModes,
+    busTransferStatus: state.busTransferStatus,
+    busTransferMessage: state.busTransferMessage,
+    soeLog: state.soeLog,
+    alarms: state.alarms,
+    setVoltageBusTransferMode: state.setVoltageBusTransferMode,
+    requestBusTransfer: state.requestBusTransfer,
+    commandBreaker: state.commandBreaker,
+    commandDisconnector: state.commandDisconnector,
+    setBayLocalRemote: state.setBayLocalRemote,
+  })));
 
   // SLD-only selection: no default highlight and no forced bay on initial render.
   const [inspectedBayId, setInspectedBayId] = useState<string | null>(null);
@@ -565,6 +587,40 @@ export const SldWorkspacePage: React.FC = () => {
   const bay11BusB = bays.filter(
     (b) => b.voltageKv === 11 && b.busSection === 'B' && (b.bayType === 'OUTGOING_FEEDER' || b.bayType === 'SPARE_FEEDER')
   );
+
+  // Render incoming 132 kV line bays from the live engineering store, not a
+  // fixed list of L1/L2 IDs. Reserved transformer columns are kept clear.
+  const bay132IncomingA = bays.filter(b => b.voltageKv === 132 && b.busSection === 'A' &&
+    (b.bayType === 'LINE_INCOMER' || b.bayType === 'INCOMING_FEEDER' || b.id === 'BAY-132-L1'));
+  const bay132IncomingB = bays.filter(b => b.voltageKv === 132 && b.busSection === 'B' &&
+    (b.bayType === 'LINE_INCOMER' || b.bayType === 'INCOMING_FEEDER' || b.id === 'BAY-132-L2'));
+  // Available slots avoid the 132/33 kV transformer drops and bus coupler.
+  const incoming132SlotsA = [215, 130, 300, 65, 355];
+  const incoming132SlotsB = [985, 1070, 900, 1135, 835];
+  // Preserve all existing equipment coordinates. Extra Bus A bays extend left;
+  // extra Bus B bays extend right. No bay is dropped or compressed as counts grow.
+  const extra132A = Math.max(0, bay132IncomingA.length - incoming132SlotsA.length);
+  const extra132B = Math.max(0, bay132IncomingB.length - incoming132SlotsB.length);
+  const extra33A = Math.max(0, bay33BusA.filter(b => b.bayCode !== '33-TF1').length - 3);
+  const extra33B = Math.max(0, bay33BusB.filter(b => b.bayCode !== '33-TF2').length - 3);
+  const extra11A = Math.max(0, bay11BusA.length - 5);
+  const extra11B = Math.max(0, bay11BusB.length - 4);
+  const leftExtension = Math.max(extra132A, extra33A, extra11A) * 105;
+  const rightExtension = Math.max(extra132B, extra33B, extra11B) * 105;
+  const sldCanvasWidth = 1200 + leftExtension + rightExtension;
+  const sldViewBoxX = -leftExtension;
+  const sldScrollRef = useRef<HTMLDivElement>(null);
+  const sldInitialScrollSet = useRef(false);
+  useEffect(() => {
+    const viewport = sldScrollRef.current;
+    if (!viewport || sldInitialScrollSet.current) return;
+    // Open at the familiar original SLD area even if Bus A has extensions.
+    viewport.scrollLeft = leftExtension * zoom;
+    sldInitialScrollSet.current = true;
+  }, [leftExtension, zoom]);
+  const scrollSld = (direction: number) => {
+    sldScrollRef.current?.scrollBy({ left: direction * 340, behavior: 'smooth' });
+  };
 
   const bus132A = busbars.find((b) => b.id === 'BUS-132-A')!;
   const bus132B = busbars.find((b) => b.id === 'BUS-132-B')!;
@@ -1604,17 +1660,21 @@ export const SldWorkspacePage: React.FC = () => {
         {/* 2. INTERACTIVE THREE-TIER SVG SINGLE-LINE DIAGRAM CANVAS */}
         <div className="flex w-full min-w-0 items-stretch">
         <div
+          ref={sldScrollRef}
+          onWheel={(event) => {
+            if (event.shiftKey && sldScrollRef.current) {
+              event.preventDefault();
+              sldScrollRef.current.scrollLeft += event.deltaY + event.deltaX;
+            }
+          }}
           className={`w-full min-w-0 overflow-x-auto overscroll-contain ${
             compactView ? 'max-h-[520px] overflow-y-auto' : ''
           }`}
         >
           <svg
-            viewBox="0 0 1200 690"
-            className="block w-full min-w-0 h-auto select-none"
-            style={{
-              transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`,
-              transformOrigin: 'center top',
-            }}
+            viewBox={`${sldViewBoxX} 0 ${sldCanvasWidth} 690`}
+            className="block max-w-none h-auto select-none"
+            style={{ width: `${sldCanvasWidth * zoom}px`, minWidth: `${sldCanvasWidth * zoom}px` }}
           >
             <defs>
               {/* Engineering Millimeter Grid Pattern (20px minor + 100px major) */}
@@ -1675,7 +1735,7 @@ export const SldWorkspacePage: React.FC = () => {
             </defs>
 
             {/* Millimeter Grid Background */}
-            <rect width="1200" height="690" fill={themeStyles.canvasBg} />
+            <rect x={sldViewBoxX} width={sldCanvasWidth} height="690" fill={themeStyles.canvasBg} />
 
             {/* ==================== TIER 1: 132 kV TRANSMISSION SWITCHYARD ==================== */}
             <text
@@ -1695,29 +1755,19 @@ export const SldWorkspacePage: React.FC = () => {
               <text x="1072" y="25" fontSize="9" fill="#c7d9e8">MW FLOW</text>
             </g>
 
-            {/* Incoming Line Bays: 132-L1 (X=215) & 132-L2 (X=985) */}
-            {bays.find((b) => b.id === 'BAY-132-L1') &&
-              renderVerticalBay(
-                bays.find((b) => b.id === 'BAY-132-L1')!,
-                215,
-                116,
-                45,
-                'INTO_BUS_FROM_TOP',
-                themeStyles.bus132Live
-              )}
-            {bays.find((b) => b.id === 'BAY-132-L2') &&
-              renderVerticalBay(
-                bays.find((b) => b.id === 'BAY-132-L2')!,
-                985,
-                116,
-                45,
-                'INTO_BUS_FROM_TOP',
-                themeStyles.bus132Live
-              )}
+            {/* Dynamic 132 kV incoming line bays. Editing, adding or deleting
+                a configured bay updates the SVG directly from store.bays. */}
+            {bay132IncomingA.map((bay, index) =>
+              renderVerticalBay(bay, index < incoming132SlotsA.length ? incoming132SlotsA[index] : -55 - (index - incoming132SlotsA.length) * 105, 116, 45,
+                'INTO_BUS_FROM_TOP', themeStyles.bus132Live))}
+            {bay132IncomingB.map((bay, index) =>
+              renderVerticalBay(bay, index < incoming132SlotsB.length ? incoming132SlotsB[index] : 1255 + (index - incoming132SlotsB.length) * 105, 116, 45,
+                'INTO_BUS_FROM_TOP', themeStyles.bus132Live))}
+
 
             {/* 132 kV BUS SECTION A (Cyan #00D2FF, 4.5px stroke + glow) */}
             <line
-              x1="48"
+              x1={48 - leftExtension}
               y1="116"
               x2="544"
               y2="116"
@@ -1731,7 +1781,7 @@ export const SldWorkspacePage: React.FC = () => {
             <line
               x1="656"
               y1="116"
-              x2="1152"
+              x2={1152 + rightExtension}
               y2="116"
               stroke={bus132B.energized ? themeStyles.bus132Live : themeStyles.deadStroke}
               strokeWidth="1.8"
@@ -1788,7 +1838,7 @@ export const SldWorkspacePage: React.FC = () => {
 
             {/* 33 kV BUS SECTION A (Electric Lime Green #00E676, 4.5px stroke + glow) */}
             <line
-              x1="42"
+              x1={42 - leftExtension}
               y1="314"
               x2="544"
               y2="314"
@@ -1802,7 +1852,7 @@ export const SldWorkspacePage: React.FC = () => {
             <line
               x1="656"
               y1="314"
-              x2="1158"
+              x2={1158 + rightExtension}
               y2="314"
               stroke={bus33B.energized ? themeStyles.bus33Live : themeStyles.deadStroke}
               strokeWidth="1.8"
@@ -1815,7 +1865,7 @@ export const SldWorkspacePage: React.FC = () => {
             {/* 33 kV Bus A Outgoing Feeders (33-F01, 33-F02, 33-F03, 33-TF1) */}
             {bay33BusA.map((bay, idx) => {
               const regular = bay33BusA.filter(b => b.bayCode !== '33-TF1');
-              const bx = bay.bayCode === '33-TF1' ? 431 : 75 + regular.indexOf(bay) * (290 / Math.max(1, regular.length - 1));
+              const bx = bay.bayCode === '33-TF1' ? 431 : regular.indexOf(bay) < 3 ? 75 + regular.indexOf(bay) * 145 : -55 - (regular.indexOf(bay) - 3) * 105;
               return renderVerticalBay(bay, bx, 314, bay.bayCode === '33-TF1' || bay.bayCode === '33-TF2' ? 400 : 370, 'DOWN_FROM_BUS', themeStyles.bus33Live, {
                 showTelemetryCard: false,
               });
@@ -1824,7 +1874,7 @@ export const SldWorkspacePage: React.FC = () => {
             {/* 33 kV Bus B Outgoing Feeders (33-F04, 33-F05, 33-F06, 33-TF2) */}
             {bay33BusB.map((bay, idx) => {
               const regular = bay33BusB.filter(b => b.bayCode !== '33-TF2');
-              const bx = bay.bayCode === '33-TF2' ? 769 : 865 + regular.indexOf(bay) * (260 / Math.max(1, regular.length - 1));
+              const bx = bay.bayCode === '33-TF2' ? 769 : regular.indexOf(bay) < 3 ? 865 + regular.indexOf(bay) * 130 : 1255 + (regular.indexOf(bay) - 3) * 105;
               return renderVerticalBay(bay, bx, 314, bay.bayCode === '33-TF1' || bay.bayCode === '33-TF2' ? 400 : 370, 'DOWN_FROM_BUS', themeStyles.bus33Live, {
                 showTelemetryCard: false,
               });
@@ -1889,7 +1939,7 @@ export const SldWorkspacePage: React.FC = () => {
 
             {/* 11 kV SWITCHGEAR BUS A (Warm Amber #FFAB00, 4.5px stroke + glow) */}
             <line
-              x1="42"
+              x1={42 - leftExtension}
               y1="532"
               x2="544"
               y2="532"
@@ -1903,7 +1953,7 @@ export const SldWorkspacePage: React.FC = () => {
             <line
               x1="656"
               y1="532"
-              x2="1158"
+              x2={1158 + rightExtension}
               y2="532"
               stroke={bus11B.energized ? themeStyles.bus11Live : themeStyles.deadStroke}
               strokeWidth="1.8"
@@ -1915,8 +1965,7 @@ export const SldWorkspacePage: React.FC = () => {
 
             {/* 11 kV Bus A Outgoing Feeders (11-F01, 11-F02, 11-F03, 11-F04, 11-SP1 + User Added) */}
             {bay11BusA.map((bay, idx) => {
-              const span = 385 / Math.max(1, bay11BusA.length - 1);
-              const bx = 66 + idx * span;
+              const bx = idx < 5 ? 66 + idx * (385 / 4) : -55 - (idx - 5) * 105;
               return renderVerticalBay(bay, bx, 532, 604, 'DOWN_FROM_BUS', themeStyles.bus11Live, {
                 showTelemetryCard: false,
               });
@@ -1924,14 +1973,21 @@ export const SldWorkspacePage: React.FC = () => {
 
             {/* 11 kV Bus B Outgoing Feeders (11-F05, 11-F06, 11-F07, 11-F08 + User Added) */}
             {bay11BusB.map((bay, idx) => {
-              const span = 365 / Math.max(1, bay11BusB.length - 1);
-              const bx = 685 + idx * span;
+              const bx = idx < 4 ? 685 + idx * (365 / 3) : 1255 + (idx - 4) * 105;
               return renderVerticalBay(bay, bx, 532, 604, 'DOWN_FROM_BUS', themeStyles.bus11Live, {
                 showTelemetryCard: false,
               });
             })}
           </svg>
         </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 px-4 py-1.5 border-t border-[#18324E] bg-[#071525] text-[11px] text-slate-300">
+          <span>SLD horizontal scroll · Shift + mouse wheel · {Math.round(sldCanvasWidth)} canvas units</span>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => scrollSld(-1)} className="rounded border border-[#27516C] px-3 py-1 hover:bg-[#15334A]">← Left</button>
+            <button type="button" onClick={() => scrollSld(1)} className="rounded border border-[#27516C] px-3 py-1 hover:bg-[#15334A]">Right →</button>
+          </div>
         </div>
 
         {/* 3. SLD FOOTER & TRANSFORMER OLTC QUICK BAR */}

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { loadCustomBayConfigs, loadHiddenDefaultBayIds, toRuntimeBay } from './customBayConfig';
 import {
   AlarmRecord,
@@ -197,13 +198,19 @@ function solveSubstationElectricalGraph(
   const bc132 = findBay('BAY-132-BC');
 
   const src132A = isClosedPath(l1);
-  const src132B = isClosedPath(l2);
+  // All configured 132 kV incoming sources participate in the bus connectivity model.
+  // This includes dynamically created LINE_INCOMER bays such as 132-L3.
+  const incoming132 = bays.filter((b) => b.voltageKv === 132 &&
+    (b.bayType === 'LINE_INCOMER' || b.bayType === 'INCOMING_FEEDER'));
+  const liveSources132A = incoming132.filter((b) => b.busSection === 'A' && isClosedPath(b));
+  const liveSources132B = incoming132.filter((b) => b.busSection === 'B' && isClosedPath(b));
+  const src132B = liveSources132B.length > 0;
   const cpl132 = isClosedPath(bc132);
 
-  const bus132ALive = src132A || (cpl132 && src132B);
-  const bus132BLive = src132B || (cpl132 && src132A);
-  const v132A = src132A ? 132.4 : (cpl132 && src132B ? 132.2 : 0);
-  const v132B = src132B ? 132.2 : (cpl132 && src132A ? 132.4 : 0);
+  const bus132ALive = liveSources132A.length > 0 || (cpl132 && src132B);
+  const bus132BLive = src132B || (cpl132 && liveSources132A.length > 0);
+  const v132A = liveSources132A.length ? 132.4 : (cpl132 && src132B ? 132.2 : 0);
+  const v132B = src132B ? 132.2 : (cpl132 && liveSources132A.length ? 132.4 : 0);
 
   // 2. Evaluate 132/33 kV Transformers T1 & T2
   const bay132T1 = findBay('BAY-132-T1');
@@ -511,7 +518,20 @@ function solveSubstationElectricalGraph(
   }
 
   updateBayFromPower(l1, l1Mw, l1Mvar, src132A ? 132.4 : 0, src132A);
-  updateBayFromPower(l2, l2Mw, l2Mvar, src132B ? 132.2 : 0, src132B);
+  updateBayFromPower(l2, isClosedPath(l2) ? l2Mw : 0, isClosedPath(l2) ? l2Mvar : 0, isClosedPath(l2) ? 132.2 : 0, isClosedPath(l2));
+  // Transfer load to the currently closed source on the same bus. No live
+  // paralleling is modeled; an existing close-command interlock blocks it.
+  for (const source of [...liveSources132A, ...liveSources132B]) {
+    if (source.id === 'BAY-132-L1' || source.id === 'BAY-132-L2') continue;
+    const sourceLoad = source.busSection === 'A' ? l1Mw : l2Mw;
+    const sourceReactive = source.busSection === 'A' ? l1Mvar : l2Mvar;
+    updateBayFromPower(source, sourceLoad, sourceReactive,
+      source.busSection === 'A' ? 132.4 : 132.2, true);
+  }
+  for (const source of incoming132) {
+    if (source.id === 'BAY-132-L1' || source.id === 'BAY-132-L2' || isClosedPath(source)) continue;
+    updateBayFromPower(source, 0, 0, 0, false);
+  }
   const bc132Mw = cpl132 ? (src132A && !src132B ? bay132T2?.activePowerMw || 0 : !src132A && src132B ? bay132T1?.activePowerMw || 0 : 0) : 0;
   const bc132Mvar = cpl132 ? (src132A && !src132B ? bay132T2?.reactivePowerMvar || 0 : !src132A && src132B ? bay132T1?.reactivePowerMvar || 0 : 0) : 0;
   updateBayFromPower(bc132, bc132Mw, bc132Mvar, bus132ALive || bus132BLive ? 132.3 : 0, cpl132 && (bus132ALive || bus132BLive));
@@ -624,8 +644,14 @@ const INITIAL_SOE: SoeRecord[] = [
 // Start with no pre-existing active alarms; runtime faults still create alarms normally.
 const INITIAL_ALARMS: AlarmRecord[] = [];
 
-export const useSubstationStore = create<SubstationStoreState>((set, get) => ({
-  activeTab: 'HERO',
+export const useSubstationStore = create<SubstationStoreState>()(persist((set, get) => ({
+  // Read the requested workspace before React's first paint; avoids a HERO flash on refresh.
+  activeTab: (() => {
+    if (typeof window === 'undefined') return 'HERO' as ActiveWorkspaceTab;
+    const requested = window.location.hash.match(/^#\/workspace\/([A-Z0-9_]+)$/)?.[1];
+    const valid: ActiveWorkspaceTab[] = ['HERO','OSI_MODEL','IEC61850_ACADEMY','INTERVIEW_PREP','CCNA_ACADEMY','SLD','SCADA','IED','IED_SIGNAL_CHAIN','NETWORK','GOOSE','MMS','MODBUS_LAB','IEC104_LAB','OPCUA_LAB','SIGNALS','FAULTS','FATSAT','LEARNING','USER_PROFILE','ADMIN_DASHBOARD'];
+    return valid.includes(requested as ActiveWorkspaceTab) ? requested as ActiveWorkspaceTab : 'HERO';
+  })(),
   selectedBayId: 'BAY-33-F03',
   selectedIedId: 'IED-33-F03',
   sldTheme: 'DARK_CINEMATIC',
@@ -842,6 +868,35 @@ export const useSubstationStore = create<SubstationStoreState>((set, get) => ({
       if (!first || !second || first.energized === second.energized) {
         const msg = `Coupler close blocked on ${bay.bayCode}: one bus must be dead and the other live. Live-live paralleling requires a separate engineered synch-check scheme.`;
         set({ lastCommandFeedback: { type: 'ERROR', message: msg, timestamp: ts } });
+        return false;
+      }
+    }
+
+    // Training-only 132 kV source transfer guard: prevent unverified live-source
+    // paralleling on the same bus section. Open-before-close is mandatory.
+    // This is NOT a synchronism-check implementation or a physical command.
+    if (targetState === 'CLOSED' && bay.breakerState !== 'CLOSED' &&
+        bay.voltageKv === 132 &&
+        (bay.bayType === 'LINE_INCOMER' || bay.bayType === 'INCOMING_FEEDER')) {
+      const competing = state.bays.find((other) =>
+        other.id !== bay.id && other.voltageKv === 132 &&
+        other.busSection === bay.busSection &&
+        (other.bayType === 'LINE_INCOMER' || other.bayType === 'INCOMING_FEEDER') &&
+        other.breakerState === 'CLOSED');
+      if (competing) {
+        const msg = `132 kV source CLOSE blocked: ${competing.bayCode} is already CLOSED on Bus ${bay.busSection}. Open and verify ${competing.breakerId} first. No synch-check / live paralleling is simulated.`;
+        set({
+          lastCommandFeedback: { type: 'ERROR', message: msg, timestamp: ts },
+          busTransferStatus: 'BLOCKED', busTransferMessage: msg,
+          soeLog: [{
+            id: `SOE-132-TRANSFER-BLOCK-${bay.id}-${ts}`,
+            timestampMs: ts, bayId: bay.id, bayName: bay.name, iedId: bay.iedId,
+            sourceRef: `${bay.iedId.replace(/-/g, '_')}/CILO1.EnaCls`,
+            eventDescription: '132 kV incoming source CLOSE rejected — same-bus anti-paralleling',
+            valueChange: `Requested=CLOSED; competing=${competing.bayCode} CLOSED`,
+            quality: bay.quality, cause: 'INTERLOCK_BLOCK',
+          }, ...state.soeLog],
+        });
         return false;
       }
     }
@@ -1935,5 +1990,44 @@ export const useSubstationStore = create<SubstationStoreState>((set, get) => ({
       signals: instantiateSignalsForSubstation(jitteredBays, state.transformers),
       trendHistory: [...state.trendHistory.slice(-19), newPoint],
     });
+  },
+ }), {
+  name: 'sas-engineering-hub-runtime-v1',
+  version: 1,
+  storage: createJSONStorage(() => localStorage),
+  // Save operational state, not UI selections, simulation timers or derived data.
+  partialize: (state) => ({
+    bays: state.bays,
+    busbars: state.busbars,
+    transformers: state.transformers,
+    alarms: state.alarms,
+    soeLog: state.soeLog,
+    busTransferMode: state.busTransferMode,
+    busTransferModes: state.busTransferModes,
+    busTransferStatus: state.busTransferStatus,
+    busTransferMessage: state.busTransferMessage,
+  }),
+  merge: (persisted, current) => {
+    const saved = persisted as Partial<SubstationStoreState> | undefined;
+    if (!saved || !Array.isArray(saved.bays) || !Array.isArray(saved.busbars)) return current;
+    // Keep newly configured bays and any newly added default bays; restore
+    // matching equipment's last operational state from the saved snapshot.
+    const savedById = new Map(saved.bays.map(b => [b.id, b]));
+    const bays = current.bays.map(b => savedById.get(b.id) ?? b);
+    for (const b of saved.bays) if (!bays.some(existing => existing.id === b.id)) bays.push(b);
+    const busbars = current.busbars.map(b => saved.busbars!.find(x => x.id === b.id) ?? b);
+    const transformers = current.transformers.map(t => saved.transformers?.find(x => x.id === t.id) ?? t);
+    return {
+      ...current,
+      ...saved,
+      bays,
+      busbars,
+      transformers,
+      // Recompute derived IEC 61850 values from restored primary equipment.
+      signals: instantiateSignalsForSubstation(bays, transformers),
+      ieds: buildMultiVendorIeds(bays),
+      networkLinks: buildNetworkLinks(bays),
+      lastCommandFeedback: null,
+    };
   },
 }));

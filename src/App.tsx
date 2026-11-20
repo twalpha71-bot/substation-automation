@@ -3,7 +3,8 @@ import { ScadaAlarmAudio } from './components/ScadaAlarmAudio';
 import { AlarmsEventsPage } from './pages/AlarmsEventsPage';
 import { WiresharkAnalyzerPage } from './pages/WiresharkAnalyzerPage';
 import { OsiModelPage } from './pages/OsiModelPage';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useSubstationStore, ActiveWorkspaceTab } from './simulation/useSubstationStore';
 import { useAuthStore, computeUserInitials, ProfileSectionTab } from './auth/useAuthStore';
 import { useSimulationLoop } from './hooks/useSimulationLoop';
@@ -81,7 +82,19 @@ export default function App() {
     lastCommandFeedback,
     clearCommandFeedback,
     bays,
-  } = useSubstationStore();
+  } = useSubstationStore(useShallow(state => ({
+    activeTab: state.activeTab,
+    setActiveTab: state.setActiveTab,
+    simulationRunning: state.simulationRunning,
+    toggleSimulationRunning: state.toggleSimulationRunning,
+    bilingualTeluguEnabled: state.bilingualTeluguEnabled,
+    toggleBilingualTelugu: state.toggleBilingualTelugu,
+    alarms: state.alarms,
+    faultScenarios: state.faultScenarios,
+    lastCommandFeedback: state.lastCommandFeedback,
+    clearCommandFeedback: state.clearCommandFeedback,
+    bays: state.bays,
+  })));
 
   const {
     currentUserId,
@@ -96,9 +109,9 @@ export default function App() {
   const [testingGuidanceOpen, setTestingGuidanceOpen] = useState(() => window.location.hash === '#/workspace/TESTING_GUIDANCE');
   const [showLanding, setShowLanding] = useState(false);
   const [specialPage, setSpecialPage] = useState<'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | null>(null);
-  const openSpecialPage = (page: 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER') => { setSpecialPage(page); setTestingGuidanceOpen(false); setShowLanding(false); setTopMenuOpen(null); window.history.pushState(null, '', `#/workspace/${page}`); window.scrollTo(0, 0); };
+  const openSpecialPage = (page: 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER') => { clearScadaVisitOnExit(); setSpecialPage(page); setTestingGuidanceOpen(false); setShowLanding(false); setTopMenuOpen(null); window.history.pushState(null, '', `#/workspace/${page}`); window.scrollTo(0, 0); };
   // Deep-link the active workspace: refreshing /workspace/GOOSE stays in GOOSE Lab.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const restoreLocation = () => {
       const special = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK|BAY_MANAGER)$/);
       if (special) { setSpecialPage(special[1] as 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER'); setTestingGuidanceOpen(false); setShowLanding(false); return; }
@@ -112,6 +125,7 @@ export default function App() {
       const match = window.location.hash.match(/^#\/workspace\/([A-Z0-9_]+)$/);
       if (match) {
         const requested = match[1] as ActiveWorkspaceTab;
+        if (requested !== 'SCADA') { try { sessionStorage.removeItem('sas-scada-navigation-v1'); } catch { /* optional */ } }
         const valid = ['HERO','OSI_MODEL','IEC61850_ACADEMY','INTERVIEW_PREP','CCNA_ACADEMY','SLD','SCADA','IED','IED_SIGNAL_CHAIN','NETWORK','GOOSE','MMS','MODBUS_LAB','IEC104_LAB','OPCUA_LAB','SIGNALS','FAULTS','FATSAT','LEARNING','USER_PROFILE','ADMIN_DASHBOARD'];
         if (valid.includes(requested)) {
           setActiveTab(requested);
@@ -340,7 +354,12 @@ export default function App() {
   ];
   const filteredNavItems = navItems.filter(item => item.label.toLowerCase().includes(navSearch.trim().toLowerCase()));
 
+  const clearScadaVisitOnExit = () => {
+    try { sessionStorage.removeItem('sas-scada-navigation-v1'); } catch { /* optional */ }
+  };
+
   const navigate = (tab: ActiveWorkspaceTab) => {
+    if (tab !== 'SCADA') clearScadaVisitOnExit();
     setSpecialPage(null);
     if (tab === ('TESTING_GUIDANCE' as ActiveWorkspaceTab)) {
       window.history.pushState(null, '', '#/workspace/TESTING_GUIDANCE');

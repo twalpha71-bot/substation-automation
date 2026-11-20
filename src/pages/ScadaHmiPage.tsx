@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { getBayProtocolBreakdown } from '../data/protocolRegistry';
 import { AlarmRecord, BayEquipment, SoeRecord } from '../types/substation';
@@ -88,7 +88,9 @@ export const ScadaHmiPage: React.FC = () => {
   } = useSubstationStore();
 
   // Operator View & Collapsible Workstation Panels State
-  const [primaryView, setPrimaryView] = useState<ScadaPrimaryView>('SLD');
+  const [primaryView, setPrimaryView] = useState<ScadaPrimaryView>(() => {
+    try { const saved = JSON.parse(sessionStorage.getItem('sas-scada-navigation-v1') || '{}'); return ['SLD','BAY_MATRIX','TRANSFORMERS','ALARMS_SOE'].includes(saved.primaryView) ? saved.primaryView : 'SLD'; } catch { return 'SLD'; }
+  });
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('All Sections');
   const [protectionFunction, setProtectionFunction] = useState('50/51 Overcurrent');
   const [protectionConfirm, setProtectionConfirm] = useState(false);
@@ -99,18 +101,54 @@ export const ScadaHmiPage: React.FC = () => {
   const [rightInspectorCollapsed, setRightInspectorCollapsed] = useState<boolean>(false);
   // Selection is local to the workstation; the shared store may have a bay selected by another module.
   const [operatorSelectedBayId, setOperatorSelectedBayId] = useState<string | null>(null);
-  const [engineeringDetailsOpen, setEngineeringDetailsOpen] = useState(false);
-  const [runtimePanel, setRuntimePanel] = useState<'ALARMS' | 'SOE' | 'SYSTEM'>('ALARMS');
+  const [engineeringDetailsOpen, setEngineeringDetailsOpen] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('sas-scada-navigation-v1') || '{}').engineeringDetailsOpen === true; } catch { return false; }
+  });
+  const [runtimePanel, setRuntimePanel] = useState<'ALARMS' | 'SOE' | 'SYSTEM'>(() => {
+    try { const saved = JSON.parse(sessionStorage.getItem('sas-scada-navigation-v1') || '{}'); return ['ALARMS','SOE','SYSTEM'].includes(saved.runtimePanel) ? saved.runtimePanel : 'ALARMS'; } catch { return 'ALARMS'; }
+  });
   const [runtimeNavOpen, setRuntimeNavOpen] = useState(true);
-  const [runtimeScreen, setRuntimeScreen] = useState<'DASHBOARD' | 'SLD' | 'TRENDS' | 'REPORTS' | 'USER'>('SLD');
+  // Persist the operator's current screen across browser refreshes only.
+  // App.tsx clears this snapshot when navigating away from SCADA/HMI,
+  // so a later visit from another main page starts on the SLD.
+  const scadaNavigationKey = 'sas-scada-navigation-v1';
+  type RuntimeScreen = 'DASHBOARD' | 'SLD' | 'TRENDS' | 'REPORTS' | 'USER';
+  const [restoredNavigation] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem(scadaNavigationKey);
+      const value = raw ? JSON.parse(raw) : null;
+      return value && typeof value === 'object' ? value : {};
+    } catch { return {}; }
+  });
+  const [runtimeScreen, setRuntimeScreen] = useState<RuntimeScreen>(() =>
+    ['DASHBOARD', 'SLD', 'TRENDS', 'REPORTS', 'USER'].includes(restoredNavigation.runtimeScreen)
+      ? restoredNavigation.runtimeScreen as RuntimeScreen : 'SLD');
+  const [transferDirection, setTransferDirection] = useState<'FORWARD' | 'REVERSE'>('FORWARD');
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(scadaNavigationKey, JSON.stringify({
+        runtimeScreen, primaryView, runtimePanel, engineeringDetailsOpen,
+      }));
+    } catch { /* Session storage can be unavailable; navigation still works. */ }
+  }, [runtimeScreen, primaryView, runtimePanel, engineeringDetailsOpen]);
+  const [reportRefreshedAt, setReportRefreshedAt] = useState<Date>(() => new Date());
+  const [reportRefreshVersion, setReportRefreshVersion] = useState(0);
+  const refreshSourceTransferReport = () => {
+    // Read the current shared simulation store, rather than merely changing the displayed clock.
+    setReportRefreshVersion(version => version + 1);
+    setReportRefreshedAt(new Date());
+  };
   const [trendPaused, setTrendPaused] = useState(false);
   const [trendRange, setTrendRange] = useState('20');
   const [trendEnabled, setTrendEnabled] = useState<string[]>(['v132Kv','v33Kv','v11Kv','totalLoadMw','freqHz']);
   const [trendSnapshot, setTrendSnapshot] = useState<typeof trendHistory>([]);
   const [bottomDrawerCollapsed, setBottomDrawerCollapsed] = useState<boolean>(false);
 
-  // SLD Zoom & Pan State (1.0 = Fit to Screen without horizontal scroll)
+  // At 100%, fit the base SLD to the available operator viewport; extra bays extend horizontally.
   const [sldZoom, setSldZoom] = useState<number>(1.0);
+  const sldViewportRef = useRef<HTMLDivElement>(null);
+  const sldPanelRef = useRef<HTMLDivElement>(null);
+  const [sldOnlyFullScreen, setSldOnlyFullScreen] = useState(false);
   const [sldPanX, setSldPanX] = useState<number>(0);
   const [sldPanY, setSldPanY] = useState<number>(0);
 
@@ -163,6 +201,163 @@ export const ScadaHmiPage: React.FC = () => {
     const rows = trendRows.map(p=>header.map(k=>String(p[k as keyof typeof p] ?? '')).join(','));
     const blob = new Blob([[header.join(','),...rows].join('\n')],{type:'text/csv;charset=utf-8'});
     const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='substation-trends.csv'; a.click(); URL.revokeObjectURL(url);
+  };
+
+  // Direction-specific evidence. Events must belong to the same ordered transfer cycle.
+  const transferReport = useMemo(() => {
+    const latest = useSubstationStore.getState();
+    const ordered = [...latest.soeLog].sort((a, b) => a.timestampMs.localeCompare(b.timestampMs));
+    const from = transferDirection === 'FORWARD' ? '132-L2' : '132-L3';
+    const to = transferDirection === 'FORWARD' ? '132-L3' : '132-L2';
+    const prefix = transferDirection === 'FORWARD' ? 'ST' : 'RST';
+    const belongs = (e: SoeRecord, code: string) => {
+      const bay = latest.bays.find(b => b.bayCode === code);
+      return e.bayId === `BAY-${code}` || (Boolean(bay) && e.bayId === bay?.id) ||
+        Boolean(bay?.breakerId && e.eventDescription.includes(`— ${bay.breakerId} `));
+    };
+    const isCommand = (e: SoeRecord, code: string, state: string) =>
+      belongs(e, code) && e.eventDescription.includes('command issued') && e.eventDescription.includes(state);
+    const isFeedback = (e: SoeRecord, code: string, state: string) =>
+      belongs(e, code) && e.eventDescription.includes('feedback confirmed') && e.eventDescription.includes(state);
+    const isBusEvent = (e: SoeRecord, voltage: number, phrase: string) =>
+      e.eventDescription.includes(`${voltage} kV Bus B`) && e.eventDescription.toLowerCase().includes(phrase);
+    const isBlocked = (e: SoeRecord) => e.cause === 'INTERLOCK_BLOCK' && belongs(e, to);
+    // Find the most recent COMPLETE ordered cycle; incomplete attempts are not promoted to observed.
+    // A cycle begins with an interlock check (optional) or outgoing-source OPEN command.
+    const cycles: Array<{ start: number; end: number; matches: Array<SoeRecord | undefined> }> = [];
+    for (let i = 0; i < ordered.length; i++) {
+      if (!isCommand(ordered[i], from, 'OPEN')) continue;
+      const matches: Array<SoeRecord | undefined> = Array(11).fill(undefined);
+      const block = [...ordered.slice(0, i)].reverse().find(e => isBlocked(e));
+      // Only use a block event after the preceding successful transfer into the starting source.
+      const precedingToClosed = [...ordered.slice(0, i)].reverse().find(e => isFeedback(e, to, 'CLOSED'));
+      if (block && (!precedingToClosed || block.timestampMs > precedingToClosed.timestampMs)) matches[0] = block;
+      matches[1] = ordered[i];
+      let cursor = i + 1;
+      const next = (test: (e: SoeRecord) => boolean) => {
+        const found = ordered.findIndex((e, idx) => idx >= cursor && test(e));
+        if (found < 0) return undefined;
+        cursor = found + 1;
+        return ordered[found];
+      };
+      matches[2] = next(e => isFeedback(e, from, 'OPEN'));
+      if (matches[2]) {
+        for (const [index, kv] of [132, 33, 11].entries()) matches[3 + index] = next(e => isBusEvent(e, kv, 'undervoltage'));
+        matches[6] = next(e => isCommand(e, to, 'CLOSED'));
+        if (matches[6]) matches[7] = next(e => isFeedback(e, to, 'CLOSED'));
+        if (matches[7]) for (const [index, kv] of [132, 33, 11].entries()) matches[8 + index] = next(e => isBusEvent(e, kv, 'restored'));
+      }
+      const end = Math.max(i, cursor - 1);
+      cycles.push({ start: i, end, matches });
+    }
+    const cycle = cycles.length ? cycles[cycles.length - 1] : undefined;
+    const checks = [
+      [`${prefix}-01`, `${to} close blocked while ${from} closed`],
+      [`${prefix}-02`, `${from} OPEN command recorded`],
+      [`${prefix}-03`, `${from} OPEN feedback confirmed`],
+      [`${prefix}-04`, '132 kV Bus B voltage loss recorded'],
+      [`${prefix}-05`, '33 kV Bus B voltage loss recorded'],
+      [`${prefix}-06`, '11 kV Bus B voltage loss recorded'],
+      [`${prefix}-07`, `${to} CLOSE command recorded`],
+      [`${prefix}-08`, `${to} CLOSED feedback confirmed`],
+      [`${prefix}-09`, '132 kV Bus B voltage restoration recorded'],
+      [`${prefix}-10`, '33 kV Bus B voltage restoration recorded'],
+      [`${prefix}-11`, '11 kV Bus B voltage restoration recorded'],
+    ];
+    const rows = checks.map(([id, title], index) => {
+      const evidence = cycle?.matches[index];
+      return { id, title, status: evidence ? 'OBSERVED' : 'NOT VERIFIED',
+        evidence: evidence ? `${evidence.timestampMs} | ${evidence.eventDescription}` : 'No matching event in selected ordered transfer cycle' };
+    });
+    for (const voltage of [132, 33, 11]) {
+      const alarm = latest.alarms.find(a => a.id === `ALM-ATS-BUS-${voltage}-B`);
+      const lossIndex = [132, 33, 11].indexOf(voltage) + 3;
+      const restoreIndex = lossIndex + 5;
+      const loss = cycle?.matches[lossIndex];
+      const restoration = cycle?.matches[restoreIndex];
+      // A current CLEARED state alone is insufficient: it may belong to a prior transfer.
+      // Require its recorded transition time to follow this cycle's voltage restoration.
+      const clearTime = alarm?.timestamp ? Date.parse(alarm.timestamp) : NaN;
+      const restorationTime = restoration ? Date.parse(restoration.timestampMs) : NaN;
+      const verified = Boolean(loss && restoration && alarm?.state === 'CLEARED' &&
+        Number.isFinite(clearTime) && Number.isFinite(restorationTime) && clearTime >= restorationTime);
+      const reason = !loss || !restoration
+        ? 'No matching voltage loss/restoration evidence in selected transfer cycle'
+        : alarm?.state !== 'CLEARED'
+          ? 'Alarm is not CLEARED in current alarm records'
+          : !Number.isFinite(clearTime) || !Number.isFinite(restorationTime)
+            ? 'Alarm clear/restoration timestamp missing or invalid'
+            : 'Recorded alarm CLEARED timestamp precedes this transfer restoration; a fresh clear event is required';
+      rows.push({ id: `${prefix}-${voltage}-ALM`, title: `${voltage} kV Bus B undervoltage alarm returned to normal`,
+        status: verified ? 'OBSERVED' : 'NOT VERIFIED',
+        evidence: verified && alarm ? `${alarm.timestamp} | ${alarm.signalName} | ${alarm.state} (after selected cycle restoration)` : reason });
+    }
+    const sequence = cycle ? ordered.slice(cycle.start, cycle.end + 1) : [];
+    return { rows, sequence, from, to, direction: transferDirection };
+  }, [soeLog, alarms, bays, reportRefreshVersion, transferDirection]);
+  const sourceTransferCases = transferReport.rows;
+
+  const exportSourceTransferPdf = () => {
+    // Evidence-based training report: no inferred physical FAT/SAT pass results.
+    const safe = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, ch =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] || ch));
+    const generatedAt = new Date().toLocaleString();
+    const observed = sourceTransferCases.filter(r => r.status === 'OBSERVED').length;
+    const pending = sourceTransferCases.length - observed;
+    const activeAlarms = alarms.filter(a => a.state !== 'CLEARED');
+    const results = sourceTransferCases.map(r => `<tr><td>${safe(r.id)}</td><td>${safe(r.title)}</td><td class="${r.status === 'OBSERVED' ? 'observed' : 'pending'}">${safe(r.status)}</td><td>${safe(r.evidence)}</td></tr>`).join('');
+    const sequence = transferReport.sequence;
+    const soeRows = sequence.map((e, i) => `<tr><td>${i + 1}</td><td>${safe(e.timestampMs)}</td><td>${safe(e.bayId)}</td><td>${safe(e.eventDescription)}</td><td>${safe(e.cause)}</td><td>${safe(e.quality)}</td></tr>`).join('');
+    const alarmRows = [132,33,11].map(kv => {
+      const a = alarms.find(x => x.id === `ALM-ATS-BUS-${kv}-B`);
+      const check = sourceTransferCases.find(r => r.id === `${transferReport.direction === 'FORWARD' ? 'ST' : 'RST'}-${kv}-ALM`);
+      return `<tr><td>${kv} kV Bus B undervoltage</td><td>${a ? safe(a.state) : 'NO RECORD'}</td><td>${a ? safe(a.timestamp) : '—'}</td><td>${check?.status === 'OBSERVED' ? 'VERIFIED AFTER RESTORATION' : 'NOT VERIFIED — ' + safe(check?.evidence)}</td></tr>`;
+    }).join('');
+    const conclusion = pending === 0 && activeAlarms.length === 0
+      ? 'All listed simulator evidence checks are observed and no active alarms remain. This is a simulator evidence review only, not physical FAT/SAT acceptance.'
+      : `${pending} of ${sourceTransferCases.length} evidence checks remain NOT VERIFIED; ${activeAlarms.length} active alarm(s) remain. Overall simulator evidence review: INCOMPLETE / PENDING VERIFICATION. Do not treat this as a passed physical FAT/SAT.`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"/><title>132 kV ${safe(transferReport.direction)} Source Transfer FAT SAT Report</title><style>
+      @page { size: A4 portrait; margin: 13mm; }
+      * { box-sizing: border-box; } body { font: 9px Arial, sans-serif; color: #182b40; margin: 0; }
+      header { border-bottom: 3px solid #0088b7; padding-bottom: 12px; margin-bottom: 16px; }
+      h1 { margin: 0 0 7px; font-size: 17px; color: #063b60; } h2 { font-size: 13px; color: #063b60; margin: 18px 0 8px; break-after: avoid; }
+      p, li { line-height: 1.55; } .subtitle { color: #53677b; } .meta { display: flex; gap: 25px; margin: 12px 0; }
+      .metric { display: inline-block; padding: 9px 13px; margin-right: 8px; background: #eaf4f8; border-radius: 4px; }
+      .metric strong { font-size: 17px; } table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 8px; }
+      th { background: #0b3656; color: white; text-align: left; } th, td { border: 1px solid #c9d8e1; padding: 5px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; } thead { display: table-header-group; }
+      tr:nth-child(even) { background: #f2f7fa; } tr { break-inside: avoid; }
+      .results th:nth-child(1) { width: 11%; } .results th:nth-child(2) { width: 27%; } .results th:nth-child(3) { width: 17%; } .results th:nth-child(4) { width: 45%; }
+      .soe th:nth-child(1) { width: 5%; } .soe th:nth-child(2) { width: 23%; } .soe th:nth-child(3) { width: 15%; } .soe th:nth-child(4) { width: 37%; } .soe th:nth-child(5) { width: 12%; } .soe th:nth-child(6) { width: 8%; }
+      .observed { color: #06723b; font-weight: bold; } .pending { color: #a35b00; font-weight: bold; }
+      .note { padding: 10px; border-left: 3px solid #0088b7; background: #edf6fa; line-height: 1.5; }
+      .sign { display: flex; gap: 30px; margin-top: 28px; } .sign div { flex: 1; border-top: 1px solid #718096; padding-top: 6px; }
+      @media screen { body { padding: 22px; max-width: 1200px; margin: auto; } }
+    </style></head><body><header><h1>132 kV ${safe(transferReport.direction)} Source Transfer — FAT/SAT Test Report</h1>
+      <div class="subtitle">132 / 33 / 11 kV Substation Automation System | SCADA/HMI Training Simulation</div>
+      <div class="meta"><span><b>Scenario:</b> ${safe(transferReport.from)} to ${safe(transferReport.to)} incoming source transfer</span><span><b>Generated:</b> ${safe(generatedAt)}</span></div>
+    </header><section><div class="metric"><strong>${sourceTransferCases.length}</strong><br/>Test checks</div>
+      <div class="metric"><strong>${observed}</strong><br/>Evidence observed</div>
+      <div class="metric"><strong>${pending}</strong><br/>Not verified</div>
+      <div class="metric"><strong>${activeAlarms.length}</strong><br/>Active alarms</div></section>
+    <h2>1. Test Objective</h2>
+    <p>Evaluate the simulated transfer of the 132 kV Bus B incoming supply from ${safe(transferReport.from)} to ${safe(transferReport.to)}. Check same-bus source closing interlock, ${safe(transferReport.from)} OPEN command and breaker feedback, 132/33/11 kV Bus B voltage-loss indications, ${safe(transferReport.to)} CLOSE command and feedback, voltage restoration, and final undervoltage alarm states. All findings are based on recorded SCADA simulator SOE and alarm data.</p>
+    <h2>2. Test Results</h2>
+    <table class="results"><thead><tr><th>Test ID</th><th>Expected Verification</th><th>Evidence Status</th><th>Actual Recorded Evidence</th></tr></thead><tbody>${results}</tbody></table>
+    <p><b>Evidence summary:</b> ${observed} observed; ${pending} not verified. OBSERVED indicates matching evidence within the selected ordered transfer cycle, not independent proof of correct electrical operation.</p>
+    <h2>3. Recorded SOE Sequence</h2>
+    <p>Recorded event sequence for the selected transfer cycle, sorted by millisecond timestamp. An empty sequence does not establish that an event occurred.</p>
+    <table class="soe"><thead><tr><th>#</th><th>Timestamp (ms)</th><th>Bay / IED reference</th><th>Event</th><th>Cause</th><th>Quality</th></tr></thead><tbody>${soeRows || '<tr><td colspan="6">No SOE records available for this session.</td></tr>'}</tbody></table>
+    <h2>4. Final Alarm Verification</h2>
+    <table><thead><tr><th>Alarm</th><th>Current Recorded State</th><th>Record Timestamp</th><th>Verification</th></tr></thead><tbody>${alarmRows}</tbody></table>
+    <p><b>All active alarms in current store:</b> ${activeAlarms.length}. ${activeAlarms.length ? safe(activeAlarms.map(a => `${a.signalName} (${a.state})`).join('; ')) : 'No active alarms recorded.'}</p>
+    <h2>5. Test Conclusion</h2><div class="note">${safe(conclusion)}</div>
+    <h2>Test Scope and Limitations</h2><div class="note">OBSERVED means matching simulator SOE/alarm evidence exists. It does not independently verify complete event ordering, physical relay behavior, breaker operation, site wiring, or time synchronization accuracy. NOT VERIFIED means no matching evidence was found. This report is for training simulation only, not a physical FAT/SAT acceptance certificate.</div>
+    <div class="sign"><div>Prepared by / Date</div><div>Checked by / Date</div><div>Approved by / Date</div></div></body></html>`;
+    const popup = window.open('', '_blank');
+    if (!popup) { window.alert('Please allow pop-ups to generate the PDF report.'); return; }
+    popup.document.open(); popup.document.write(html); popup.document.close();
+    popup.focus();
+    popup.addEventListener('load', () => popup.print(), { once: true });
   };
 
   const unackCount = alarms.filter((a) => a.state === 'ACTIVE_UNACK').length;
@@ -248,7 +443,7 @@ export const ScadaHmiPage: React.FC = () => {
           ? `IED ${selectedBay.iedId} communication offline / quality=${selectedBay.quality}`
           : selectedBay.localRemote === 'LOCAL'
           ? 'Bay 43LR switch is in LOCAL mode (Blocked-by-switching-hierarchy)'
-          : selectedBay.interlockReason;
+          : useSubstationStore.getState().lastCommandFeedback?.message || selectedBay.interlockReason;
 
       setOperatorFeedback({
         status: 'REJECTED',
@@ -268,15 +463,35 @@ export const ScadaHmiPage: React.FC = () => {
   };
 
   const handleFitToScreen = () => {
-    setSldZoom(1.0);
+    const viewport = sldViewportRef.current;
+    const availableWidth = (viewport?.clientWidth ?? 1100) - 18;
+    const availableHeight = (viewport?.clientHeight ?? 680) - 18;
+    setSldZoom(Math.max(0.3, Math.min(1.6, availableWidth / operatorCanvasWidth, availableHeight / 820)));
     setSldPanX(0);
     setSldPanY(0);
   };
 
+  // Use the browser fullscreen API so the SLD fills the actual display,
+  // rather than a CSS fixed element constrained by a transformed ancestor.
+  const toggleSldFullScreen = async () => {
+    const panel = sldPanelRef.current;
+    if (!panel) return;
+    if (document.fullscreenElement === panel) {
+      await document.exitFullscreen().catch(() => {});
+    } else if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => {});
+    } else {
+      try {
+        await panel.requestFullscreen();
+      } catch {
+        // Some embedded browsers disallow native fullscreen: use CSS fallback.
+        setSldOnlyFullScreen((value) => !value);
+      }
+    }
+  };
+
   const handleResetView = () => {
-    setSldZoom(1.0);
-    setSldPanX(0);
-    setSldPanY(0);
+    handleFitToScreen();
     setVoltageFilter('ALL');
     setPrimaryView('SLD');
   };
@@ -306,6 +521,54 @@ export const ScadaHmiPage: React.FC = () => {
       b.busSection === 'B' &&
       (b.bayType === 'OUTGOING_FEEDER' || b.bayType === 'SPARE_FEEDER')
   );
+
+  // Operator SLD consumes the same live bay list as Engineering Mode.
+  // Extra bays extend outward rather than squeezing the fixed transformer/coupler columns.
+  const incoming132A = bays.filter(b => b.voltageKv === 132 && b.busSection === 'A' &&
+    (b.bayType === 'LINE_INCOMER' || b.bayType === 'INCOMING_FEEDER' || b.id === 'BAY-132-L1'));
+  const incoming132B = bays.filter(b => b.voltageKv === 132 && b.busSection === 'B' &&
+    (b.bayType === 'LINE_INCOMER' || b.bayType === 'INCOMING_FEEDER' || b.id === 'BAY-132-L2'));
+  const extraLeft = Math.max(0, incoming132A.length - 2, bay33BusA.length - 3, bay11BusA.length - 4) * 110;
+  const extraRight = Math.max(0, incoming132B.length - 2, bay33BusB.length - 3, bay11BusB.length - 4) * 110;
+  const operatorCanvasWidth = 1200 + extraLeft + extraRight;
+  const operatorBayX = (side: 'A' | 'B', index: number, level: 132 | 33 | 11) => {
+    if (level === 132) return side === 'A' ? (index === 0 ? 300 : 175 - (index - 1) * 110) : (index === 0 ? 900 : 1020 + (index - 1) * 110);
+    const slots = level === 33 ? (side === 'A' ? [105, 235, 345] : [855, 995, 1100]) :
+      (side === 'A' ? [100, 205, 310, 385] : [815, 925, 1035, 1120]);
+    return index < slots.length ? slots[index] : side === 'A'
+      ? 15 - (index - slots.length) * 110
+      : 1230 + (index - slots.length) * 110;
+  };
+
+  // Fit the complete drawing initially and whenever the number of bays changes.
+  useEffect(() => {
+    if (primaryView !== 'SLD') return;
+    const viewport = sldViewportRef.current;
+    if (!viewport) return;
+    // Fullscreen changes and window resizes change both available dimensions.
+    // Measure the real viewport instead of assuming a fixed 680px height.
+    let frame = 0;
+    const fit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const width = Math.max(1, viewport.clientWidth - 12);
+        const height = Math.max(1, viewport.clientHeight - 12);
+        setSldZoom(Math.max(0.3, Math.min(1.6, width / operatorCanvasWidth, height / 820)));
+        viewport.scrollLeft = 0;
+        viewport.scrollTop = 0;
+      });
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(viewport);
+    fit();
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, [operatorCanvasWidth, sldOnlyFullScreen, primaryView]);
+
+  useEffect(() => {
+    const syncFullscreen = () => setSldOnlyFullScreen(document.fullscreenElement === sldPanelRef.current);
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreen);
+  }, []);
 
   const bus132A = busbars.find((b) => b.id === 'BUS-132-A')!;
   const bus132B = busbars.find((b) => b.id === 'BUS-132-B')!;
@@ -1041,7 +1304,7 @@ export const ScadaHmiPage: React.FC = () => {
     const dsClosed = bay.busDisconnectorState === 'CLOSED';
     const esClosed = bay.earthSwitchState === 'CLOSED';
     const selected = operatorSelectedBayId === bay.id;
-    const wire = color;
+    const wire = bay.quality === 'GOOD' && !bay.energized ? '#64748b' : color;
     return <g key={bay.id} role="button" tabIndex={0} aria-label={`Inspect ${bay.bayCode}`} onClick={() => selectBayInScada(bay.id)} onKeyDown={e => { if(e.key==='Enter'||e.key===' ') {e.preventDefault();selectBayInScada(bay.id);} }} style={{cursor:'pointer'}}>
       {selected && <rect x={x-20} y={top-5} width="40" height={span+10} rx="3" fill="#0c4261" fillOpacity="0.34" stroke="#22d3ee" strokeDasharray="4 4"/>}
       {/* Split conductors at DS and CB: open isolators show a real visible air gap. */}
@@ -1058,8 +1321,8 @@ export const ScadaHmiPage: React.FC = () => {
       <text x={x+13} y={cbY+3} fontSize="8" fill="#d7e7f6">Q0</text>
       <text x={x+24} y={earthY+5} fontSize="8" fill="#d7e7f6">Q8</text>
       <text x={x} y={direction==='up'?top-9:bottom+13} fontSize="10" fill="#f1f7ff" fontWeight="600" textAnchor="middle">{bay.bayCode}</text>
-      {direction==='up' && (bay.id === 'BAY-132-L1' || bay.id === 'BAY-132-L2' ? (
-        // Incoming 132 kV line: downward-facing arrow at the start of the conductor.
+      {direction==='up' && ((bay.voltageKv === 132 && (bay.bayType === 'LINE_INCOMER' || bay.bayType === 'INCOMING_FEEDER')) || ['BAY-33-INC1', 'BAY-33-INC2', 'BAY-11-INC1', 'BAY-11-INC2'].includes(bay.id) ? (
+        // Incoming source arrows (132 kV lines and 33/11 kV transformer incomers) point toward the busbar.
         <path d={`M${x-4} ${top+1} L${x} ${top+8} L${x+4} ${top+1}`} fill="none" stroke={wire} strokeWidth="1.6"/>
       ) : (
         <path d={`M${x-4} ${top+7} L${x} ${top} L${x+4} ${top+7}`} fill="none" stroke={wire} strokeWidth="1.6"/>
@@ -1185,7 +1448,41 @@ export const ScadaHmiPage: React.FC = () => {
         </div>
         <aside className="runtime-panel p-3 text-xs"><h3 className="font-bold border-b border-[#315779] pb-2">Trend Variables</h3><div className="space-y-3 mt-3">{trendChannels.map(c=><label key={c.key} className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={trendEnabled.includes(c.key)} onChange={e=>setTrendEnabled(old=>e.target.checked?[...old,c.key]:old.filter(k=>k!==c.key))}/><span style={{color:c.color}}>━</span>{c.label}</label>)}</div><h3 className="font-bold border-b border-[#315779] pb-2 mt-8">Current Values</h3>{trendChannels.map(c=><div key={c.key} className="flex justify-between gap-2 py-2 border-b border-[#1b4163]"><span>{c.label}</span><b style={{color:c.color}}>{Number(trendHistory[trendHistory.length-1]?.[c.key]??0).toFixed(2)} {c.unit}</b></div>)}</aside>
       </section>}
-      {runtimeScreen==='REPORTS' && !engineeringDetailsOpen && <section className="runtime-panel p-5 min-h-[350px]"><h2 className="font-bold text-xl mb-3">Station Reports</h2><p className="text-sm text-slate-300 mb-4">Export the current simulated station measurements and historical trend samples.</p><button className="runtime-tab px-4 py-2" onClick={exportTrendCsv}>Download Trend Measurements (CSV)</button></section>}
+      {runtimeScreen==='REPORTS' && !engineeringDetailsOpen && <section className="runtime-panel p-5 min-h-[350px] space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><h2 className="font-bold text-xl text-cyan-200">132 kV Source Transfer — FAT/SAT Report</h2>
+            <p className="text-xs text-slate-300 mt-1">Training simulation only • Evidence from current SOE and alarm records • Not a physical site SAT certificate</p><p className="text-xs text-cyan-300 mt-1">Last report refresh: {reportRefreshedAt.toLocaleTimeString()} • Live SOE/alarm changes update automatically</p></div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="runtime-tab px-3 py-2" onClick={refreshSourceTransferReport} title="Recheck current SOE and alarm evidence without leaving Reports">↻ Refresh Report</button>
+            <button type="button" className="runtime-tab px-3 py-2" onClick={exportSourceTransferPdf}>Download {transferDirection === 'FORWARD' ? 'Forward' : 'Reverse'} FAT/SAT PDF</button>
+            <button type="button" className="runtime-tab px-3 py-2" onClick={() => window.print()}>Print Report</button>
+            <button type="button" className="runtime-tab px-3 py-2" onClick={exportTrendCsv}>Trend CSV</button>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 rounded border border-[#315779] bg-[#09213b] p-3 text-sm">
+          <span className="font-semibold text-cyan-200" id="transfer-direction-label">Source Transfer Scenario</span>
+          <div role="group" aria-labelledby="transfer-direction-label" className="inline-flex flex-wrap gap-2">
+            <button type="button" aria-pressed={transferDirection === 'FORWARD'} onClick={() => setTransferDirection('FORWARD')} className={`rounded border px-3 py-2 font-semibold transition-colors ${transferDirection === 'FORWARD' ? 'border-cyan-300 bg-[#1264a3] text-white' : 'border-[#355c7e] bg-[#102b4b] text-slate-200 hover:bg-[#19446c]'}`}>Forward — 132-L2 → 132-L3</button>
+            <button type="button" aria-pressed={transferDirection === 'REVERSE'} onClick={() => setTransferDirection('REVERSE')} className={`rounded border px-3 py-2 font-semibold transition-colors ${transferDirection === 'REVERSE' ? 'border-cyan-300 bg-[#1264a3] text-white' : 'border-[#355c7e] bg-[#102b4b] text-slate-200 hover:bg-[#19446c]'}`}>Reverse — 132-L3 → 132-L2</button>
+          </div>
+          <span className="text-slate-300">Independent ordered SOE verification • {transferReport.from} → {transferReport.to}</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div className="rounded border border-[#315779] p-3">Test cases <strong className="block text-xl">{sourceTransferCases.length}</strong></div>
+          <div className="rounded border border-[#315779] p-3">Observed <strong className="block text-xl text-green-300">{sourceTransferCases.filter(r=>r.status==='OBSERVED').length}</strong></div>
+          <div className="rounded border border-[#315779] p-3">Not verified <strong className="block text-xl text-amber-300">{sourceTransferCases.filter(r=>r.status==='NOT VERIFIED').length}</strong></div>
+          <div className="rounded border border-[#315779] p-3">Active alarms <strong className="block text-xl">{alarms.filter(a=>a.state!=='CLEARED').length}</strong></div>
+        </div>
+        <div className="overflow-x-auto"><table className="runtime-alarm-table w-full">
+          <thead><tr><th>Test ID</th><th>Expected verification</th><th>Evidence status</th><th>Actual SOE / Alarm evidence</th></tr></thead>
+          <tbody>{sourceTransferCases.map(r=><tr key={r.id}>
+            <td className="font-mono">{r.id}</td><td>{r.title}</td>
+            <td className={r.status==='OBSERVED'?'text-green-300':'text-amber-300'}>{r.status}</td>
+            <td className="text-xs font-mono">{r.evidence}</td>
+          </tr>)}</tbody>
+        </table></div>
+        <p className="text-xs text-slate-400">OBSERVED means matching simulator evidence exists; it does not prove the full switching sequence, physical IED behavior, or independent time accuracy. Missing evidence is NOT VERIFIED, never automatically PASS.</p>
+      </section>}
       <div style={{display:runtimeScreen==='SLD'?'contents':'none'}}>
       {/* ==================== 1. TOP SCADA SYSTEM STATUS & TELEMETRY HEADER (#081A30) ==================== */}
       <div className="px-3.5 py-2 rounded-lg bg-[#081A30] border border-[#142A3C] flex flex-wrap items-center justify-between gap-2">
@@ -1516,7 +1813,9 @@ export const ScadaHmiPage: React.FC = () => {
 
         {/* CENTER COLUMN: Main Interactive 132/33/11 kV SCADA Single-Line Diagram */}
         <div
-          className={`${centerColSpanClass} min-w-0 bg-[#0B1D30] border border-[#142A3C] rounded-lg flex flex-col overflow-hidden`}
+          ref={sldPanelRef}
+          className={`${sldOnlyFullScreen && primaryView === 'SLD' ? 'fixed inset-0 z-[100] !w-screen !h-[100dvh] !max-w-none shadow-[0_0_0_9999px_rgba(0,0,0,0.88)]' : centerColSpanClass} min-w-0 bg-[#0B1D30] border border-[#142A3C] rounded-lg flex flex-col overflow-hidden`}
+          style={sldOnlyFullScreen && primaryView === 'SLD' ? { width: '100vw', height: '100dvh', maxHeight: '100dvh' } : undefined}
         >
           {/* Center Workspace Header & Fit-to-Screen / Zoom In / Zoom Out / Reset View Controls */}
           <div className="px-3 py-2 bg-[#081A30] border-b border-[#142A3C] flex flex-wrap items-center justify-between gap-2">
@@ -1560,6 +1859,12 @@ export const ScadaHmiPage: React.FC = () => {
                   title="Zoom Out SLD"
                 >
                   <Minus className="w-3 h-3" /> Zoom Out
+                </button>
+                <button type="button" onClick={toggleSldFullScreen}
+                  title={sldOnlyFullScreen ? 'Exit SLD full screen' : 'Full screen SLD only'}
+                  className="px-2 py-0.5 rounded bg-[#142A3C] hover:bg-[#168BFF] text-[#E9F3FF] text-[11px] font-semibold flex items-center gap-1">
+                  {sldOnlyFullScreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+                  {sldOnlyFullScreen ? 'Exit Full Screen' : 'Full Screen'}
                 </button>
                 <button
                   type="button"
@@ -1611,49 +1916,54 @@ export const ScadaHmiPage: React.FC = () => {
           {/* Primary Center View Content — Argon Dark-SCADA 132/33/11 kV Interactive SLD Structure */}
           {primaryView === 'SLD' && (
             <div
-              className="overflow-auto relative flex items-center justify-center p-1.5 h-[540px] sm:h-[620px] xl:h-[680px]"
+              ref={sldViewportRef}
+              onWheel={(event) => { if (event.shiftKey && sldViewportRef.current) { sldViewportRef.current.scrollLeft += event.deltaY; event.preventDefault(); } }}
+              className={`overflow-x-auto overflow-y-auto relative p-1.5 ${sldOnlyFullScreen ? 'flex-1 min-h-0' : 'h-[540px] sm:h-[620px] xl:h-[680px]'}`}
               style={{
                 background: '#071b33',
               }}
             >
-              <svg viewBox="0 0 1200 820" preserveAspectRatio="xMidYMid meet" className="w-full h-full min-w-[660px] select-none block" style={{ transform: `scale(${sldZoom}) translate(${sldPanX}px, ${sldPanY}px)`, transformOrigin: 'center center' }}>
-                <rect width="1200" height="820" fill="#071b33" />
+              <svg viewBox={`${-extraLeft} 0 ${operatorCanvasWidth} 820`} preserveAspectRatio="xMidYMin meet" className="select-none block" style={{ width: `${operatorCanvasWidth * sldZoom}px`, height: `${820 * sldZoom}px`, maxWidth: 'none', transform: `translate(${sldPanX}px, ${sldPanY}px)`, transformOrigin: 'top left' }}>
+                <rect x={-extraLeft} width={operatorCanvasWidth} height="820" fill="#071b33" />
                 <text x="600" y="32" fill="#e9f3ff" fontSize="22" fontWeight="bold" textAnchor="middle">132 / 33 / 11 kV SUBSTATION – SINGLE LINE DIAGRAM</text>
                 <g fontFamily="Arial, sans-serif" fontSize="13" fill="#e9f3ff" fontWeight="bold">
-                  <text x="32" y="153">132 kV</text><text x="88" y="165">132 kV BUS SECTION A</text><text x="965" y="165">132 kV BUS SECTION B</text>
-                  <text x="88" y="180" fontSize="11">({bus132A.voltageKvLive.toFixed(1)} kV / 50.00 Hz)</text><text x="965" y="180" fontSize="11">({bus132B.voltageKvLive.toFixed(1)} kV / 50.00 Hz)</text>
+                  <text x="32" y="153">132 kV</text><text x="88" y="219">132 kV BUS SECTION A</text><text x="965" y="219">132 kV BUS SECTION B</text>
+                  <text x="88" y="234" fontSize="11">({bus132A.voltageKvLive.toFixed(1)} kV / 50.00 Hz)</text><text x="965" y="234" fontSize="11">({bus132B.voltageKvLive.toFixed(1)} kV / 50.00 Hz)</text>
                   <text x="88" y="392">33 kV BUS SECTION A</text><text x="965" y="392">33 kV BUS SECTION B</text>
                   <text x="88" y="407" fontSize="11">({bus33A.voltageKvLive.toFixed(2)} kV)</text><text x="965" y="407" fontSize="11">({bus33B.voltageKvLive.toFixed(2)} kV)</text>
                   <text x="88" y="652">11 kV SWITCHGEAR BUS A</text><text x="950" y="652">11 kV SWITCHGEAR BUS B</text>
                 </g>
                 <g strokeLinecap="round" strokeWidth="1.8" fill="none">
-                  <path d="M65 195 H550 M650 195 H1135" stroke="#ed3b42" />
-                  <path d="M65 425 H550 M650 425 H1135" stroke="#18bd48" />
-                  <path d="M65 675 H550 M650 675 H1135" stroke="#d3aa00" />
+                  <path d={`M${65-extraLeft} 195 H550`} stroke={bus132A.energized ? '#ed3b42' : '#64748b'} />
+                  <path d={`M650 195 H${1135+extraRight}`} stroke={bus132B.energized ? '#ed3b42' : '#64748b'} />
+                  <path d={`M${65-extraLeft} 425 H550`} stroke={bus33A.energized ? '#18bd48' : '#64748b'} />
+                  <path d={`M650 425 H${1135+extraRight}`} stroke={bus33B.energized ? '#18bd48' : '#64748b'} />
+                  <path d={`M${65-extraLeft} 675 H550`} stroke={bus11A.energized ? '#d3aa00' : '#64748b'} />
+                  <path d={`M650 675 H${1135+extraRight}`} stroke={bus11B.energized ? '#d3aa00' : '#64748b'} />
                 </g>
                 {renderReferenceCoupler('BAY-132-BC', 600, 195, '#ed3b42')}
                 {renderReferenceCoupler('BAY-33-BC', 600, 425, '#18bd48')}
                 {renderReferenceCoupler('BAY-11-BC', 600, 675, '#d3aa00')}
-                {renderReferenceBay(bays.find(b => b.id === 'BAY-132-L1'), 300, 195, 90, '#ed3b42', 'up')}
-                {renderReferenceBay(bays.find(b => b.id === 'BAY-132-L2'), 900, 195, 90, '#ed3b42', 'up')}
+                {incoming132A.map((b,i)=>renderReferenceBay(b,operatorBayX('A',i,132),195,90,'#ed3b42','up'))}
+                {incoming132B.map((b,i)=>renderReferenceBay(b,operatorBayX('B',i,132),195,90,'#ed3b42','up'))}
                 {[{x:420,id:'BAY-132-T1',inc:'BAY-33-INC1',tx:txT1},{x:780,id:'BAY-132-T2',inc:'BAY-33-INC2',tx:txT2}].map((item,i) => <g key={item.id}>
                   {renderReferenceBay(bays.find(b=>b.id===item.id),item.x,195,260,'#ed3b42','down',false)}
-                  <line x1={item.x} y1="260" x2={item.x} y2="425" stroke="#18bd48" strokeWidth="1.8" />
-                  <circle cx={item.x-9} cy="314" r="18" fill="none" stroke="#e0b100" strokeWidth="3"/><circle cx={item.x+9} cy="314" r="18" fill="none" stroke="#20a35e" strokeWidth="3"/>
+                  <line x1={item.x} y1="260" x2={item.x} y2="425" stroke={item.tx?.energized ? '#18bd48' : '#64748b'} strokeWidth="1.8" />
+                  <circle cx={item.x-9} cy="314" r="18" fill="none" stroke={item.tx?.energized ? "#e0b100" : "#64748b"} strokeWidth="3"/><circle cx={item.x+9} cy="314" r="18" fill="none" stroke={item.tx?.energized ? "#20a35e" : "#64748b"} strokeWidth="3"/>
                   <text x={item.x+33} y="309" fontSize="11" fill="#e9f3ff">{i===0?'T1':'T2'} · 132/33 kV</text>
                   <text x={item.x+33} y="325" fontSize="10" fill="#b8cde2">50 MVA · {item.tx?.loadPercent?.toFixed(1) || '0.0'}%</text>
                   {renderReferenceBay(bays.find(b=>b.id===item.inc),item.x,425,365,'#18bd48','up',false)}
                 </g>)}
-                {bay33BusA.map((b,i)=>renderReferenceBay(b,105+i*(405/Math.max(1,bay33BusA.length-1)),425,505,'#18bd48','down',false))}
-                {bay33BusB.map((b,i)=>renderReferenceBay(b,695+i*(405/Math.max(1,bay33BusB.length-1)),425,505,'#18bd48','down',false))}
+                {bay33BusA.map((b,i)=>renderReferenceBay(b,operatorBayX('A',i,33),425,505,'#18bd48','down',false))}
+                {bay33BusB.map((b,i)=>renderReferenceBay(b,operatorBayX('B',i,33),425,505,'#18bd48','down',false))}
                 {[{x:420,tx:txDt1,id:'BAY-11-INC1'},{x:780,tx:txDt2,id:'BAY-11-INC2'}].map((item,i)=><g key={item.id}>
-                  <line x1={item.x} y1="425" x2={item.x} y2="675" stroke="#d3aa00" strokeWidth="1.8"/>
-                  <circle cx={item.x-8} cy="585" r="15" fill="none" stroke="#d3aa00" strokeWidth="3"/><circle cx={item.x+8} cy="585" r="15" fill="none" stroke="#20a35e" strokeWidth="3"/>
+                  <line x1={item.x} y1="425" x2={item.x} y2="675" stroke={item.tx?.energized ? "#d3aa00" : "#64748b"} strokeWidth="1.8"/>
+                  <circle cx={item.x-8} cy="585" r="15" fill="none" stroke={item.tx?.energized ? "#d3aa00" : "#64748b"} strokeWidth="3"/><circle cx={item.x+8} cy="585" r="15" fill="none" stroke={item.tx?.energized ? "#20a35e" : "#64748b"} strokeWidth="3"/>
                   <text x={item.x+30} y="583" fontSize="10" fill="#e9f3ff">{i===0?'DT1':'DT2'} · 33/11 kV</text>
                   {renderReferenceBay(bays.find(b=>b.id===item.id),item.x,675,622,'#d3aa00','up',false)}
                 </g>)}
-                {bay11BusA.map((b,i)=>renderReferenceBay(b,100+i*(380/Math.max(1,bay11BusA.length-1)),675,765,'#d3aa00','down',false))}
-                {bay11BusB.map((b,i)=>renderReferenceBay(b,700+i*(380/Math.max(1,bay11BusB.length-1)),675,765,'#d3aa00','down',false))}
+                {bay11BusA.map((b,i)=>renderReferenceBay(b,operatorBayX('A',i,11),675,765,'#d3aa00','down',false))}
+                {bay11BusB.map((b,i)=>renderReferenceBay(b,operatorBayX('B',i,11),675,765,'#d3aa00','down',false))}
               </svg>
             </div>
           )}
