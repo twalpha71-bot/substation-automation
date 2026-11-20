@@ -62,8 +62,8 @@ export function BayConfigurationManager() {
       <p className="text-slate-400">Export existing custom bays and hidden default bay IDs. Import replaces the current saved configuration after confirmation.</p>
       <div className="flex flex-wrap gap-2"><button type="button" className={actionClass+' border-cyan-600 text-cyan-200'} onClick={exportJson}><Download className="h-4 w-4"/> Export JSON</button><label className={actionClass+' cursor-pointer border-cyan-600 text-cyan-200'}><Upload className="h-4 w-4"/> Import JSON<input className="hidden" type="file" accept=".json,application/json" onChange={e => { void importJson(e.target.files?.[0]); e.target.value = ''; }}/></label></div>
     </section>}
-    {(activeTab === 'configuration' || activeTab === 'manage') && <div className="grid gap-3 lg:grid-cols-2">
-      <form onSubmit={save} className="space-y-2 rounded-lg border border-[#00a8d5] bg-[#041a2b] p-3 shadow-[inset_0_0_16px_rgba(0,207,255,0.05)]">
+    {(activeTab === 'configuration' || activeTab === 'manage') && <div className={activeTab === 'configuration' ? 'grid gap-3' : 'grid gap-3'}>
+      {activeTab === 'configuration' && <form onSubmit={save} className="space-y-2 rounded-lg border border-[#00a8d5] bg-[#041a2b] p-3 shadow-[inset_0_0_16px_rgba(0,207,255,0.05)]">
         <h3 className="flex items-center gap-2 text-sm font-extrabold text-[#52E6FF]"><Plus className="h-5 w-5"/> {editing ? `Edit Bay — ${editing}` : 'Add / Edit Bay'}</h3>
         <div className="grid grid-cols-2 gap-x-3 gap-y-2">
           <label>Bay ID <span className="text-red-400">*</span><input required className={inputClass} placeholder="33-F04" value={draft.id} onChange={e => update('id', e.target.value)}/></label>
@@ -82,8 +82,8 @@ export function BayConfigurationManager() {
         <div className="flex flex-wrap items-center gap-2 pt-1"><button type="submit" className={actionClass+' border-cyan-400 bg-cyan-500 text-slate-950'}><Save className="h-4 w-4"/> {editing ? 'Update Bay' : 'Save Bay'}</button><button type="button" className={actionClass+' border-slate-600 text-slate-200'} onClick={() => { setEditing(null); setDraft(blank()); }}> <RotateCcw className="h-4 w-4"/> Reset</button></div>
         {message && <p role="status" className="text-xs text-cyan-300">{message}</p>}
         {undoSnapshot && <button type="button" className={actionClass+' border-amber-500 text-amber-300'} onClick={() => { setRows(undoSnapshot); setUndoSnapshot(null); setMessage('Restored previous custom bays.'); }}>Undo last deletion</button>}
-      </form>
-      <section className="space-y-3 rounded-lg border border-[#00a8d5] bg-[#041a2b] p-3 shadow-[inset_0_0_16px_rgba(0,207,255,0.05)]">
+      </form>}
+      {activeTab === 'manage' && <section className="space-y-3 rounded-lg border border-[#00a8d5] bg-[#041a2b] p-3 shadow-[inset_0_0_16px_rgba(0,207,255,0.05)]">
         <div className="flex items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-sm font-extrabold text-[#52E6FF]"><Layers className="h-5 w-5"/> Configured Bays ({rows.length + INITIAL_BAYS.length - hiddenDefaults.length})</h3>
           <select aria-label="Filter voltage" className={inputClass+' !mt-0 !w-auto'} value={filter} onChange={e => { setFilter(e.target.value as typeof filter); setSelectedBayId(''); }}>{['ALL','132','33','11'].map(v => <option key={v} value={v}>{v === 'ALL' ? 'All voltages' : `${v} kV`}</option>)}</select></div>
         <label className="block">Select Bay<select aria-label="Select bay to manage" className={inputClass} value={selectedBayId} onChange={e => setSelectedBayId(e.target.value)}><option value="">-- Select an existing or custom bay --</option>{defaultShown.length > 0 && <optgroup label="Existing Bays">{defaultShown.map(b => <option key={b.id} value={b.id}>{b.id} — {b.name}</option>)}</optgroup>}{shown.length > 0 && <optgroup label="Custom Bays">{shown.map(b => <option key={b.id} value={b.id}>{b.id} — {b.name}</option>)}</optgroup>}</select></label>
@@ -106,7 +106,7 @@ export function BayConfigurationManager() {
           </div>
         </> : <div className="flex min-h-36 items-center justify-center rounded-lg border border-dashed border-cyan-900 p-4 text-center text-slate-400">Choose a Bay to view its configuration, edit or delete it.</div>}
         {hiddenDefaults.length > 0 && <p className="text-xs text-amber-300">{hiddenDefaults.length} default bay(s) hidden. Use Restore Deleted to bring them back.</p>}
-      </section>
+      </section>}
     </div>}
     <div className="rounded-md border border-[#175777] bg-[#061b2d] px-3 py-2 text-[11px] text-slate-400">ⓘ Changes update the training simulation store and IEC 61850 signal models. Fixed-layout 2D/3D diagrams may require additional integration; no physical equipment is controlled.</div>
   </div>;

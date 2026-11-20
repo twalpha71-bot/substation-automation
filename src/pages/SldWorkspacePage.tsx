@@ -1,3 +1,4 @@
+import { BayConfigurationManager } from './BayConfigurationManager';
 import { MultifunctionMeter } from '../components/MultifunctionMeter';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
@@ -8,6 +9,7 @@ import { Substation3DScene } from '../components/Substation3DScene';
 import { createPortal } from 'react-dom';
 import {
   Filter,
+  Settings2,
   Layers,
   Maximize2,
   Minus,
@@ -28,6 +30,14 @@ import {
 } from 'lucide-react';
 
 export const SldWorkspacePage: React.FC = () => {
+  const [bayManagerOpen, setBayManagerOpen] = useState(false);
+  useEffect(() => {
+    if (!bayManagerOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setBayManagerOpen(false); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [bayManagerOpen]);
+
   const {
     bays,
     busbars,
@@ -54,6 +64,43 @@ export const SldWorkspacePage: React.FC = () => {
   // SLD-only selection: no default highlight and no forced bay on initial render.
   const [inspectedBayId, setInspectedBayId] = useState<string | null>(null);
   const [deviceDetailsTab, setDeviceDetailsTab] = useState<'Overview' | 'Measurements' | 'Protection' | 'IEC 61850' | 'Controls' | 'SOE'>('Overview');
+  // Training-only earthing arrangement metadata. This does not change store interlocks
+  // or authorize an earth-switch operation on actual equipment.
+  type EarthingArrangement = 'NOT_CONFIGURED' | 'FIXED_ES' | 'EARTHING_TRUCK' | 'PORTABLE_EARTHING';
+  const [earthingArrangements, setEarthingArrangements] = useState<Record<string, EarthingArrangement>>({});
+  const earthingFor = (bay: BayEquipment): EarthingArrangement =>
+    earthingArrangements[bay.id] ?? 'NOT_CONFIGURED';
+  const setEarthingFor = (id: string, arrangement: EarthingArrangement) =>
+    setEarthingArrangements(previous => ({ ...previous, [id]: arrangement }));
+
+  // Clear selection outside the SLD bay and Device Details inspector only.
+  // Keep selection while using the inspector tabs and CB/DS/ES controls.
+  useEffect(() => {
+    const clearOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-sld-bay], [data-sld-device-details]')) return;
+      setInspectedBayId(null);
+    };
+    document.addEventListener('click', clearOnOutsideClick, true);
+    return () => document.removeEventListener('click', clearOnOutsideClick, true);
+  }, []);
+
+  // Q2 is engineering-only visual metadata until the simulation store exposes
+  // independent Q2 telemetry and interlocked switching commands.
+  type Q2Setting = 'NOT_INSTALLED' | 'OPEN' | 'CLOSED';
+  const [q2Settings, setQ2Settings] = useState<Record<string, Q2Setting>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('sas-sld-q2-settings-v1') || '{}');
+      if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return {};
+      return Object.fromEntries(Object.entries(saved).filter((entry): entry is [string, Q2Setting] =>
+        typeof entry[0] === 'string' && ['NOT_INSTALLED', 'OPEN', 'CLOSED'].includes(String(entry[1]))));
+    } catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('sas-sld-q2-settings-v1', JSON.stringify(q2Settings)); } catch { /* storage optional */ }
+  }, [q2Settings]);
+  const q2For = (bay: BayEquipment): Q2Setting => q2Settings[bay.id] ?? 'NOT_INSTALLED';
+
   const inspectedBay = bays.find(b => b.id === inspectedBayId);
   const inspectSldBay = (id: string) => {
     if (inspectedBayId === id) { setInspectedBayId(null); return; }
@@ -471,9 +518,9 @@ export const SldWorkspacePage: React.FC = () => {
         textPrimary: '#0F172A',
         textMuted: '#475569',
         cardBg: '#FFFFFF',
-        bus132Live: '#0284C7',
-        bus33Live: '#16A34A',
-        bus11Live: '#D97706',
+        bus132Live: '#ed3b42',
+        bus33Live: '#18bd48',
+        bus11Live: '#d3aa00',
         deadStroke: '#94A3B8',
       };
     }
@@ -485,22 +532,22 @@ export const SldWorkspacePage: React.FC = () => {
         textPrimary: '#FFFFFF',
         textMuted: '#64748B',
         cardBg: '#0D1829',
-        bus132Live: '#00E5FF',
-        bus33Live: '#00FF66',
-        bus11Live: '#FFC400',
+        bus132Live: '#ed3b42',
+        bus33Live: '#18bd48',
+        bus11Live: '#d3aa00',
         deadStroke: '#334155',
       };
     }
     return {
-      canvasBg: '#09101C',
+      canvasBg: '#071b33',
       gridMinor: '#101D30',
       gridMajor: '#162840',
       textPrimary: '#E8F3FF',
       textMuted: '#52667A',
       cardBg: '#101E33',
-      bus132Live: '#00D2FF',
-      bus33Live: '#00E676',
-      bus11Live: '#FFAB00',
+      bus132Live: '#ed3b42',
+      bus33Live: '#18bd48',
+      bus11Live: '#d3aa00',
       deadStroke: '#334458',
     };
   }, [sldTheme]);
@@ -551,73 +598,18 @@ export const SldWorkspacePage: React.FC = () => {
    * - CLOSED: Bright Crimson Red (#FF2A4B) inner cross & glowing red border
    * - OPEN: Bright Neon Green (#00E676) inner cross & glowing green border
    */
-  const renderCircuitBreakerBox = (bay: BayEquipment, cx: number, cy: number, size = 28) => {
-    const isClosed = bay.breakerState === 'CLOSED';
-    const stateColor = isClosed ? '#FF2A4B' : '#00E676';
-    const innerBg = isClosed ? '#2B0912' : '#05291A';
-    const half = size / 2;
-    const innerHalf = half - 3.5;
-    const crossHalf = innerHalf - 4.2;
-
+  // Compact electrical schematic CB symbol, matching the SCADA/HMI operator SLD.
+  const renderCircuitBreakerBox = (bay: BayEquipment, cx: number, cy: number, size = 18) => {
+    const closed = bay.breakerState === 'CLOSED';
+    const color = bay.protectionTripActive ? '#ff6871' : closed ? '#f04450' : '#20d775';
     return (
-      <g
-        className="cursor-pointer"
-        onClick={(e) => { e.stopPropagation(); inspectSldBay(bay.id); }}
-      >
-        <title>{`${bay.breakerId} (${bay.bayCode}): ${bay.breakerState} — Click to select bay`}</title>
-        {/* Outer soft state glow */}
-        <rect
-          x={cx - half - 2}
-          y={cy - half - 2}
-          width={size + 4}
-          height={size + 4}
-          rx={6.5}
-          fill="none"
-          stroke={stateColor}
-          strokeWidth={1.6}
-          opacity={0.45}
-        />
-        {/* Outer 3D metallic beveled housing */}
-        <rect
-          x={cx - half}
-          y={cy - half}
-          width={size}
-          height={size}
-          rx={5.5}
-          fill="url(#cbFrameGrad)"
-          stroke="#566B84"
-          strokeWidth={1.5}
-        />
-        {/* Inner recessed breaker chamber */}
-        <rect
-          x={cx - innerHalf}
-          y={cy - innerHalf}
-          width={innerHalf * 2}
-          height={innerHalf * 2}
-          rx={3.5}
-          fill={innerBg}
-          stroke={stateColor}
-          strokeWidth={1.8}
-        />
-        {/* Internal Cross [X] */}
-        <line
-          x1={cx - crossHalf}
-          y1={cy - crossHalf}
-          x2={cx + crossHalf}
-          y2={cy + crossHalf}
-          stroke={isClosed ? '#FF3B58' : '#E2FFF0'}
-          strokeWidth={2.2}
-          strokeLinecap="round"
-        />
-        <line
-          x1={cx + crossHalf}
-          y1={cy - crossHalf}
-          x2={cx - crossHalf}
-          y2={cy + crossHalf}
-          stroke={isClosed ? '#FF3B58' : '#E2FFF0'}
-          strokeWidth={2.2}
-          strokeLinecap="round"
-        />
+      <g className="cursor-pointer" onClick={(e) => { e.stopPropagation(); inspectSldBay(bay.id); }}>
+        <title>{`${bay.breakerId}: ${bay.breakerState} — click for Bay Details`}</title>
+        <rect x={cx - size / 2} y={cy - size / 2} width={size} height={size}
+          fill={closed ? '#f04450' : '#09263a'} stroke={color} strokeWidth={1.6} />
+        {!closed && <path d={`M${cx-size/2+3} ${cy-size/2+3} L${cx+size/2-3} ${cy+size/2-3} M${cx+size/2-3} ${cy-size/2+3} L${cx-size/2+3} ${cy+size/2-3}`}
+          stroke={color} strokeWidth={1.5} fill="none" />}
+        {bay.protectionTripActive && <circle cx={cx + size/2 + 4} cy={cy - size/2} r={3} fill="#ff6871" />}
       </g>
     );
   };
@@ -625,51 +617,31 @@ export const SldWorkspacePage: React.FC = () => {
   /**
    * Two-dot hinge Isolator / Disconnector + CT Ring + Ground Switch indicator
    */
+  // Q1 disconnector and Q8 earthing switch in the primary SCADA reference style.
+  // All symbols retain their original bay selection and dynamic store states.
   const renderIsolatorAndCt = (
-    bay: BayEquipment,
-    x: number,
-    yTop: number,
-    yBottom: number,
-    liveColor: string,
-    showCt = true
+    bay: BayEquipment, x: number, yTop: number, yBottom: number,
+    liveColor: string, showCt = true
   ) => {
-    const isIsoClosed = bay.busDisconnectorState === 'CLOSED';
-    const isEnergized = bay.energized && isIsoClosed && bay.breakerState === 'CLOSED';
-    const strokeCol = isEnergized ? liveColor : themeStyles.deadStroke;
-
+    const closed = bay.busDisconnectorState === 'CLOSED';
+    const earthClosed = bay.earthSwitchState === 'CLOSED';
+    const hasFixedEs = earthingFor(bay) === 'FIXED_ES';
+    const color = bay.energized ? liveColor : themeStyles.deadStroke;
     return (
-      <g
-        className="cursor-pointer"
-        onClick={(e) => { e.stopPropagation(); inspectSldBay(bay.id); }}
-      >
-        <title>{`Isolator ${bay.bayCode}-Q1: ${bay.busDisconnectorState} — Click to select bay`}</title>
-        {/* Two-dot hinge isolator */}
-        <circle cx={x} cy={yTop} r={2.4} fill={strokeCol} />
-        <circle cx={x} cy={yTop + 10} r={2.4} fill={strokeCol} />
-        <line
-          x1={x}
-          y1={yTop + 10}
-          x2={isIsoClosed ? x : x - 7}
-          y2={yTop + (isIsoClosed ? 0 : 2)}
-          stroke={isIsoClosed ? strokeCol : '#00E676'}
-          strokeWidth={2}
-          strokeLinecap="round"
-        />
-        {/* CT circular ring with ground/fault indicator */}
-        {showCt && (
-          <g>
-            <circle
-              cx={x}
-              cy={yBottom}
-              r={5.5}
-              fill="#091322"
-              stroke={strokeCol}
-              strokeWidth={1.7}
-            />
-            <circle cx={x} cy={yBottom - 1.5} r={1.3} fill={strokeCol} />
-            <circle cx={x} cy={yBottom + 1.8} r={1.3} fill={strokeCol} />
-          </g>
-        )}
+      <g className="cursor-pointer" onClick={(e) => { e.stopPropagation(); inspectSldBay(bay.id); }}>
+        <title>{`${bay.bayCode} Q1: ${bay.busDisconnectorState}; Earthing: ${earthingFor(bay)}${hasFixedEs ? `; Q8: ${bay.earthSwitchState}` : ''}`}</title>
+        <circle cx={x} cy={yTop} r={2} fill={color} />
+        <circle cx={x} cy={yTop + 9} r={2} fill={color} />
+        <line x1={x} y1={yTop + 9} x2={closed ? x : x + 9} y2={yTop + (closed ? 0 : 1)} stroke={color} strokeWidth={1.5} />
+        <text x={x + 10} y={yTop + 3} fill="#c6d8e9" fontSize="6.5">Q1</text>
+        {showCt && hasFixedEs && <>
+          <line x1={x} y1={yBottom - 5} x2={x + 11} y2={yBottom - 5} stroke="#c6d8e9" strokeWidth={1.1} />
+          <line x1={x + 11} y1={yBottom - 5} x2={x + (earthClosed ? 11 : 17)} y2={yBottom + (earthClosed ? 3 : -1)} stroke="#c6d8e9" strokeWidth={1.1} />
+          <line x1={x + 11} y1={yBottom + 4} x2={x + 23} y2={yBottom + 4} stroke="#c6d8e9" strokeWidth={1.1} />
+          <line x1={x + 14} y1={yBottom + 7} x2={x + 20} y2={yBottom + 7} stroke="#c6d8e9" strokeWidth={1.1} />
+          <line x1={x + 16} y1={yBottom + 10} x2={x + 18} y2={yBottom + 10} stroke="#c6d8e9" strokeWidth={1.1} />
+          <text x={x + 23} y={yBottom - 8} fill="#c6d8e9" fontSize="6.5">Q8</text>
+        </>}
       </g>
     );
   };
@@ -677,6 +649,35 @@ export const SldWorkspacePage: React.FC = () => {
   /**
    * Reusable Vertical Bay Renderer (Incomers, Transformer Bays, and Outgoing Feeders)
    */
+  // Direction indicators are based on the sign of the simulated bay MW reading.
+  // They are hidden when the path is open/dead or the reading is effectively zero.
+  // Positive MW is displayed from source to load (downward) for both incoming and outgoing vertical bays.
+  // Negative MW reverses the arrow. This is a training-model sign convention, not metered direction verification.
+  const renderPowerFlowArrow = (
+    x: number, y: number, downward: boolean, color: string, key?: string
+  ) => (
+    <g key={key} pointerEvents="none" aria-hidden="true">
+      <path
+        d={downward
+          ? `M ${x - 3.2} ${y - 3.5} L ${x} ${y + 2.5} L ${x + 3.2} ${y - 3.5}`
+          : `M ${x - 3.2} ${y + 3.5} L ${x} ${y - 2.5} L ${x + 3.2} ${y + 3.5}`}
+        fill="none" stroke={color} strokeWidth={1.8}
+        strokeLinecap="round" strokeLinejoin="round"
+      />
+    </g>
+  );
+
+  // Boxed bus section nameplates matching the operator's SCADA reference.
+  const renderBusNameplate = (x: number, y: number, width: number, label: string) => (
+    <g pointerEvents="none">
+      <rect x={x} y={y} width={width} height={28} rx={5}
+        fill={themeStyles.canvasBg} fillOpacity={0.98}
+        stroke={sldTheme === 'LIGHT_DRAWING' ? '#64748b' : '#9eb7d1'} strokeWidth={1} />
+      <text x={x + width / 2} y={y + 17.5} textAnchor="middle"
+        fill={themeStyles.textPrimary} fontSize={10} fontWeight="bold">{label}</text>
+    </g>
+  );
+
   const renderVerticalBay = (
     bay: BayEquipment,
     x: number,
@@ -707,14 +708,29 @@ export const SldWorkspacePage: React.FC = () => {
 
     const topY = Math.min(yBus, yEnd);
     const botY = Math.max(yBus, yEnd);
-    const cbY = direction === 'INTO_BUS_FROM_TOP' ? topY + 24 : topY + 30;
-    const ctY = cbY + 21;
-    const labelY = direction === 'INTO_BUS_FROM_TOP' ? topY + 4 : topY + 12;
+    // Keep the breaker close to its busbar; lengthen only the outgoing conductor.
+    const cbY = direction === 'INTO_BUS_FROM_TOP' ? topY + 30 : topY + 30;
+    const ctY = cbY + 23;
+    // Outgoing feeder IDs sit ABOVE the busbar, not on top of CB/CT symbols.
+    // Transformer-connected bay nameplates must not cover winding symbols or ratings.
+    const is132TransformerBay = /^132-T[12]$/.test(bay.bayCode);
+    const is33Incomer = /^33-INC[12]$/.test(bay.bayCode);
+    const is11Incomer = /^11-INC[12]$/.test(bay.bayCode);
+    const labelY = is132TransformerBay ? 175
+      : is33Incomer ? 280
+      : is11Incomer ? 464
+      : direction === 'INTO_BUS_FROM_TOP' ? topY - 11
+      : bay.bayCode.startsWith('33-TF') ? yBus - 9 : botY + 21;
+    // Put transformer-bay tags beside the vertical conductor, leaving the windings clear.
+    const labelX = (is132TransformerBay || is33Incomer || is11Incomer)
+      ? x + (x < 600 ? -65 : 65)
+      : x;
     const displayCode = options?.customLabel || bay.bayCode;
 
     return (
       <g
         key={bay.id}
+        data-sld-bay={bay.id}
         opacity={opacity}
         onClick={() => inspectSldBay(bay.id)}
         className="cursor-pointer"
@@ -737,75 +753,87 @@ export const SldWorkspacePage: React.FC = () => {
         {/* Upper Conductor Segment */}
         <line
           x1={x}
-          y1={direction === 'INTO_BUS_FROM_TOP' ? topY + 7 : yBus}
+          y1={direction === 'INTO_BUS_FROM_TOP' ? topY + 9 : yBus}
           x2={x}
-          y2={cbY - 13}
+          y2={cbY - 8}
           stroke={lineCol}
-          strokeWidth={2.6}
-          filter={glowFilter}
+          strokeWidth={1.8}
+          
         />
 
         {/* Lower Conductor Segment */}
         <line
           x1={x}
-          y1={cbY + 13}
+          y1={cbY + 8}
           x2={x}
           y2={botY}
           stroke={lineCol}
-          strokeWidth={2.6}
-          filter={glowFilter}
+          strokeWidth={1.8}
+          
         />
+
+        {/* Power-flow arrow at the line terminal. For 132 kV incoming bays,
+            retain the conductor between the terminal arrow and Q0 breaker. */}
+        {isEnergized && Math.abs(bay.activePowerMw) > 0.05 &&
+          renderPowerFlowArrow(
+            x,
+            direction === 'INTO_BUS_FROM_TOP' ? topY + 6 : botY - 8,
+            bay.activePowerMw > 0,
+            tierColor
+          )}
 
         {/* Isolator & CT Symbol */}
         {renderIsolatorAndCt(
           bay,
           x,
-          direction === 'INTO_BUS_FROM_TOP' ? cbY + 15 : yBus + 4,
+          direction === 'INTO_BUS_FROM_TOP' ? cbY + 11 : yBus + 5,
           ctY,
           tierColor,
           true
         )}
 
-        {/* Circuit Breaker [X] Box */}
-        {renderCircuitBreakerBox(bay, x, cbY, 27)}
+        {/* Optional Q2 line-side disconnector. This is a visual engineering
+            symbol, not a controllable or verified live apparatus state. */}
+        {q2For(bay) !== 'NOT_INSTALLED' && direction === 'DOWN_FROM_BUS' &&
+          (bay.bayType === 'OUTGOING_FEEDER' || bay.bayType === 'SPARE_FEEDER') && (() => {
+            const q2Y = cbY + 26;
+            const q2Closed = q2For(bay) === 'CLOSED';
+            return <g pointerEvents="none">
+              <circle cx={x} cy={q2Y - 4} r={1.6} fill="#dbeafe" />
+              <circle cx={x} cy={q2Y + 5} r={1.6} fill="#dbeafe" />
+              <line x1={x} y1={q2Y - 4} x2={q2Closed ? x : x + 9}
+                y2={q2Closed ? q2Y + 5 : q2Y + 1} stroke="#dbeafe" strokeWidth={1.5} />
+              <text x={x - 10} y={q2Y + 3} fontSize="7" textAnchor="end" fill="#dbeafe">Q2</text>
+            </g>;
+          })()}
 
-        {/* Bay Code Label with clean dark backing pill */}
+        {/* Circuit Breaker [X] Box */}
+        {renderCircuitBreakerBox(bay, x, cbY, 16)}
+        <text x={x + 11} y={cbY + 2} fontSize="6.5" fill="#c6d8e9">Q0</text>
+
+        {/* Reference-style outlined terminal nameplate; no label over breaker symbols. */}
         <rect
-          x={x - 21}
-          y={labelY - 9.5}
-          width={42}
-          height={12}
-          rx={2.5}
-          fill="#080E18"
-          fillOpacity={0.88}
+          x={labelX - 27}
+          y={labelY - 11}
+          width={54}
+          height={16}
+          rx={3}
+          fill={themeStyles.canvasBg}
+          fillOpacity={0.98}
+          stroke={sldTheme === 'LIGHT_DRAWING' ? '#64748b' : '#a7bacf'}
+          strokeWidth={0.85}
         />
         <text
-          x={x}
+          x={labelX}
           y={labelY}
           textAnchor="middle"
           fill="#F1F8FF"
-          fontSize="10"
+          fontSize="9.5"
           fontWeight="bold"
           fontFamily="Inter, ui-sans-serif, system-ui"
         >
           {displayCode}
         </text>
-
-        {/* Earthing Switch Q8 Symbol (especially visible on 11-SP1 when OPEN/EARTHED) */}
-        {(bay.earthSwitchState === 'CLOSED' || bay.id === 'BAY-11-SP1') && (
-          <g
-            onClick={(e) => {
-              e.stopPropagation();
-              inspectSldBay(bay.id);
-            }}
-          >
-            <line x1={x} y1={ctY + 8} x2={x + 14} y2={ctY + 8} stroke="#FFAB00" strokeWidth={1.6} />
-            <line x1={x + 14} y1={ctY + 8} x2={x + 14} y2={ctY + 13} stroke="#FFAB00" strokeWidth={1.6} />
-            <line x1={x + 9} y1={ctY + 13} x2={x + 19} y2={ctY + 13} stroke="#FFAB00" strokeWidth={1.6} />
-            <line x1={x + 11} y1={ctY + 16} x2={x + 17} y2={ctY + 16} stroke="#FFAB00" strokeWidth={1.6} />
-            <line x1={x + 13} y1={ctY + 19} x2={x + 15} y2={ctY + 19} stroke="#FFAB00" strokeWidth={1.6} />
-          </g>
-        )}
 
         {/* Cable Termination Arrow at Feeder Bottom */}
         {options?.showTelemetryCard && (
@@ -879,7 +907,7 @@ export const SldWorkspacePage: React.FC = () => {
     const isClosed = bay.breakerState === 'CLOSED';
 
     return (
-      <g key={bay.id}>
+      <g key={bay.id} data-sld-bay={bay.id}>
         {/* Horizontal Coupler Bus Links + Two-Dot Isolator Terminals */}
         <line
           x1={cx - 56}
@@ -887,7 +915,7 @@ export const SldWorkspacePage: React.FC = () => {
           x2={cx - 15}
           y2={cy}
           stroke={isClosed ? tierColor : '#3A506B'}
-          strokeWidth={3}
+          strokeWidth={1.8}
         />
         <line
           x1={cx + 15}
@@ -895,7 +923,7 @@ export const SldWorkspacePage: React.FC = () => {
           x2={cx + 56}
           y2={cy}
           stroke={isClosed ? tierColor : '#3A506B'}
-          strokeWidth={3}
+          strokeWidth={1.8}
         />
         <circle cx={cx - 32} cy={cy} r={2.3} fill={tierColor} />
         <circle cx={cx + 32} cy={cy} r={2.3} fill={tierColor} />
@@ -956,7 +984,7 @@ export const SldWorkspacePage: React.FC = () => {
         )}
 
         {/* Center Breaker [X] Box */}
-        {renderCircuitBreakerBox(bay, cx, cy, 28)}
+        {renderCircuitBreakerBox(bay, cx, cy, 18)}
 
         {/* Coupler Title Above */}
         <text
@@ -989,257 +1017,17 @@ export const SldWorkspacePage: React.FC = () => {
   /**
    * Interlocking Dual-Circle Power Transformer (TX-T1 & TX-T2) with Neon Core & Argon Telemetry Cards
    */
-  const renderMainPowerTransformer = (
-    tx: typeof txT1,
-    cx: number,
-    cy: number,
-    side: 'LEFT' | 'RIGHT'
-  ) => {
-    const hvColor = tx.energized ? '#00D2FF' : themeStyles.deadStroke;
-    const lvColor = tx.energized ? '#00E676' : themeStyles.deadStroke;
-    const gaugeColor = side === 'LEFT' ? '#00D2FF' : '#FFAB00';
-    const pct = Math.min(100, Math.max(0, tx.loadPercent));
-    const dashLen = (pct / 100) * 88;
-
+  // Compact dual-winding transformer: no decorative gauges obstructing the SLD.
+  const renderMainPowerTransformer = (tx: typeof txT1, cx: number, cy: number, side: 'LEFT' | 'RIGHT') => {
+    const live = tx.energized;
     return (
       <g key={tx.id}>
-        {/* Soft Radial Neon Aura Behind Transformer Coils */}
-        {tx.energized && (
-          <circle
-            cx={cx}
-            cy={cy}
-            r={34}
-            fill="url(#txCoreAura)"
-            pointerEvents="none"
-          />
-        )}
-
-        {/* Upper HV Winding Circle (132 kV Cyan) */}
-        <circle
-          cx={cx}
-          cy={cy - 9}
-          r={15.5}
-          fill="#091526"
-          stroke={hvColor}
-          strokeWidth={2.8}
-          filter={tx.energized ? 'url(#glowCyan)' : undefined}
-        />
-
-        {/* Lower LV Winding Circle (33 kV Electric Lime Green) */}
-        <circle
-          cx={cx}
-          cy={cy + 10}
-          r={15.5}
-          fill="#091526"
-          stroke={lvColor}
-          strokeWidth={2.8}
-          filter={tx.energized ? 'url(#glowGreen)' : undefined}
-        />
-
-        {/* Diagonal OLTC Tap-Changer Arrow */}
-        <line
-          x1={cx - 18}
-          y1={cy + 18}
-          x2={cx + 18}
-          y2={cy - 18}
-          stroke="#FFAB00"
-          strokeWidth={2}
-        />
-        <polygon
-          points={`${cx + 20},${cy - 20} ${cx + 13},${cy - 18} ${cx + 18},${cy - 13}`}
-          fill="#FFAB00"
-        />
-
-        {/* Glowing Lens-Flare Star at Winding Core Intersection */}
-        {tx.energized && (
-          <g pointerEvents="none">
-            <line x1={cx - 28} y1={cy} x2={cx + 28} y2={cy} stroke="#E0F7FF" strokeWidth={1.2} opacity={0.75} />
-            <circle cx={cx} cy={cy} r={3.5} fill="#FFFFFF" filter="url(#glowCyan)" />
-          </g>
-        )}
-
-        {/* Argon Glassmorphic Telemetry Card + Radial Gauge + Mini Spectrum/Trend Widgets */}
-        {side === 'LEFT' ? (
-          <g transform={`translate(48, ${cy - 34})`}>
-            {/* 1. Mini Spectrum Bar Widget */}
-            <rect x={0} y={0} width={68} height={66} rx={7} fill="#101E33" fillOpacity={0.9} stroke="#284666" strokeWidth={1.2} />
-            <circle cx={18} cy={18} r={9} fill="none" stroke="#00D2FF" strokeWidth={2.2} strokeDasharray="36 18" />
-            <rect x={34} y={10} width={24} height={3} rx={1.5} fill="#00D2FF" />
-            <rect x={34} y={16} width={18} height={3} rx={1.5} fill="#38BDF8" opacity={0.7} />
-            <rect x={34} y={22} width={21} height={3} rx={1.5} fill="#00E676" opacity={0.8} />
-            {[10, 15, 22, 18, 25, 19, 14, 24, 20, 16, 12].map((bh, idx) => (
-              <rect
-                key={idx}
-                x={8 + idx * 4.8}
-                y={58 - bh * 0.85}
-                width={3}
-                height={bh * 0.85}
-                rx={1}
-                fill={idx % 3 === 0 ? '#00D2FF' : '#38BDF8'}
-              />
-            ))}
-
-            {/* 2. Radial Load Gauge Widget */}
-            <g transform="translate(76, 0)">
-              <rect x={0} y={0} width={68} height={66} rx={7} fill="#101E33" fillOpacity={0.9} stroke="#284666" strokeWidth={1.2} />
-              <circle cx={34} cy={34} r={20} fill="none" stroke="#1E344E" strokeWidth={4.5} strokeDasharray="88 40" strokeDashoffset="-20" strokeLinecap="round" />
-              <circle
-                cx={34}
-                cy={34}
-                r={20}
-                fill="none"
-                stroke={gaugeColor}
-                strokeWidth={4.5}
-                strokeDasharray={`${dashLen} 120`}
-                strokeDashoffset="-20"
-                strokeLinecap="round"
-              />
-              <line x1={34} y1={34} x2={44} y2={24} stroke="#E2F2FF" strokeWidth={2} strokeLinecap="round" />
-              <circle cx={34} cy={34} r={3} fill="#00D2FF" />
-              <text x={34} y={58} textAnchor="middle" fill="#94B8D7" fontSize="8" fontFamily="monospace">
-                {tx.loadPercent.toFixed(1)}%
-              </text>
-            </g>
-
-            {/* 3. Main Transformer Telemetry Overlay Card */}
-            <g transform="translate(152, -2)">
-              <rect
-                x={0}
-                y={0}
-                width={158}
-                height={70}
-                rx={7}
-                fill="#101E33"
-                fillOpacity={0.94}
-                stroke="#3B628B"
-                strokeWidth={1.4}
-              />
-              <text x={10} y={16} fill="#FFFFFF" fontSize="10" fontWeight="bold">
-                {tx.id}: 132/33kV 50MVA
-              </text>
-              <text x={10} y={31} fill="#00D2FF" fontSize="9.5" fontWeight="bold" fontFamily="monospace">
-                Load: {tx.loadPercent.toFixed(1)}% ({tx.activePowerMw.toFixed(1)} MW)
-              </text>
-              <text x={10} y={45} fill="#00E676" fontSize="9" fontFamily="monospace">
-                OTI: {tx.oilTempC}°C  WTI: {tx.windingTempLvC}°C
-              </text>
-              <text x={10} y={59} fill="#FFAB00" fontSize="9.5" fontWeight="bold" fontFamily="monospace">
-                OLTC Tap: {tx.oltcTapPosition} ({tx.coolingStage})
-              </text>
-              {/* Interactive OLTC Raise/Lower Mini Buttons */}
-              <g
-                className="cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  stepTransformerOltc(tx.id, 'LOWER');
-                }}
-              >
-                <rect x={122} y={48} width={14} height={14} rx={3} fill="#0B192C" stroke="#386186" />
-                <text x={129} y={58} textAnchor="middle" fill="#E2F2FF" fontSize="10" fontWeight="bold">-</text>
-              </g>
-              <g
-                className="cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  stepTransformerOltc(tx.id, 'RAISE');
-                }}
-              >
-                <rect x={139} y={48} width={14} height={14} rx={3} fill="#0B192C" stroke="#386186" />
-                <text x={146} y={58} textAnchor="middle" fill="#E2F2FF" fontSize="10" fontWeight="bold">+</text>
-              </g>
-            </g>
-          </g>
-        ) : (
-          <g transform={`translate(${cx + 32}, ${cy - 34})`}>
-            {/* 1. Main Transformer Telemetry Overlay Card */}
-            <g transform="translate(0, -2)">
-              <rect
-                x={0}
-                y={0}
-                width={158}
-                height={70}
-                rx={7}
-                fill="#101E33"
-                fillOpacity={0.94}
-                stroke="#3B628B"
-                strokeWidth={1.4}
-              />
-              <text x={10} y={16} fill="#FFFFFF" fontSize="10" fontWeight="bold">
-                {tx.id}: 132/33kV 50MVA
-              </text>
-              <text x={10} y={31} fill="#00D2FF" fontSize="9.5" fontWeight="bold" fontFamily="monospace">
-                Load: {tx.loadPercent.toFixed(0)}% ({tx.activePowerMw.toFixed(1)} MW)
-              </text>
-              <text x={10} y={45} fill="#00E676" fontSize="9" fontFamily="monospace">
-                OTI: {tx.oilTempC}°C  WTI: {tx.windingTempLvC}°C
-              </text>
-              <text x={10} y={59} fill="#FFAB00" fontSize="9.5" fontWeight="bold" fontFamily="monospace">
-                OLTC Tap: {tx.oltcTapPosition} ({tx.coolingStage})
-              </text>
-              <g
-                className="cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  stepTransformerOltc(tx.id, 'LOWER');
-                }}
-              >
-                <rect x={122} y={48} width={14} height={14} rx={3} fill="#0B192C" stroke="#386186" />
-                <text x={129} y={58} textAnchor="middle" fill="#E2F2FF" fontSize="10" fontWeight="bold">-</text>
-              </g>
-              <g
-                className="cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  stepTransformerOltc(tx.id, 'RAISE');
-                }}
-              >
-                <rect x={139} y={48} width={14} height={14} rx={3} fill="#0B192C" stroke="#386186" />
-                <text x={146} y={58} textAnchor="middle" fill="#E2F2FF" fontSize="10" fontWeight="bold">+</text>
-              </g>
-            </g>
-
-            {/* 2. Radial Load Gauge Widget */}
-            <g transform="translate(166, 0)">
-              <rect x={0} y={0} width={68} height={66} rx={7} fill="#101E33" fillOpacity={0.9} stroke="#284666" strokeWidth={1.2} />
-              <circle cx={34} cy={34} r={20} fill="none" stroke="#1E344E" strokeWidth={4.5} strokeDasharray="88 40" strokeDashoffset="-20" strokeLinecap="round" />
-              <circle
-                cx={34}
-                cy={34}
-                r={20}
-                fill="none"
-                stroke={gaugeColor}
-                strokeWidth={4.5}
-                strokeDasharray={`${dashLen} 120`}
-                strokeDashoffset="-20"
-                strokeLinecap="round"
-              />
-              <line x1={34} y1={34} x2={43} y2={25} stroke="#FDE047" strokeWidth={2} strokeLinecap="round" />
-              <circle cx={34} cy={34} r={3} fill="#FFAB00" />
-              <text x={34} y={58} textAnchor="middle" fill="#FDE047" fontSize="8" fontFamily="monospace">
-                {tx.loadPercent.toFixed(1)}%
-              </text>
-            </g>
-
-            {/* 3. Mini Area-Trend Widget */}
-            <g transform="translate(242, 0)">
-              <rect x={0} y={0} width={68} height={66} rx={7} fill="#101E33" fillOpacity={0.9} stroke="#284666" strokeWidth={1.2} />
-              <circle cx={18} cy={18} r={9} fill="none" stroke="#FFAB00" strokeWidth={2.2} strokeDasharray="34 18" />
-              <rect x={34} y={10} width={24} height={3} rx={1.5} fill="#FFAB00" />
-              <rect x={34} y={16} width={18} height={3} rx={1.5} fill="#FDE047" opacity={0.7} />
-              <rect x={34} y={22} width={21} height={3} rx={1.5} fill="#00D2FF" opacity={0.8} />
-              <path
-                d="M 8 54 L 16 48 L 24 50 L 32 42 L 40 45 L 48 39 L 58 43 L 58 58 L 8 58 Z"
-                fill="rgba(255, 171, 0, 0.25)"
-              />
-              <path
-                d="M 8 54 L 16 48 L 24 50 L 32 42 L 40 45 L 48 39 L 58 43"
-                fill="none"
-                stroke="#FFAB00"
-                strokeWidth={1.8}
-              />
-            </g>
-          </g>
-        )}
+        {live && Math.abs(tx.activePowerMw) > 0.05 &&
+          renderPowerFlowArrow(cx, cy + 43, tx.activePowerMw > 0, '#18bd48')}
+        <circle cx={cx - 8} cy={cy - 7} r={16} fill="none" stroke={live ? '#e2b900' : themeStyles.deadStroke} strokeWidth={2.3} />
+        <circle cx={cx + 8} cy={cy + 7} r={16} fill="none" stroke={live ? '#18bd48' : themeStyles.deadStroke} strokeWidth={2.3} />
+        <text x={cx + (side === 'LEFT' ? 30 : -30)} y={cy - 10} textAnchor={side === 'LEFT' ? 'start' : 'end'} fill="#e9f3ff" fontSize="10" fontWeight="bold">{tx.id} · 132/33 kV</text>
+        <text x={cx + (side === 'LEFT' ? 30 : -30)} y={cy + 4} textAnchor={side === 'LEFT' ? 'start' : 'end'} fill="#b8cde2" fontSize="9">50 MVA · {tx.loadPercent.toFixed(1)}% · {tx.activePowerMw.toFixed(1)} MW</text>
       </g>
     );
   };
@@ -1265,6 +1053,32 @@ export const SldWorkspacePage: React.FC = () => {
           : ''
       }`}
     >
+      {bayManagerOpen && createPortal(
+        (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-[#010713]/85 p-3 backdrop-blur-[5px] sm:p-6"
+          role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setBayManagerOpen(false); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="bay-manager-dialog-title"
+            className="flex max-h-[88vh] w-full max-w-[970px] flex-col overflow-hidden rounded-2xl border-2 border-[#00E5FF] bg-[#031423] shadow-[0_0_8px_#00E5FF,0_0_25px_rgba(0,229,255,0.65)]">
+            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-cyan-900/70 bg-[#071D32] px-5 py-3">
+              <div className="flex items-center gap-3">
+                <Settings2 className="h-7 w-7 rounded-full text-[#00E5FF]" />
+                <div><h2 id="bay-manager-dialog-title" className="text-lg font-extrabold text-white">Bay Configuration Manager</h2>
+                  <p className="text-xs text-slate-400">Create, edit, delete and manage substation bays in the current workspace.</p></div>
+              </div>
+              <span className="hidden rounded-md border border-[#16799b] px-3 py-1.5 text-xs font-bold text-[#44e9ff] sm:inline-flex"><Layers className="mr-1.5 h-4 w-4"/> Workspace: 132/33/11 kV Main</span>
+              <button type="button" aria-label="Close Bay Configuration Manager" onClick={() => setBayManagerOpen(false)}
+                className="rounded-lg border border-cyan-800 p-2 text-slate-200 hover:bg-[#12334C] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"><X className="h-5 w-5" /></button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4"><BayConfigurationManager /></div>
+            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-cyan-900/70 bg-[#071D32] px-5 py-3">
+              <span className="text-[11px] text-slate-400">Training simulation only — configuration changes may not appear in fixed-layout SLD/3D views</span>
+              <button type="button" onClick={() => setBayManagerOpen(false)} className="rounded-lg border border-cyan-700 px-4 py-1.5 text-sm text-slate-100 hover:bg-[#12334C]">Close</button>
+            </footer>
+          </section>
+        </div>
+      )
+        , document.body
+      )}
       {show3DModel && createPortal(
         <Substation3DScene
           initialFullscreen
@@ -1346,6 +1160,11 @@ export const SldWorkspacePage: React.FC = () => {
               </button>
             ))}
           </div>
+
+          <button type="button" onClick={() => setBayManagerOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg border-2 border-[#00E5FF] bg-[#05263c] px-3 py-1.5 text-xs font-bold text-white shadow-[0_0_12px_rgba(0,229,255,0.35)] transition hover:bg-[#07506A]">
+            <Layers className="h-4 w-4" /> Bay Configuration Manager
+          </button>
 
           {/* Configurable Bay Engineering Editor Button */}
           <button
@@ -1758,8 +1577,8 @@ export const SldWorkspacePage: React.FC = () => {
             {/* Crimson Red ALERTS Pill */}
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#330C17] border border-[#FF2A4B]/70 text-[#FF4D62] font-bold">
               <AlertTriangle className="w-3.5 h-3.5" />
-              <span>ALERTS { Math.max(1, criticalAlarmCount) }</span>
-              <span className="px-1 rounded bg-[#FF2A4B]/25 text-[10px]">-1</span>
+              <span>ALERTS {criticalAlarmCount}</span>
+
             </div>
 
             {/* COMPACT VIEW / FULLSCREEN Toggle Button */}
@@ -1790,7 +1609,7 @@ export const SldWorkspacePage: React.FC = () => {
           }`}
         >
           <svg
-            viewBox="0 0 1200 646"
+            viewBox="0 0 1200 690"
             className="block w-full min-w-0 h-auto select-none"
             style={{
               transform: `scale(${zoom}) translate(${panX}px, ${panY}px)`,
@@ -1856,19 +1675,25 @@ export const SldWorkspacePage: React.FC = () => {
             </defs>
 
             {/* Millimeter Grid Background */}
-            <rect width="1200" height="646" fill="url(#sldMajorGrid)" />
+            <rect width="1200" height="690" fill={themeStyles.canvasBg} />
 
             {/* ==================== TIER 1: 132 kV TRANSMISSION SWITCHYARD ==================== */}
             <text
-              x="28"
-              y="26"
-              fill="#00D2FF"
-              fontSize="12.5"
+              x="600"
+              y="24"
+              textAnchor="middle"
+              fill="#f1f8ff"
+              fontSize="15"
               fontWeight="bold"
               letterSpacing="0.04em"
             >
-              132 kV TRANSMISSION SWITCHYARD (DOUBLE-SECTION BUSBAR WITH BUS COUPLER CB-132)
+              132 / 33 / 11 kV SUBSTATION — SINGLE LINE DIAGRAM
             </text>
+
+            <g pointerEvents="none" aria-label="Power-flow arrow legend">
+              {renderPowerFlowArrow(1060, 22, true, '#d9f8ff')}
+              <text x="1072" y="25" fontSize="9" fill="#c7d9e8">MW FLOW</text>
+            </g>
 
             {/* Incoming Line Bays: 132-L1 (X=215) & 132-L2 (X=985) */}
             {bays.find((b) => b.id === 'BAY-132-L1') &&
@@ -1876,7 +1701,7 @@ export const SldWorkspacePage: React.FC = () => {
                 bays.find((b) => b.id === 'BAY-132-L1')!,
                 215,
                 116,
-                28,
+                45,
                 'INTO_BUS_FROM_TOP',
                 themeStyles.bus132Live
               )}
@@ -1885,65 +1710,36 @@ export const SldWorkspacePage: React.FC = () => {
                 bays.find((b) => b.id === 'BAY-132-L2')!,
                 985,
                 116,
-                28,
+                45,
                 'INTO_BUS_FROM_TOP',
                 themeStyles.bus132Live
               )}
 
             {/* 132 kV BUS SECTION A (Cyan #00D2FF, 4.5px stroke + glow) */}
-            {bus132A.energized && (
-              <line
-                x1="48"
-                y1="116"
-                x2="544"
-                y2="116"
-                stroke="#00D2FF"
-                strokeWidth="9"
-                opacity="0.22"
-              />
-            )}
             <line
               x1="48"
               y1="116"
               x2="544"
               y2="116"
               stroke={bus132A.energized ? themeStyles.bus132Live : themeStyles.deadStroke}
-              strokeWidth="4.5"
+              strokeWidth="1.8"
               strokeLinecap="round"
-              filter={bus132A.energized ? 'url(#glowCyan)' : undefined}
             />
-            <text x="82" y="106" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-              132 kV BUS SECTION A ({bus132A.voltageKvLive.toFixed(1)} kV • {bus132A.frequencyHz.toFixed(2)} Hz)
-            </text>
+            {renderBusNameplate(48, 126, 245, `132 kV BUS SECTION A (${bus132A.voltageKvLive.toFixed(1)} kV / ${bus132A.frequencyHz.toFixed(2)} Hz)`)}
 
             {/* 132 kV BUS SECTION B (Cyan #00D2FF, 4.5px stroke + glow) */}
-            {bus132B.energized && (
-              <line
-                x1="656"
-                y1="116"
-                x2="1152"
-                y2="116"
-                stroke="#00D2FF"
-                strokeWidth="9"
-                opacity="0.22"
-              />
-            )}
             <line
               x1="656"
               y1="116"
               x2="1152"
               y2="116"
               stroke={bus132B.energized ? themeStyles.bus132Live : themeStyles.deadStroke}
-              strokeWidth="4.5"
+              strokeWidth="1.8"
               strokeLinecap="round"
-              filter={bus132B.energized ? 'url(#glowCyan)' : undefined}
             />
-            <text x="825" y="106" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-              132 kV BUS SECTION B ({bus132B.voltageKvLive.toFixed(1)} kV • {bus132B.frequencyHz.toFixed(2)} Hz)
-            </text>
 
             {/* Center Bus Coupler CB-132 at (600, 148) with [OPEN | CLOSED] segmented pills */}
-            {renderBusCoupler('BAY-132-BC', 600, 116, themeStyles.bus132Live, true)}
+            {renderBusCoupler('BAY-132-BC', 600, 116, themeStyles.bus132Live, false)}
 
             {/* 132 kV Transformer Incomer Bays: 132-T1 (X=382) & 132-T2 (X=818) */}
             {bays.find((b) => b.id === 'BAY-132-T1') &&
@@ -1991,88 +1787,61 @@ export const SldWorkspacePage: React.FC = () => {
               )}
 
             {/* 33 kV BUS SECTION A (Electric Lime Green #00E676, 4.5px stroke + glow) */}
-            {bus33A.energized && (
-              <line
-                x1="42"
-                y1="314"
-                x2="544"
-                y2="314"
-                stroke="#00E676"
-                strokeWidth="9"
-                opacity="0.20"
-              />
-            )}
             <line
               x1="42"
               y1="314"
               x2="544"
               y2="314"
               stroke={bus33A.energized ? themeStyles.bus33Live : themeStyles.deadStroke}
-              strokeWidth="4.5"
+              strokeWidth="1.8"
               strokeLinecap="round"
-              filter={bus33A.energized ? 'url(#glowGreen)' : undefined}
             />
-            <text x="48" y="304" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-              33 kV BUS SECTION A ({bus33A.voltageKvLive.toFixed(2)} kV)
-            </text>
+            {renderBusNameplate(48, 277, 210, `33 kV BUS SECTION A (${bus33A.voltageKvLive.toFixed(2)} kV)`)}
 
             {/* 33 kV BUS SECTION B (Electric Lime Green #00E676, 4.5px stroke + glow) */}
-            {bus33B.energized && (
-              <line
-                x1="656"
-                y1="314"
-                x2="1158"
-                y2="314"
-                stroke="#00E676"
-                strokeWidth="9"
-                opacity="0.20"
-              />
-            )}
             <line
               x1="656"
               y1="314"
               x2="1158"
               y2="314"
               stroke={bus33B.energized ? themeStyles.bus33Live : themeStyles.deadStroke}
-              strokeWidth="4.5"
+              strokeWidth="1.8"
               strokeLinecap="round"
-              filter={bus33B.energized ? 'url(#glowGreen)' : undefined}
             />
-            <text x="892" y="304" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-              33 kV BUS SECTION B ({bus33B.voltageKvLive.toFixed(2)} kV)
-            </text>
 
             {/* Center Bus Coupler CB-33 at (600, 372) */}
             {renderBusCoupler('BAY-33-BC', 600, 314, themeStyles.bus33Live, false)}
 
             {/* 33 kV Bus A Outgoing Feeders (33-F01, 33-F02, 33-F03, 33-TF1) */}
             {bay33BusA.map((bay, idx) => {
-              const span = 355 / Math.max(1, bay33BusA.length - 1);
-              const bx = 76 + idx * span;
-              return renderVerticalBay(bay, bx, 314, 386, 'DOWN_FROM_BUS', themeStyles.bus33Live, {
-                showTelemetryCard: true,
+              const regular = bay33BusA.filter(b => b.bayCode !== '33-TF1');
+              const bx = bay.bayCode === '33-TF1' ? 431 : 75 + regular.indexOf(bay) * (290 / Math.max(1, regular.length - 1));
+              return renderVerticalBay(bay, bx, 314, bay.bayCode === '33-TF1' || bay.bayCode === '33-TF2' ? 400 : 370, 'DOWN_FROM_BUS', themeStyles.bus33Live, {
+                showTelemetryCard: false,
               });
             })}
 
             {/* 33 kV Bus B Outgoing Feeders (33-F04, 33-F05, 33-F06, 33-TF2) */}
             {bay33BusB.map((bay, idx) => {
-              const span = 365 / Math.max(1, bay33BusB.length - 1);
-              const bx = 685 + idx * span;
-              return renderVerticalBay(bay, bx, 314, 386, 'DOWN_FROM_BUS', themeStyles.bus33Live, {
-                showTelemetryCard: true,
+              const regular = bay33BusB.filter(b => b.bayCode !== '33-TF2');
+              const bx = bay.bayCode === '33-TF2' ? 769 : 865 + regular.indexOf(bay) * (260 / Math.max(1, regular.length - 1));
+              return renderVerticalBay(bay, bx, 314, bay.bayCode === '33-TF1' || bay.bayCode === '33-TF2' ? 400 : 370, 'DOWN_FROM_BUS', themeStyles.bus33Live, {
+                showTelemetryCard: false,
               });
             })}
 
             {/* ==================== TIER 3: 33/11 kV STEP-DOWN TRANSFORMERS & 11 kV SWITCHGEAR BOARD ==================== */}
             {[
-              { tx: txDt1, x: 431, y: 448, incId: 'BAY-11-INC1', dashed: true },
-              { tx: txDt2, x: 769, y: 448, incId: 'BAY-11-INC2', dashed: false },
+              { tx: txDt1, x: 431, y: 427, incId: 'BAY-11-INC1', dashed: true },
+              { tx: txDt2, x: 769, y: 427, incId: 'BAY-11-INC2', dashed: false },
             ].map(({ tx, x, y, incId, dashed }) => {
               const hvCol = tx.energized ? themeStyles.bus33Live : themeStyles.deadStroke;
               const lvCol = tx.energized ? themeStyles.bus11Live : themeStyles.deadStroke;
               const incBay = bays.find((b) => b.id === incId);
               return (
                 <g key={tx.id}>
+                  {/* Continuous HV connection from 33 kV transformer feeder to HV winding. */}
+                  <line x1={x} y1={400} x2={x} y2={y - 18.5} stroke={hvCol} strokeWidth={1.8} />
                   {/* Interlocking Dual-Circle 33/11 kV Step-Down Transformer */}
                   <circle
                     cx={x}
@@ -2093,15 +1862,17 @@ export const SldWorkspacePage: React.FC = () => {
                     filter={tx.energized ? 'url(#glowAmber)' : undefined}
                   />
                   <text
-                    x={x - 18}
-                    y={y + 4}
-                    textAnchor="end"
+                    x={x + (x < 600 ? -24 : 24)}
+                    y={y - 13}
+                    textAnchor={x < 600 ? 'end' : 'start'}
                     fill="#E8F3FF"
-                    fontSize="10"
+                    fontSize="9"
                     fontWeight="bold"
                   >
-                    {tx.id} (33/11kV 16MVA - {tx.activePowerMw.toFixed(1)}MW)
+                    {tx.id} · 33/11 kV · 16 MVA
                   </text>
+                  {tx.energized && Math.abs(tx.activePowerMw) > 0.05 &&
+                    renderPowerFlowArrow(x, y + 30, tx.activePowerMw > 0, themeStyles.bus11Live)}
                   {incBay &&
                     renderVerticalBay(
                       incBay,
@@ -2117,56 +1888,27 @@ export const SldWorkspacePage: React.FC = () => {
             })}
 
             {/* 11 kV SWITCHGEAR BUS A (Warm Amber #FFAB00, 4.5px stroke + glow) */}
-            {bus11A.energized && (
-              <line
-                x1="42"
-                y1="532"
-                x2="544"
-                y2="532"
-                stroke="#FFAB00"
-                strokeWidth="9"
-                opacity="0.20"
-              />
-            )}
             <line
               x1="42"
               y1="532"
               x2="544"
               y2="532"
               stroke={bus11A.energized ? themeStyles.bus11Live : themeStyles.deadStroke}
-              strokeWidth="4.5"
+              strokeWidth="1.8"
               strokeLinecap="round"
-              filter={bus11A.energized ? 'url(#glowAmber)' : undefined}
             />
-            <text x="48" y="522" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-              11 kV SWITCHGEAR BUS A ({bus11A.voltageKvLive.toFixed(2)} kV)
-            </text>
+            {renderBusNameplate(48, 492, 250, `11 kV SWITCHGEAR BUS A (${bus11A.voltageKvLive.toFixed(2)} kV)`)}
 
             {/* 11 kV SWITCHGEAR BUS B (Warm Amber #FFAB00, 4.5px stroke + glow) */}
-            {bus11B.energized && (
-              <line
-                x1="656"
-                y1="532"
-                x2="1158"
-                y2="532"
-                stroke="#FFAB00"
-                strokeWidth="9"
-                opacity="0.20"
-              />
-            )}
             <line
               x1="656"
               y1="532"
               x2="1158"
               y2="532"
               stroke={bus11B.energized ? themeStyles.bus11Live : themeStyles.deadStroke}
-              strokeWidth="4.5"
+              strokeWidth="1.8"
               strokeLinecap="round"
-              filter={bus11B.energized ? 'url(#glowAmber)' : undefined}
             />
-            <text x="890" y="522" fill="#F1F8FF" fontSize="11" fontWeight="bold">
-              11 kV SWITCHGEAR BUS B ({bus11B.voltageKvLive.toFixed(2)} kV)
-            </text>
 
             {/* Center Bus Coupler CB-11 at (600, 642) */}
             {renderBusCoupler('BAY-11-BC', 600, 532, themeStyles.bus11Live, false)}
@@ -2175,8 +1917,8 @@ export const SldWorkspacePage: React.FC = () => {
             {bay11BusA.map((bay, idx) => {
               const span = 385 / Math.max(1, bay11BusA.length - 1);
               const bx = 66 + idx * span;
-              return renderVerticalBay(bay, bx, 532, 598, 'DOWN_FROM_BUS', themeStyles.bus11Live, {
-                showTelemetryCard: true,
+              return renderVerticalBay(bay, bx, 532, 604, 'DOWN_FROM_BUS', themeStyles.bus11Live, {
+                showTelemetryCard: false,
               });
             })}
 
@@ -2184,8 +1926,8 @@ export const SldWorkspacePage: React.FC = () => {
             {bay11BusB.map((bay, idx) => {
               const span = 365 / Math.max(1, bay11BusB.length - 1);
               const bx = 685 + idx * span;
-              return renderVerticalBay(bay, bx, 532, 598, 'DOWN_FROM_BUS', themeStyles.bus11Live, {
-                showTelemetryCard: true,
+              return renderVerticalBay(bay, bx, 532, 604, 'DOWN_FROM_BUS', themeStyles.bus11Live, {
+                showTelemetryCard: false,
               });
             })}
           </svg>
@@ -2352,7 +2094,7 @@ export const SldWorkspacePage: React.FC = () => {
       })()}
       </div>
         </main>
-        <aside className="min-w-0 rounded-xl border border-cyan-500/70 bg-[#061a30] p-3 shadow-[0_0_14px_rgba(0,207,255,.12)] xl:sticky xl:top-28" aria-label="Device details inspector">
+        <aside className="min-w-0 rounded-xl border border-cyan-500/70 bg-[#061a30] p-3 shadow-[0_0_14px_rgba(0,207,255,.12)] xl:sticky xl:top-28" aria-label="Device details inspector" data-sld-device-details="true">
           <div className="mb-3 flex items-center justify-between border-b border-cyan-800 pb-2"><h3 className="font-bold text-cyan-100">Device Details</h3>{inspectedBay && <button type="button" onClick={() => setInspectedBayId(null)} aria-label="Clear selected breaker"><X size={17}/></button>}</div>
         {inspectedBay ? (
           <aside className="space-y-2 text-xs text-slate-100" aria-label="Selected breaker device details">
@@ -2366,8 +2108,32 @@ export const SldWorkspacePage: React.FC = () => {
             <div className="rounded-lg border border-cyan-800 bg-[#071728] p-3 space-y-2 max-h-[65vh] overflow-y-auto">
               {deviceDetailsTab === 'Overview' && <>
                 <h4 className="font-bold text-cyan-300">Equipment Status</h4>
-                {([['Circuit Breaker (Q0)',inspectedBay.breakerState],['Bus Disconnector (Q1)',inspectedBay.busDisconnectorState],['Earth Switch (Q8)',inspectedBay.earthSwitchState]] as const).map(([label,value]) => <div key={label} className="flex justify-between gap-2 border-b border-slate-700 py-1"><span>{label}</span><strong className={value === 'CLOSED' ? 'text-green-300' : 'text-amber-300'}>{value}</strong></div>)}
-                <div className="flex justify-between"><span>Line Disconnector (Q2)</span><span className="text-slate-400">NOT AVAILABLE</span></div>
+                {([['Circuit Breaker (Q0)',inspectedBay.breakerState],['Bus Disconnector (Q1)',inspectedBay.busDisconnectorState],['Earth Switch (Q8)',earthingFor(inspectedBay) === 'FIXED_ES' ? inspectedBay.earthSwitchState : 'NOT INSTALLED / UNVERIFIED']] as const).map(([label,value]) => <div key={label} className="flex justify-between gap-2 border-b border-slate-700 py-1"><span>{label}</span><strong className={value === 'CLOSED' ? 'text-green-300' : 'text-amber-300'}>{value}</strong></div>)}
+                <div className="mt-3 rounded border border-cyan-800 bg-[#0b2033] p-2 space-y-2">
+                  <label htmlFor="sld-earthing-type" className="block font-semibold text-cyan-200">Earthing Arrangement (Training Configuration)</label>
+                  <select id="sld-earthing-type" value={earthingFor(inspectedBay)}
+                    onChange={e => setEarthingFor(inspectedBay.id, e.target.value as EarthingArrangement)}
+                    className="w-full rounded border border-cyan-800 bg-[#061727] p-2 text-xs text-white">
+                    <option value="NOT_CONFIGURED">Not Configured / Unverified</option>
+                    <option value="FIXED_ES">Fixed Earthing Switch (Q8)</option>
+                    <option value="EARTHING_TRUCK">Earthing Truck</option>
+                    <option value="PORTABLE_EARTHING">Portable Earthing</option>
+                  </select>
+                  <p className="text-[10px] text-slate-400">Q8 appears on the SLD only when Fixed ES is selected. This is visual training metadata, not a validated equipment design or switching permission.</p>
+                  {earthingFor(inspectedBay) !== 'FIXED_ES' && inspectedBay.earthSwitchState === 'CLOSED' && <p className="text-amber-300">Warning: simulated ES is CLOSED but this bay is not configured with Fixed ES in this view. Verify the actual bay configuration.</p>}
+                </div>
+                <div className="mt-3 rounded border border-cyan-800 bg-[#0b2033] p-2 space-y-2">
+                  <label htmlFor="sld-q2-setting" className="block font-semibold text-cyan-200">Line Disconnector (Q2) — Engineering Layout</label>
+                  <select id="sld-q2-setting" value={q2For(inspectedBay)}
+                    onChange={e => setQ2Settings(prev => ({ ...prev, [inspectedBay.id]: e.target.value as Q2Setting }))}
+                    className="w-full rounded border border-cyan-800 bg-[#061727] p-2 text-xs text-white">
+                    <option value="NOT_INSTALLED">Not Installed / Unverified</option>
+                    <option value="OPEN">Installed — OPEN (visual only)</option>
+                    <option value="CLOSED">Installed — CLOSED (visual only)</option>
+                  </select>
+                  <div className="flex justify-between gap-2"><span>Line Disconnector (Q2)</span><strong className={q2For(inspectedBay) === 'CLOSED' ? 'text-green-300' : 'text-amber-300'}>{q2For(inspectedBay) === 'NOT_INSTALLED' ? 'NOT INSTALLED / UNVERIFIED' : `${q2For(inspectedBay)} (UNVERIFIED)`}</strong></div>
+                  <p className="text-[10px] text-amber-300">Q2 is drawing-only training metadata. It does not provide real telemetry, switching commands, or verified interlocks. Do not infer an electrical switching permission from this selection.</p>
+                </div>
                 <div>Control Mode: {inspectedBay.localRemote}</div>
                 <div>Quality: {inspectedBay.quality}</div>
                 <div>Interlock: <strong className={inspectedBay.interlockPermissive ? 'text-green-300' : 'text-amber-300'}>{inspectedBay.interlockPermissive ? 'PERMISSIVE' : 'BLOCKED'}</strong></div>
@@ -2391,7 +2157,7 @@ export const SldWorkspacePage: React.FC = () => {
               {deviceDetailsTab === 'IEC 61850' && <>
                 <h4 className="font-bold text-cyan-300">IEC 61850 — Simulated Signals</h4>
                 <div>IED: <strong>{inspectedBay.iedId}</strong></div>
-                {([['XCBR1.Pos.stVal',inspectedBay.breakerState],['XSWI1.Pos.stVal',inspectedBay.busDisconnectorState],['XSWI (Earth Switch)',inspectedBay.earthSwitchState],['PTRC1.Tr.general',inspectedBay.protectionTripActive ? 'TRUE' : 'FALSE'],['MMXU1.A (aggregate)',`${inspectedBay.currentA.toFixed(1)} A`],['MMXU1.PPV.phsAB',`${inspectedBay.voltageAbKv.toFixed(2)} kV`]] as const).map(([label,value]) => <div key={label} className="flex justify-between gap-2 border-b border-slate-700 py-1"><span className="break-all">{label}</span><strong className="text-right">{value}</strong></div>)}
+                {([['XCBR1.Pos.stVal',inspectedBay.breakerState],['XSWI1.Pos.stVal',inspectedBay.busDisconnectorState],['XSWI (Earth Switch)',earthingFor(inspectedBay) === 'FIXED_ES' ? inspectedBay.earthSwitchState : 'NOT CONFIGURED'],['PTRC1.Tr.general',inspectedBay.protectionTripActive ? 'TRUE' : 'FALSE'],['MMXU1.A (aggregate)',`${inspectedBay.currentA.toFixed(1)} A`],['MMXU1.PPV.phsAB',`${inspectedBay.voltageAbKv.toFixed(2)} kV`]] as const).map(([label,value]) => <div key={label} className="flex justify-between gap-2 border-b border-slate-700 py-1"><span className="break-all">{label}</span><strong className="text-right">{value}</strong></div>)}
                 <p>Quality: {inspectedBay.quality}</p>
                 <p className="text-slate-400">Logical-node names are illustrative mappings of store fields, not verified CID/SCD object references. Individual timestamps are unavailable here.</p>
               </>}
@@ -2402,6 +2168,9 @@ export const SldWorkspacePage: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2 pt-2">
                   <button type="button" disabled={inspectedBay.localRemote !== 'REMOTE' || !inspectedBay.interlockPermissive || inspectedBay.protectionTripActive} onClick={() => commandBreaker(inspectedBay.id, 'CLOSED')} className="rounded border border-green-500 bg-green-950 px-2 py-2 font-bold text-green-300 disabled:opacity-40">CB CLOSE</button>
                   <button type="button" disabled={inspectedBay.localRemote !== 'REMOTE'} onClick={() => commandBreaker(inspectedBay.id, 'OPEN')} className="rounded border border-red-500 bg-red-950 px-2 py-2 font-bold text-red-300 disabled:opacity-40">CB OPEN</button>
+                </div>
+                <div className="rounded border border-amber-800 bg-amber-950/20 p-2 text-amber-200">
+                  Earthing: {earthingFor(inspectedBay).replaceAll('_', ' ')}. {earthingFor(inspectedBay) === 'FIXED_ES' ? 'Fixed ES operation must be checked against the configured isolation, absence-of-voltage, backfeed and interlock conditions.' : 'No fixed ES command is offered here. Earthing truck/portable earthing is a procedural maintenance activity, not a remote SCADA command.'}
                 </div>
                 <p className="text-slate-400">Existing store command/interlock logic is preserved. For DS/ES switching and advanced SBO, use the existing Engineering/Bay Control interface; no unverified control actions were added.</p>
                 <button type="button" onClick={() => setWorkspaceTab('ENGINEERING')} className="w-full rounded border border-cyan-700 px-2 py-2 text-cyan-200">Open Engineering Controls</button>

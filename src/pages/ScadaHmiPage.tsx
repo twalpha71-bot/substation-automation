@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
-import { BayConfigurationManager } from './BayConfigurationManager';
 import { getBayProtocolBreakdown } from '../data/protocolRegistry';
 import { AlarmRecord, BayEquipment, SoeRecord } from '../types/substation';
 import {
@@ -87,14 +86,6 @@ export const ScadaHmiPage: React.FC = () => {
     acknowledgeAllAlarms,
     clearClearedAlarms,
   } = useSubstationStore();
-
-  const [bayManagerOpen, setBayManagerOpen] = useState(false);
-  useEffect(() => {
-    if (!bayManagerOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setBayManagerOpen(false); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [bayManagerOpen]);
 
   // Operator View & Collapsible Workstation Panels State
   const [primaryView, setPrimaryView] = useState<ScadaPrimaryView>('SLD');
@@ -1067,7 +1058,12 @@ export const ScadaHmiPage: React.FC = () => {
       <text x={x+13} y={cbY+3} fontSize="8" fill="#d7e7f6">Q0</text>
       <text x={x+24} y={earthY+5} fontSize="8" fill="#d7e7f6">Q8</text>
       <text x={x} y={direction==='up'?top-9:bottom+13} fontSize="10" fill="#f1f7ff" fontWeight="600" textAnchor="middle">{bay.bayCode}</text>
-      {direction==='up' && <path d={`M${x-4} ${top+7} L${x} ${top} L${x+4} ${top+7}`} fill="none" stroke={wire} strokeWidth="1.6"/>}
+      {direction==='up' && (bay.id === 'BAY-132-L1' || bay.id === 'BAY-132-L2' ? (
+        // Incoming 132 kV line: downward-facing arrow at the start of the conductor.
+        <path d={`M${x-4} ${top+1} L${x} ${top+8} L${x+4} ${top+1}`} fill="none" stroke={wire} strokeWidth="1.6"/>
+      ) : (
+        <path d={`M${x-4} ${top+7} L${x} ${top} L${x+4} ${top+7}`} fill="none" stroke={wire} strokeWidth="1.6"/>
+      ))}
       {direction==='down' && <path d={`M${x-5} ${bottom-8} L${x} ${bottom} L${x+5} ${bottom-8}`} fill="none" stroke={wire} strokeWidth="1.6"/>}
       {showTelemetry && direction==='down' && <g transform={`translate(${x-37},${bottom+18})`}><rect width="74" height="30" fill="#102b47" stroke="#577895" strokeWidth="0.8"/><text x="5" y="11" fontSize="9" fill="#e9f3ff">P [MW]</text><text x="69" y="11" fontSize="9" textAnchor="end" fill="#e9f3ff">{bay.activePowerMw.toFixed(1)}</text><path d="M4 15 H70" stroke="#577895"/><text x="69" y="26" fontSize="9" textAnchor="end" fill="#b8cde2">{bay.currentA.toFixed(0)} A</text></g>}
     </g>;
@@ -1337,38 +1333,6 @@ export const ScadaHmiPage: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {/* Bay engineering access: directly below the alarm banner. */}
-      <div className="reference-manager flex justify-end">
-        <button type="button" onClick={() => setBayManagerOpen(true)}
-          className="inline-flex items-center gap-2 rounded-lg border-2 border-[#00E5FF] bg-[#05263c] px-4 py-2 text-xs font-bold text-white shadow-[0_0_12px_rgba(0,229,255,0.65)] transition hover:bg-[#07506A] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300">
-          <Settings2 className="h-4 w-4" /> Bay Configuration Manager
-        </button>
-      </div>
-
-      {bayManagerOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-[#010713]/85 p-3 backdrop-blur-[5px] sm:p-6"
-          role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setBayManagerOpen(false); }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="bay-manager-dialog-title"
-            className="flex max-h-[88vh] w-full max-w-[970px] flex-col overflow-hidden rounded-2xl border-2 border-[#00E5FF] bg-[#031423] shadow-[0_0_8px_#00E5FF,0_0_25px_rgba(0,229,255,0.65)]">
-            <header className="flex shrink-0 items-center justify-between gap-3 border-b border-cyan-900/70 bg-[#071D32] px-5 py-3">
-              <div className="flex items-center gap-3">
-                <Settings2 className="h-7 w-7 rounded-full text-[#00E5FF]" />
-                <div><h2 id="bay-manager-dialog-title" className="text-lg font-extrabold text-white">Bay Configuration Manager</h2>
-                  <p className="text-xs text-slate-400">Create, edit, delete and manage substation bays in the current workspace.</p></div>
-              </div>
-              <span className="hidden rounded-md border border-[#16799b] px-3 py-1.5 text-xs font-bold text-[#44e9ff] sm:inline-flex"><Layers className="mr-1.5 h-4 w-4"/> Workspace: 132/33/11 kV Main</span>
-              <button type="button" aria-label="Close Bay Configuration Manager" onClick={() => setBayManagerOpen(false)}
-                className="rounded-lg border border-cyan-800 p-2 text-slate-200 hover:bg-[#12334C] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"><X className="h-5 w-5" /></button>
-            </header>
-            <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4"><BayConfigurationManager /></div>
-            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-cyan-900/70 bg-[#071D32] px-5 py-3">
-              <span className="text-[11px] text-slate-400">Training simulation only — configuration changes may not appear in fixed-layout SLD/3D views</span>
-              <button type="button" onClick={() => setBayManagerOpen(false)} className="rounded-lg border border-cyan-700 px-4 py-1.5 text-sm text-slate-100 hover:bg-[#12334C]">Close</button>
-            </footer>
-          </section>
-        </div>
-      )}
 
       {/* 132 kV Bus Transfer Controller — educational simulation only */}
       {primaryView === 'BAY_MATRIX' && <div className="rounded-lg border border-[#1E3A5F] bg-[#081A30] p-3 space-y-2">
@@ -2293,7 +2257,7 @@ export const ScadaHmiPage: React.FC = () => {
 
 
       </div>
-      {runtimeScreen==='REPORTS' && engineeringDetailsOpen && <section className="runtime-panel p-3 space-y-3"><div className="flex justify-between items-center"><h2 className="text-sm font-bold text-[#00CFFF]">Engineering · Protocol Diagnostics & RCC Forwarding</h2><button type="button" className="runtime-tab px-3 py-1 text-xs" onClick={()=>setBayManagerOpen(true)}>Bay Configuration Manager</button></div>
+      {runtimeScreen==='REPORTS' && engineeringDetailsOpen && <section className="runtime-panel p-3 space-y-3"><div className="flex justify-between items-center"><h2 className="text-sm font-bold text-[#00CFFF]">Engineering · Protocol Diagnostics & RCC Forwarding</h2></div>
       {/* SECTION 4: SCADA / HMI MULTI-PROTOCOL COMMUNICATION STATUS & SIGNAL SOURCE */}
       {(() => {
         const bayIdx = Math.max(0, bays.findIndex((b) => b.id === selectedBay.id));
