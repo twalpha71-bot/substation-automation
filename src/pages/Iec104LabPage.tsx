@@ -1,23 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
-import { buildIec104TelecontrolTable, Iec104IoaEntry } from '../data/protocolRegistry';
+import { buildIec104TelecontrolTable } from '../data/protocolRegistry';
 import {
   Activity,
   AlertTriangle,
-  CheckCircle2,
+  Cpu,
   Database,
+  Download,
+  FileCode2,
+  History,
+  Info,
   Layers,
-  Monitor,
   Pause,
+  Pin,
+  PinOff,
   Play,
   Radio,
-  RefreshCw,
   RotateCcw,
   Send,
-  Server,
-  ShieldAlert,
+  Settings,
   Terminal,
-  Zap,
+  X,
 } from 'lucide-react';
 
 type Iec104LabTab =
@@ -26,1929 +29,1712 @@ type Iec104LabTab =
   | 'GI_SEQUENCE'
   | 'REMOTE_COMMANDS'
   | 'APCI_ANALYZER'
-  | 'FAULT_SIMULATION'
   | 'LOGS_DIAGNOSTICS';
 
-type Iec104FaultMode =
-  | 'NONE'
-  | 'TCP_2404_DOWN'
-  | 'STARTDT_FAIL'
-  | 'GI_TIMEOUT'
-  | 'UNKNOWN_COA'
-  | 'UNKNOWN_IOA'
-  | 'NEG_CMD_CON'
-  | 'SEQ_NUM_ERROR'
-  | 'T1_TIMEOUT'
-  | 'T3_TIMEOUT';
+type SimSpeed = 0.1 | 0.25 | 0.5 | 1 | 2 | 4;
+type SimPhase = 'MMS_IN' | 'CONVERT' | 'WAN_TX';
+type TestCategory = 'ALL' | 'A_UFRAME' | 'B_MMS' | 'C_CONV' | 'D_CMD' | 'E_WAN';
 
-type FrameFormat = 'I-Frame' | 'S-Frame' | 'U-Frame';
-type ControlMode = 'SBO' | 'DIRECT';
-
-interface PortPoint {
-  x: number;
-  y: number;
-}
-
-interface PortInspectionInfo {
-  title: string;
-  connectedDevice: string;
-  remotePort: string;
+interface Iec61850IedSpec {
+  id: 'P1' | 'P2' | 'P3' | 'P4';
+  portNum: 1 | 2 | 3 | 4;
+  shortName: string;
+  fullName: string;
+  iedName: string;
+  deviceType: string;
+  ip: string;
   protocol: string;
-  tcpPort: string;
-  linkStatus: 'UP' | 'DOWN';
-  speedDuplex: string;
+  lnRef: string;
+  rcbName: string;
+  dataset: string;
+  signals: string;
+  image: string;
+  ioa: number;
+  iec104Type: string;
+  typeIdNum: number;
+  baseValue: string;
+  unit: string;
 }
 
-interface Iec104FrameLog {
+interface Iec104TestDef {
+  num: number;
+  id: string;
+  name: string;
+  cat: Exclude<TestCategory, 'ALL'>;
+  isFault: boolean;
+  safeBatch: boolean;
+  expectedResult: string;
+}
+
+interface Iec104TestRuntime {
+  enabled: boolean;
+  status: 'IDLE' | 'PASSED' | 'FAILED';
+  actualResult: string;
+  timestamp: string;
+}
+
+interface TestHistoryItem {
   id: number;
   time: string;
-  format: FrameFormat;
-  dir: 'RCC → RTU' | 'RTU → RCC' | 'RCC → RTU → IED';
-  apciText: string;
-  summary: string;
-  rawHex: string;
-  typeId?: number;
-  vsq?: string;
-  cot?: number;
-  coa?: number;
-  ioa?: number;
-  quality?: string;
-  ns?: number;
-  nr?: number;
+  testName: string;
+  action: 'ON' | 'OFF' | 'RUN_SAFE' | 'RESET';
+  status: 'PASSED' | 'FAILED' | 'IDLE';
+  detail: string;
 }
 
-interface InFlightPacket {
+interface FrameLogEntry {
   id: number;
-  format: FrameFormat;
-  direction: 'RTU_TO_RCC' | 'RCC_TO_RTU';
-  progress: number;
-  label1: string;
-  label2: string;
-  ns?: number;
-  nr?: number;
+  time: string;
+  frameType: 'MMS Report' | 'I-Frame' | 'S-Frame' | 'U-Frame';
+  direction: string;
+  details: string;
+  result: 'Success' | 'Delivered' | 'Fault' | 'Timeout';
 }
 
-const IEC104_NET = {
-  rtuName: 'RTU / Station Gateway',
-  rtuModel: 'Schneider MiCOM C264 / Moxa MGate 5216',
-  rtuIp: '10.132.10.190',
-  switchName: 'Hirschmann RSP35',
-  switchIp: '192.168.100.10',
-  gatewayName: 'IEC-104 Gateway',
-  gatewayIp: '10.132.10.190',
-  rccName: 'RCC / SLDC (Master)',
-  rccIp: '172.16.104.10',
-  tcpPort: 2404,
-  coa: 132,
-  coaHex: '0x0084',
-  originatorAddr: 1,
-  t1Sec: 15,
-  t2Sec: 10,
-  t3Sec: 20,
-  kParam: 12,
-  wParam: 8,
-} as const;
+const IEC61850_IEDS: Iec61850IedSpec[] = [
+  {
+    id: 'P1',
+    portNum: 1,
+    shortName: '7SA87',
+    fullName: 'Siemens SIPROTEC 5 (7SA87)',
+    iedName: 'IED_132_L1',
+    deviceType: 'Line Distance Protection (IEC 61850)',
+    ip: '10.132.10.11',
+    protocol: 'IEC 61850 MMS (TCP/102)',
+    lnRef: '132_L1/XCBR1.Pos.stVal',
+    rcbName: 'BRCB01 (Buffered)',
+    dataset: 'dsStatus',
+    signals: 'XCBR1.Pos, 21P, 50/51, PTRC.Tr',
+    image: 'assets/ieds/siemens-7sa87.webp',
+    ioa: 1001,
+    iec104Type: 'M_DP_TB_1',
+    typeIdNum: 31,
+    baseValue: '2 (CLOSED)',
+    unit: '',
+  },
+  {
+    id: 'P2',
+    portNum: 2,
+    shortName: 'RET615',
+    fullName: 'ABB Relion RET615',
+    iedName: 'IED_132_T1',
+    deviceType: 'Transformer Differential (IEC 61850)',
+    ip: '10.132.10.12',
+    protocol: 'IEC 61850 MMS (TCP/102)',
+    lnRef: '132_T1/MMXU1.TotW.mag.f',
+    rcbName: 'URCB01 (Unbuffered)',
+    dataset: 'dsMeas',
+    signals: '87T, TotW, OilTemp, ATCC Tap',
+    image: 'assets/ieds/abb-ret615.webp',
+    ioa: 3001,
+    iec104Type: 'M_ME_TF_1',
+    typeIdNum: 36,
+    baseValue: '27.34',
+    unit: 'MW',
+  },
+  {
+    id: 'P3',
+    portNum: 3,
+    shortName: 'C264',
+    fullName: 'Schneider MiCOM C264',
+    iedName: 'IED_132_BC',
+    deviceType: 'Bay Control Unit (IEC 61850)',
+    ip: '10.132.10.13',
+    protocol: 'IEC 61850 MMS (TCP/102)',
+    lnRef: '132_BC/XCBR1.Pos.stVal',
+    rcbName: 'BRCB02 (Buffered)',
+    dataset: 'dsCtrl',
+    signals: 'XCBR1, CSWI1, CILO, XSWI',
+    image: 'assets/ieds/schneider-c264.webp',
+    ioa: 1005,
+    iec104Type: 'M_DP_TB_1',
+    typeIdNum: 31,
+    baseValue: '2 (CLOSED)',
+    unit: '',
+  },
+  {
+    id: 'P4',
+    portNum: 4,
+    shortName: 'GE D60',
+    fullName: 'GE Multilin D60',
+    iedName: 'IED_33_F03',
+    deviceType: 'Line Distance Relay (IEC 61850)',
+    ip: '10.132.10.14',
+    protocol: 'IEC 61850 MMS (TCP/102)',
+    lnRef: '33_F03/MMXU1.A.phsA.cVal',
+    rcbName: 'URCB02 (Unbuffered)',
+    dataset: 'dsAnalog',
+    signals: 'PhV, A.phsA/B/C, Hz, PF',
+    image: 'assets/ieds/ge-d60.webp',
+    ioa: 3004,
+    iec104Type: 'M_ME_TF_1',
+    typeIdNum: 36,
+    baseValue: '142.8',
+    unit: 'A',
+  },
+];
 
-const HW_ASSETS = {
-  RTU: 'assets/ieds/schneider-c264.webp',
-  RTU_FALLBACK: 'assets/goose-lab/schneider-c264.png',
-  SWITCH: 'assets/devices/hirschmann-rsp35.png',
-  GATEWAY: 'assets/signal-chain/station-gateway.png',
-  RCC: 'assets/signal-chain/scada-hmi.png',
-} as const;
+const IEC104_TESTS: Iec104TestDef[] = [
+  // A. Link Layer & U-Frames (6)
+  { num: 1, id: 'T01_TCP2404_CONN', name: 'TCP Port 2404 Socket Handshake', cat: 'A_UFRAME', isFault: false, safeBatch: true, expectedResult: 'GTW-01 (ETH1) ↔ RCC/SLDC TCP/2404 established' },
+  { num: 2, id: 'T02_STARTDT', name: 'U-Frame STARTDT Act / Con', cat: 'A_UFRAME', isFault: false, safeBatch: true, expectedResult: '0x68 04 07 00 00 00 → Con 0x0B; data transfer active' },
+  { num: 3, id: 'T03_STOPDT', name: 'U-Frame STOPDT Standby Mode', cat: 'A_UFRAME', isFault: true, safeBatch: false, expectedResult: 'STOPDT Act confirmed; spontaneous I-frames paused' },
+  { num: 4, id: 'T04_TESTFR', name: 'U-Frame TESTFR Keep-Alive (T3=20s)', cat: 'A_UFRAME', isFault: false, safeBatch: true, expectedResult: 'TESTFR Act (0x43) → TESTFR Con (0x83) healthy' },
+  { num: 5, id: 'T05_PORT2404_DOWN', name: 'TCP Port 2404 Socket Disconnected', cat: 'A_UFRAME', isFault: true, safeBatch: false, expectedResult: 'WAN TCP/2404 closed; GTW-01 buffers ASDUs locally' },
+  { num: 6, id: 'T06_STARTDT_T1_TO', name: 'STARTDT Confirmation Timeout (T1=15s)', cat: 'A_UFRAME', isFault: true, safeBatch: false, expectedResult: 'No STARTDT Con within T1; link reset triggered' },
 
-function nowTimeMs(): string {
+  // B. IEC 61850 Southbound MMS (6)
+  { num: 7, id: 'T07_MMS_ASSOC', name: 'Multi-IED IEC 61850 MMS Association (102)', cat: 'B_MMS', isFault: false, safeBatch: true, expectedResult: 'GTW-01 MMS Client associated with P1–P4 (TCP/102)' },
+  { num: 8, id: 'T08_BRCB_REPORT', name: 'BRCB Buffered Status Report (XCBR1)', cat: 'B_MMS', isFault: false, safeBatch: true, expectedResult: 'BRCB01/02 delivers buffered breaker change events' },
+  { num: 9, id: 'T09_URCB_MEAS', name: 'URCB Unbuffered Analog Report (MMXU1)', cat: 'B_MMS', isFault: false, safeBatch: true, expectedResult: 'URCB01/02 streams live MW/A/kV measurements' },
+  { num: 10, id: 'T10_P2_OFFLINE', name: 'Single IED Offline (P2 ABB RET615)', cat: 'B_MMS', isFault: true, safeBatch: false, expectedResult: 'P2 cable faulted; P1, P3, P4 continue MMS reporting' },
+  { num: 11, id: 'T11_SWITCH_DOWN', name: 'Industrial Switch RSP35 Link Down', cat: 'B_MMS', isFault: true, safeBatch: false, expectedResult: 'RSP35 P5 → GTW-01 ETH0 down; Station Bus halted' },
+  { num: 12, id: 'T12_MMS_LOST', name: 'IEC 61850 MMS Association Lost', cat: 'B_MMS', isFault: true, safeBatch: false, expectedResult: 'TCP/102 aborted; GTW-01 flags southbound invalid' },
+
+  // C. IEC 61850 -> IEC-104 Conversion (7)
+  { num: 13, id: 'T13_XCBR_M_DP_TB_1', name: 'XCBR1.Pos → M_DP_TB_1 (Type ID 31)', cat: 'C_CONV', isFault: false, safeBatch: true, expectedResult: 'Double-point breaker position encoded with CP56Time2a' },
+  { num: 14, id: 'T14_MMXU_M_ME_TF_1', name: 'MMXU1 Analog → M_ME_TF_1 (Type ID 36)', cat: 'C_CONV', isFault: false, safeBatch: true, expectedResult: 'IEEE-754 short float encoded with CP56Time2a' },
+  { num: 15, id: 'T15_CP56TIME2A', name: 'IEC 61850 UTC → CP56Time2a Sync', cat: 'C_CONV', isFault: false, safeBatch: true, expectedResult: '7-byte IEC-104 timestamp synchronized to PTP/SNTP' },
+  { num: 16, id: 'T16_MISSING_IOA', name: 'Missing IOA Mapping Table Entry', cat: 'C_CONV', isFault: true, safeBatch: false, expectedResult: 'Gateway Step 3/4 halts: LN not mapped to any IOA' },
+  { num: 17, id: 'T17_BAD_QUALITY', name: 'IEC 61850 Invalid q=0x0100 → QDS IV=1', cat: 'C_CONV', isFault: true, safeBatch: false, expectedResult: 'Gateway sets IEC-104 QDS Invalid bit (0x80)' },
+  { num: 18, id: 'T18_COA_MISMATCH', name: 'Common Address Mismatch (COA ≠ 132)', cat: 'C_CONV', isFault: true, safeBatch: false, expectedResult: 'RCC rejects ASDU with unknown COA (COT=46)' },
+  { num: 19, id: 'T19_GTW_OVERLOAD', name: 'Gateway GTW-01 Queue / CPU Overload', cat: 'C_CONV', isFault: true, safeBatch: false, expectedResult: 'Conversion queue saturated; spontaneous ASDUs delayed' },
+
+  // D. General Interrogation & Remote Commands (7)
+  { num: 20, id: 'T20_GI_ACT', name: 'Station GI C_IC_NA_1 (QOI=20, COT=6)', cat: 'D_CMD', isFault: false, safeBatch: true, expectedResult: 'RCC sends GI Activation; GTW-01 snapshots all IOAs' },
+  { num: 21, id: 'T21_GI_CON', name: 'GI Activation Confirm (COT=7)', cat: 'D_CMD', isFault: false, safeBatch: true, expectedResult: 'GTW-01 replies C_IC_NA_1 COT=7 before IOA burst' },
+  { num: 22, id: 'T22_GI_TERM', name: 'GI Termination (COT=10)', cat: 'D_CMD', isFault: false, safeBatch: true, expectedResult: 'All IOAs transmitted (COT=20) followed by COT=10' },
+  { num: 23, id: 'T23_SBO_CMD', name: 'SBO Remote Command C_DC_NA_1 (Trip/Close)', cat: 'D_CMD', isFault: false, safeBatch: true, expectedResult: 'Select (S/E=1) → Confirm → Execute (S/E=0) → CSWI1' },
+  { num: 24, id: 'T24_DIRECT_CMD', name: 'Direct Execute C_DC_NA_1 Command', cat: 'D_CMD', isFault: false, safeBatch: true, expectedResult: 'Direct DCO command forwarded to IEC 61850 CSWI1' },
+  { num: 25, id: 'T25_GI_TIMEOUT', name: 'General Interrogation Timeout (T1)', cat: 'D_CMD', isFault: true, safeBatch: false, expectedResult: 'GI COT=10 missing within T1; GI marked failed' },
+  { num: 26, id: 'T26_INTERLOCK_BLK', name: 'Interlock Blocked — Negative Con (P/N=1)', cat: 'D_CMD', isFault: true, safeBatch: false, expectedResult: 'CILO interlock active; GTW-01 returns Negative Con' },
+
+  // E. APCI Flow Control & WAN (6)
+  { num: 27, id: 'T27_NS_NR_SYNC', name: 'APCI N(S) / N(R) Sequence Verification', cat: 'E_WAN', isFault: false, safeBatch: true, expectedResult: 'Transmit N(S) and Receive N(R) counters synchronized' },
+  { num: 28, id: 'T28_SFRAME_ACK', name: 'S-Frame Supervisory Ack (w=8, T2=10s)', cat: 'E_WAN', isFault: false, safeBatch: true, expectedResult: 'RCC acknowledges received I-frames with S-frame' },
+  { num: 29, id: 'T29_K_WINDOW_FULL', name: 'k-Window Overflow (k=12 Unacked I-Frames)', cat: 'E_WAN', isFault: true, safeBatch: false, expectedResult: 'GTW-01 pauses I-frame TX awaiting RCC S-frame Ack' },
+  { num: 30, id: 'T30_WAN_LOSS', name: 'WAN Link Loss (ETH1 → RCC/SLDC Down)', cat: 'E_WAN', isFault: true, safeBatch: false, expectedResult: 'WAN cable faulted; IEC 61850 Station Bus stays live' },
+  { num: 31, id: 'T31_HIGH_LATENCY', name: 'High WAN Latency (+450 ms RTT)', cat: 'E_WAN', isFault: true, safeBatch: false, expectedResult: 'Slow WAN delivery; T2 Ack timer warning flagged' },
+  { num: 32, id: 'T32_FULL_RECOVERY', name: 'Full End-to-End IEC 61850 → 104 Recovery', cat: 'E_WAN', isFault: false, safeBatch: true, expectedResult: 'All faults cleared; MMS & IEC-104 links restored' },
+];
+
+function nowTimeStr(): string {
   const d = new Date();
   const p = (n: number, w = 2) => String(n).padStart(w, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-function buildOrthogonalPath(pts: PortPoint[]): string {
-  if (pts.length === 0) return '';
-  return pts.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(' ');
-}
-
-function samplePolyline(pts: PortPoint[], progress: number): { x: number; y: number; angleDeg: number } | null {
-  if (pts.length < 2) return null;
-  const clamped = Math.max(0, Math.min(1, progress));
-  const segLens: number[] = [];
+function samplePolyline(pts: { x: number; y: number }[], t: number): { x: number; y: number } {
+  if (!pts.length) return { x: 0, y: 0 };
+  if (pts.length === 1) return pts[0];
   let total = 0;
+  const lens: number[] = [];
   for (let i = 0; i < pts.length - 1; i++) {
-    const len = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
-    segLens.push(len);
-    total += len;
+    const l = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+    lens.push(l);
+    total += l;
   }
-  if (total <= 0.001) return { x: pts[0].x, y: pts[0].y, angleDeg: 0 };
-  let target = clamped * total;
-  for (let i = 0; i < segLens.length; i++) {
-    if (target <= segLens[i] || i === segLens.length - 1) {
-      const ratio = segLens[i] > 0 ? target / segLens[i] : 0;
-      const a = pts[i];
-      const b = pts[i + 1];
-      const angleDeg = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+  let target = Math.max(0, Math.min(1, t)) * total;
+  for (let i = 0; i < lens.length; i++) {
+    if (target <= lens[i] || i === lens.length - 1) {
+      const r = lens[i] > 0 ? target / lens[i] : 0;
       return {
-        x: a.x + (b.x - a.x) * ratio,
-        y: a.y + (b.y - a.y) * ratio,
-        angleDeg,
+        x: pts[i].x + (pts[i + 1].x - pts[i].x) * r,
+        y: pts[i].y + (pts[i + 1].y - pts[i].y) * r,
       };
     }
-    target -= segLens[i];
+    target -= lens[i];
+  }
+  return pts[pts.length - 1];
+}
+
+function roundedOrthPath(pts: { x: number; y: number }[], r = 12): string {
+  if (pts.length < 2) return '';
+  let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const prev = pts[i - 1];
+    const curr = pts[i];
+    const next = pts[i + 1];
+    const v1x = curr.x - prev.x;
+    const v1y = curr.y - prev.y;
+    const v2x = next.x - curr.x;
+    const v2y = next.y - curr.y;
+    const l1 = Math.hypot(v1x, v1y) || 1;
+    const l2 = Math.hypot(v2x, v2y) || 1;
+    const rad = Math.min(r, l1 / 2, l2 / 2);
+    const p1x = curr.x - (v1x / l1) * rad;
+    const p1y = curr.y - (v1y / l1) * rad;
+    const p2x = curr.x + (v2x / l2) * rad;
+    const p2y = curr.y + (v2y / l2) * rad;
+    d += ` L ${p1x.toFixed(1)} ${p1y.toFixed(1)} Q ${curr.x.toFixed(1)} ${curr.y.toFixed(1)} ${p2x.toFixed(1)} ${p2y.toFixed(1)}`;
   }
   const last = pts[pts.length - 1];
-  return { x: last.x, y: last.y, angleDeg: 0 };
+  d += ` L ${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
+  return d;
 }
 
-function encodeIFrameHex(ns: number, nr: number, typeId: number, cot: number, coa: number, ioa: number, valByte = 0x02): string {
-  const b = (n: number) => (n & 0xff).toString(16).padStart(2, '0').toUpperCase();
-  const nsShifted = (ns & 0x7fff) << 1;
-  const nrShifted = (nr & 0x7fff) << 1;
-  const c1 = nsShifted & 0xff;
-  const c2 = (nsShifted >> 8) & 0xff;
-  const c3 = nrShifted & 0xff;
-  const c4 = (nrShifted >> 8) & 0xff;
-  const bytes = [
-    0x68,
-    0x0e,
-    c1,
-    c2,
-    c3,
-    c4,
-    typeId,
-    0x01, // VSQ = 1
-    cot,
-    IEC104_NET.originatorAddr,
-    coa & 0xff,
-    (coa >> 8) & 0xff,
-    ioa & 0xff,
-    (ioa >> 8) & 0xff,
-    (ioa >> 16) & 0xff,
-    valByte,
-  ];
-  return bytes.map(b).join(' ');
-}
+function buildIec104TestSteps(t: Iec104TestDef, r: Iec104TestRuntime, ns: number, nr: number) {
+  const active = r.enabled;
+  const isF = t.isFault;
+  const frameHex =
+    t.id === 'T02_STARTDT' ? '68 04 07 00 00 00  →  68 04 0B 00 00 00 (STARTDT CON)' :
+    t.id === 'T03_STOPDT' ? '68 04 13 00 00 00  →  68 04 23 00 00 00 (STOPDT CON)' :
+    t.id === 'T04_TESTFR' ? '68 04 43 00 00 00  →  68 04 83 00 00 00 (TESTFR CON)' :
+    t.id.startsWith('T20') || t.id.startsWith('T21') || t.id.startsWith('T22')
+      ? '68 0E 00 00 00 00 64 01 06 00 84 00 00 00 00 14 (C_IC_NA_1 QOI=20)' :
+    t.id.startsWith('T23') || t.id.startsWith('T24') || t.id === 'T26_INTERLOCK_BLK'
+      ? '68 0E 02 00 00 00 2E 01 06 00 84 00 E9 17 00 81 (C_DC_NA_1 SBO/Direct)' :
+    `68 15 ${(ns << 1).toString(16).padStart(4, '0').toUpperCase()} ${(nr << 1).toString(16).padStart(4, '0').toUpperCase()} 1F 01 03 00 84 00 E9 03 00 ${t.id === 'T17_BAD_QUALITY' ? '80' : '00'}`;
 
-function encodeSFrameHex(nr: number): string {
-  const b = (n: number) => (n & 0xff).toString(16).padStart(2, '0').toUpperCase();
-  const nrShifted = (nr & 0x7fff) << 1;
-  return [0x68, 0x04, 0x01, 0x00, nrShifted & 0xff, (nrShifted >> 8) & 0xff].map(b).join(' ');
+  return {
+    path:
+      t.cat === 'A_UFRAME' ? 'RCC/SLDC (10.132.20.201) ↔ WAN TCP/2404 ↔ GTW-01 (ETH1)' :
+      t.cat === 'B_MMS' ? 'IEC 61850 IEDs (P1–P4) ↔ RSP35 (VLAN 10) ↔ GTW-01 (ETH0 · TCP/102)' :
+      t.cat === 'C_CONV' ? 'GTW-01 MMS Client → Conversion Engine (COA 132) → IEC-104 ASDU Queue' :
+      t.cat === 'D_CMD' ? 'RCC/SLDC Master → GTW-01 (C_IC/C_DC) → IEC 61850 CSWI1 / XCBR1' :
+      'GTW-01 (ETH1) ↔ WAN Link ↔ RCC/SLDC Master (APCI Flow Control)',
+    frameHex,
+    steps: [
+      {
+        num: 1,
+        title: 'Test Trigger & Precondition',
+        color: '#38F3FF',
+        detail: active
+          ? `Test #${t.num} (${t.name}) toggled ON at ${r.timestamp}. Simulation injected into live pipeline.`
+          : `Test #${t.num} (${t.name}) is currently IDLE. Toggle ON to execute live verification.`,
+      },
+      {
+        num: 2,
+        title: 'Southbound Station Bus (IEC 61850 MMS · TCP/102)',
+        color: '#7DD3FC',
+        detail:
+          t.cat === 'B_MMS' && isF && active
+            ? `Fault active on Station Bus: ${t.expectedResult}. Affected IED link turns dashed red.`
+            : 'All healthy IEC 61850 IEDs (7SA87, RET615, C264, GE D60) stream BRCB/URCB reports via Hirschmann RSP35.',
+      },
+      {
+        num: 3,
+        title: 'Gateway GTW-01 Conversion & IOA Mapping (COA=132)',
+        color: '#D8B4FE',
+        detail:
+          t.cat === 'C_CONV' && isF && active
+            ? `Conversion anomaly injected: ${t.expectedResult}. Gateway popup highlights faulted conversion stage.`
+            : 'GTW-01 maps IEC 61850 LN/DataSet → IEC-104 TypeID (31/36), translates quality (q→QDS), and stamps CP56Time2a.',
+      },
+      {
+        num: 4,
+        title: 'Northbound WAN & APCI Frame Transport (TCP/2404)',
+        color: '#FDE047',
+        detail:
+          (t.cat === 'A_UFRAME' || t.cat === 'E_WAN') && isF && active
+            ? `WAN / APCI fault active: ${t.expectedResult}. GTW-01 buffers unacknowledged ASDUs.`
+            : `APCI sequence synchronized (N(S)=${ns}, N(R)=${nr}) with moving IEC-104 WAN frame delivery to RCC/SLDC.`,
+      },
+      {
+        num: 5,
+        title: isF ? 'SCADA Impact & Recovery Action' : 'RCC / SLDC Verification Result',
+        color: isF && active ? '#FCA5A5' : '#4ADE80',
+        detail: active
+          ? `${t.expectedResult}${isF ? ' — Toggle OFF or enable Test #32 (Full Recovery) to restore healthy operation.' : ' — Verified PASS on live RCC/SLDC.'}`
+          : 'Awaiting test execution — click the Toggle switch ON to observe real-time topology & frame trace.',
+      },
+    ],
+  };
 }
 
 export const Iec104LabPage: React.FC = () => {
   const { bays, commandBreaker } = useSubstationStore();
 
-  // Navigation & Playback Controls (Default 0.5x; does NOT alter T1/T2/T3 protocol timers)
+  // Navigation & Playback (Default 0.1x slow inspection matching Modbus TCP Lab V3!)
   const [activeTab, setActiveTab] = useState<Iec104LabTab>('TOPOLOGY_LIVE');
-  const [speed, setSpeed] = useState<0.5 | 1 | 2 | 4>(0.5);
   const [playing, setPlaying] = useState<boolean>(true);
+  const [speed, setSpeed] = useState<SimSpeed>(0.1);
 
-  // IEC-104 Protocol State
-  const [linkState, setLinkState] = useState<'STARTDT_ACTIVE' | 'STOPDT_STANDBY'>('STARTDT_ACTIVE');
-  const [faultMode, setFaultMode] = useState<Iec104FaultMode>('NONE');
-  const [txSeqNs, setTxSeqNs] = useState<number>(48);
-  const [rxSeqNr, setRxSeqNr] = useState<number>(22);
-  const [txFramesTotal, setTxFramesTotal] = useState<number>(148);
-  const [rxFramesTotal, setRxFramesTotal] = useState<number>(122);
+  // IEC-104 Counters & Interactive Command State
+  const [nsSeq, setNsSeq] = useState<number>(48);
+  const [nrSeq, setNrSeq] = useState<number>(22);
   const [giCount, setGiCount] = useState<number>(3);
-  const [giStatus, setGiStatus] = useState<'Completed (QOI=20)' | 'In Progress' | 'Timeout (T1)' | 'Idle'>('Completed (QOI=20)');
-  const [giStep, setGiStep] = useState<0 | 1 | 2 | 3 | 4>(4);
-
-  // IOA & Command State
-  const [selectedIoa, setSelectedIoa] = useState<number>(1001);
-  const [commandTargetBayId, setCommandTargetBayId] = useState<string>(bays[0]?.id || 'BAY-132-L1');
+  const [cmdBayId, setCmdBayId] = useState<string>(bays[0]?.id || 'BAY-132-L1');
   const [cmdAction, setCmdAction] = useState<'TRIP' | 'CLOSE'>('TRIP');
-  const [controlMode, setControlMode] = useState<ControlMode>('SBO');
-  const [interlockOk, setInterlockOk] = useState<boolean>(true);
-  const [lastCommandText, setLastCommandText] = useState<string>('None');
-  const [commandTraceStep, setCommandTraceStep] = useState<string>('Idle — Select bay IOA & issue C_DC_NA_1');
-  const [lastUpdateTs, setLastUpdateTs] = useState<string>(nowTimeMs());
+  const [cmdMode, setCmdMode] = useState<'SBO' | 'DIRECT'>('SBO');
+  const [lastCmdMsg, setLastCmdMsg] = useState<string>('Idle — Ready for C_DC_NA_1 SBO/Direct command');
 
-  // Packet Inspection & Port Inspection Popup
-  const [selectedFrameId, setSelectedFrameId] = useState<number>(4);
-  const [logFilter, setLogFilter] = useState<'ALL' | FrameFormat>('ALL');
-  const [inspectedPort, setInspectedPort] = useState<PortInspectionInfo | null>(null);
-  const [inFlight, setInFlight] = useState<InFlightPacket | null>(null);
+  // Cycle State: activeIedIdx (0..3) & cycleProgress (0..1)
+  const [activeIedIdx, setActiveIedIdx] = useState<number>(0);
+  const [cycleProgress, setCycleProgress] = useState<number>(0.34);
 
-  const [frameLog, setFrameLog] = useState<Iec104FrameLog[]>(() => [
-    {
-      id: 5,
-      time: '14:20:03.005',
-      format: 'S-Frame',
-      dir: 'RCC → RTU',
-      apciText: 'S (N(R)=48)',
-      summary: 'Supervisory Acknowledgement (Receiver Ready)',
-      rawHex: encodeSFrameHex(48),
-      nr: 48,
-    },
-    {
-      id: 4,
-      time: '14:20:02.662',
-      format: 'I-Frame',
-      dir: 'RTU → RCC',
-      apciText: 'N(S)=48 N(R)=22',
-      summary: 'M_DP_TB_1 (TypeID=31), COT=3, COA=132, IOA=1001, Val=2 (CLOSED)',
-      rawHex: encodeIFrameHex(48, 22, 31, 3, 132, 1001, 0x02),
-      typeId: 31,
-      vsq: '0x01 (1 obj)',
-      cot: 3,
-      coa: 132,
-      ioa: 1001,
-      quality: 'GOOD (IV=0, NT=0, SB=0, BL=0)',
-      ns: 48,
-      nr: 22,
-    },
-    {
-      id: 3,
-      time: '14:20:02.450',
-      format: 'I-Frame',
-      dir: 'RCC → RTU',
-      apciText: 'N(S)=21 N(R)=47',
-      summary: 'C_IC_NA_1 (TypeID=100), COT=6, COA=132, IOA=0, QOI=20 — General Interrogation',
-      rawHex: encodeIFrameHex(21, 47, 100, 6, 132, 0, 0x14),
-      typeId: 100,
-      vsq: '0x01 (1 obj)',
-      cot: 6,
-      coa: 132,
-      ioa: 0,
-      quality: 'QOI=20 (Station Interrogation)',
-      ns: 21,
-      nr: 47,
-    },
-    {
-      id: 2,
-      time: '14:20:01.118',
-      format: 'U-Frame',
-      dir: 'RTU → RCC',
-      apciText: 'STARTDT CON',
-      summary: '0x68 0x04 0x0B 0x00 0x00 0x00 — Start Data Transfer Confirmation',
-      rawHex: '68 04 0B 00 00 00',
-    },
-    {
-      id: 1,
-      time: '14:20:01.104',
-      format: 'U-Frame',
-      dir: 'RCC → RTU',
-      apciText: 'STARTDT ACT',
-      summary: '0x68 0x04 0x07 0x00 0x00 0x00 — Start Data Transfer Activation',
-      rawHex: '68 04 07 00 00 00',
-    },
+  // Hover & Pin Popups
+  const [hoveredIedId, setHoveredIedId] = useState<Iec61850IedSpec['id'] | null>(null);
+  const [switchHovered, setSwitchHovered] = useState<boolean>(false);
+  const [gatewayPinned, setGatewayPinned] = useState<boolean>(false);
+  const [gatewayManuallyClosed, setGatewayManuallyClosed] = useState<boolean>(false);
+
+  // 32-Test Simulation Lab State
+  const [testCatFilter, setTestCatFilter] = useState<TestCategory>('ALL');
+  const [selectedTestId, setSelectedTestId] = useState<string>('T02_STARTDT');
+  const [showHistory, setShowHistory] = useState<boolean>(false);
+  const [testHistory, setTestHistory] = useState<TestHistoryItem[]>([]);
+  const [testState, setTestState] = useState<Record<string, Iec104TestRuntime>>(() => {
+    const init: Record<string, Iec104TestRuntime> = {};
+    IEC104_TESTS.forEach((t) => {
+      init[t.id] = { enabled: false, status: 'IDLE', actualResult: 'Not executed', timestamp: '—' };
+    });
+    return init;
+  });
+
+  const [logs, setLogs] = useState<FrameLogEntry[]>(() => [
+    { id: 1, time: nowTimeStr(), frameType: 'I-Frame', direction: 'GTW-01 → RCC/SLDC', details: 'N(S)=48 N(R)=22 · M_DP_TB_1 COA=132 IOA=1001 COT=3 CLOSED', result: 'Delivered' },
+    { id: 2, time: nowTimeStr(), frameType: 'MMS Report', direction: 'IED_132_L1 → GTW-01', details: 'BRCB01 dsStatus 132_L1/XCBR1.Pos.stVal=CLOSED (q=0x0000)', result: 'Success' },
+    { id: 3, time: nowTimeStr(), frameType: 'S-Frame', direction: 'RCC/SLDC → GTW-01', details: 'S (N(R)=48) Supervisory Acknowledgement', result: 'Success' },
+    { id: 4, time: nowTimeStr(), frameType: 'U-Frame', direction: 'RCC/SLDC ↔ GTW-01', details: 'STARTDT ACT (0x07) → STARTDT CON (0x0B)', result: 'Success' },
   ]);
 
-  // DOM Refs for ResizeObserver port-to-port SVG overlay
-  const topoContainerRef = useRef<HTMLDivElement | null>(null);
-  const rtuEthRef = useRef<HTMLButtonElement | null>(null);
-  const swP1Ref = useRef<HTMLButtonElement | null>(null);
-  const swP5Ref = useRef<HTMLButtonElement | null>(null);
-  const gwEth1Ref = useRef<HTMLButtonElement | null>(null);
-  const gwEth2Ref = useRef<HTMLButtonElement | null>(null);
-  const rccEthRef = useRef<HTMLButtonElement | null>(null);
+  // Derived Fault Flags from 32-Test Lab
+  const isOn = (id: string) => !!testState[id]?.enabled;
+  const stopdtStandby = isOn('T03_STOPDT');
+  const port2404Down = isOn('T05_PORT2404_DOWN');
+  const startdtTimeout = isOn('T06_STARTDT_T1_TO');
+  const p2Offline = isOn('T10_P2_OFFLINE');
+  const switchDown = isOn('T11_SWITCH_DOWN');
+  const mmsLost = isOn('T12_MMS_LOST');
+  const missingIoa = isOn('T16_MISSING_IOA');
+  const badQuality = isOn('T17_BAD_QUALITY');
+  const coaMismatch = isOn('T18_COA_MISMATCH');
+  const gtwOverload = isOn('T19_GTW_OVERLOAD');
+  const interlockBlocked = isOn('T26_INTERLOCK_BLK');
+  const kWindowFull = isOn('T29_K_WINDOW_FULL');
+  const wanLoss = isOn('T30_WAN_LOSS');
+  const highLatency = isOn('T31_HIGH_LATENCY');
 
-  const [cableGeom, setCableGeom] = useState<{
-    width: number;
-    height: number;
-    trayY: number;
-    c1: PortPoint[]; // RTU ETH1 -> Switch P1
-    c2: PortPoint[]; // Switch P5 -> Gateway ETH1
-    c3: PortPoint[]; // Gateway ETH2 -> WAN -> RCC ETH
-    wanMid: PortPoint;
-  } | null>(null);
+  const activeIed = IEC61850_IEDS[activeIedIdx];
+  const iedOfflineNow = (activeIed.id === 'P2' && p2Offline) || mmsLost;
+  const stationBusOk = !switchDown && !mmsLost;
+  const mmsHealthy = stationBusOk && !iedOfflineNow;
+  const convHealthy = mmsHealthy && !missingIoa && !gtwOverload;
+  const wanHealthy = !port2404Down && !startdtTimeout && !wanLoss && !stopdtStandby && !kWindowFull;
+  const endToEndOk = convHealthy && wanHealthy && !coaMismatch;
 
-  const nextIdRef = useRef<number>(20);
-  const cursorRef = useRef<number>(0);
-  const processedPktIdsRef = useRef<Set<number>>(new Set());
+  // 3-Phase Smooth Animation State Machine
+  const simPhase: SimPhase =
+    cycleProgress < 0.24 ? 'MMS_IN' : cycleProgress < 0.72 ? 'CONVERT' : 'WAN_TX';
 
-  // Preserve all 36 configured IOAs from existing protocolRegistry
-  const ioaEntries: Iec104IoaEntry[] = useMemo(() => buildIec104TelecontrolTable(bays), [bays]);
-  const selectedEntry = useMemo(
-    () => ioaEntries.find((e) => e.ioa === selectedIoa) || ioaEntries[0],
-    [ioaEntries, selectedIoa]
-  );
-  const targetBay = useMemo(
-    () => bays.find((b) => b.id === commandTargetBayId) || bays[0],
-    [bays, commandTargetBayId]
-  );
-  const selectedFrame = useMemo(
-    () => frameLog.find((f) => f.id === selectedFrameId) || frameLog[0],
-    [frameLog, selectedFrameId]
-  );
-  const filteredFrames = useMemo(
-    () => (logFilter === 'ALL' ? frameLog : frameLog.filter((f) => f.format === logFilter)),
-    [frameLog, logFilter]
-  );
+  const convFraction = simPhase === 'CONVERT' ? Math.max(0, Math.min(1, (cycleProgress - 0.24) / 0.48)) : simPhase === 'WAN_TX' ? 1 : 0;
+  const convPct = Math.round(convFraction * 100);
+  const convStep: 1 | 2 | 3 | 4 =
+    convFraction < 0.25 ? 1 : convFraction < 0.5 ? 2 : convFraction < 0.75 ? 3 : 4;
 
-  // Derived protocol health flags
-  const isTcpUp = faultMode !== 'TCP_2404_DOWN';
-  const isDataTransferActive =
-    isTcpUp &&
-    linkState === 'STARTDT_ACTIVE' &&
-    faultMode !== 'STARTDT_FAIL' &&
-    faultMode !== 'T1_TIMEOUT' &&
-    faultMode !== 'T3_TIMEOUT';
-  const isFullyHealthy = faultMode === 'NONE' && linkState === 'STARTDT_ACTIVE';
-
-  // Helper to append frames (declared BEFORE any effects or handlers — zero TDZ)
-  const appendFrame = (entry: Omit<Iec104FrameLog, 'id' | 'time'>) => {
-    const id = nextIdRef.current++;
-    const time = nowTimeMs();
-    setLastUpdateTs(time);
-    setFrameLog((prev) => [{ id, time, ...entry }, ...prev].slice(0, 32));
-    setSelectedFrameId(id);
-  };
-
-  const launchPacket = (
-    format: FrameFormat,
-    direction: 'RTU_TO_RCC' | 'RCC_TO_RTU',
-    label1: string,
-    label2: string,
-    ns?: number,
-    nr?: number
-  ) => {
-    const id = nextIdRef.current++;
-    setInFlight({ id, format, direction, progress: 0, label1, label2, ns, nr });
-  };
-
-  // Measure DOM port anchors via ResizeObserver
-  const measureTopology = () => {
-    const c = topoContainerRef.current;
-    const rtu = rtuEthRef.current;
-    const s1 = swP1Ref.current;
-    const s5 = swP5Ref.current;
-    const g1 = gwEth1Ref.current;
-    const g2 = gwEth2Ref.current;
-    const rcc = rccEthRef.current;
-    if (!c || !rtu || !s1 || !s5 || !g1 || !g2 || !rcc) return;
-
-    const cr = c.getBoundingClientRect();
-    if (cr.width < 100 || cr.height < 100) return;
-
-    const ctr = (el: HTMLElement): PortPoint => {
-      const r = el.getBoundingClientRect();
-      return {
-        x: r.left - cr.left + r.width / 2,
-        y: r.top - cr.top + r.height / 2,
-      };
-    };
-
-    const pRtu = ctr(rtu);
-    const pS1 = ctr(s1);
-    const pS5 = ctr(s5);
-    const pG1 = ctr(g1);
-    const pG2 = ctr(g2);
-    const pRcc = ctr(rcc);
-    const trayY = Math.max(pRtu.y, pS1.y, pS5.y, pG1.y, pG2.y, pRcc.y) + 20;
-
-    setCableGeom({
-      width: cr.width,
-      height: cr.height,
-      trayY,
-      c1: [pRtu, { x: pRtu.x, y: trayY }, { x: pS1.x, y: trayY }, pS1],
-      c2: [pS5, { x: pS5.x, y: trayY }, { x: pG1.x, y: trayY }, pG1],
-      c3: [pG2, { x: pG2.x, y: trayY }, { x: pRcc.x, y: trayY }, pRcc],
-      wanMid: { x: (pG2.x + pRcc.x) / 2, y: trayY },
-    });
-  };
+  // Auto-open Gateway Popup on MMS arrival, auto-close on IEC-104 departure (unless pinned)
+  const showGatewayPopup = gatewayPinned || (simPhase === 'CONVERT' && !gatewayManuallyClosed && mmsHealthy);
 
   useEffect(() => {
-    if (activeTab !== 'TOPOLOGY_LIVE') return;
-    const c = topoContainerRef.current;
-    if (!c) return;
-    window.requestAnimationFrame(measureTopology);
-    const t1 = window.setTimeout(measureTopology, 120);
-    const t2 = window.setTimeout(measureTopology, 360);
-    const ro = new ResizeObserver(() => measureTopology());
-    ro.observe(c);
-    window.addEventListener('resize', measureTopology);
+    if (simPhase === 'MMS_IN') {
+      setGatewayManuallyClosed(false);
+    }
+  }, [simPhase]);
+
+  useEffect(() => {
+    if (!playing) return;
+    let rafId = 0;
+    let lastTs = performance.now();
+    const baseCycleMs = highLatency ? 5200 : 3200; // At 0.1x -> 32s full slow cycle!
+
+    const tick = (now: number) => {
+      const dt = Math.min(80, now - lastTs);
+      lastTs = now;
+      setCycleProgress((prev) => {
+        const next = prev + dt / (baseCycleMs / speed);
+        if (next >= 1) {
+          setActiveIedIdx((i) => (i + 1) % IEC61850_IEDS.length);
+          setNsSeq((n) => (n + 1) % 32767);
+          setNrSeq((n) => (n + 1) % 32767);
+          return next - 1;
+        }
+        return next;
+      });
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [playing, speed, highLatency]);
+
+  // Live Telecontrol IOA Table from store
+  const ioaTable = useMemo(() => buildIec104TelecontrolTable(bays), [bays]);
+
+  // Append frame log on each cycle completion
+  useEffect(() => {
+    const ts = nowTimeStr();
+    const d = IEC61850_IEDS[activeIedIdx];
+    const entry: FrameLogEntry = !mmsHealthy
+      ? { id: Date.now() + Math.random(), time: ts, frameType: 'MMS Report', direction: `${d.iedName} → GTW-01`, details: `TCP/102 MMS association / RSP35 fault`, result: 'Timeout' }
+      : !convHealthy
+      ? { id: Date.now() + Math.random(), time: ts, frameType: 'MMS Report', direction: 'GTW-01 Engine', details: missingIoa ? `Unmapped LN ${d.lnRef} (No IOA)` : 'GTW-01 conversion buffer overload', result: 'Fault' }
+      : !wanHealthy
+      ? { id: Date.now() + Math.random(), time: ts, frameType: 'I-Frame', direction: 'GTW-01 → RCC/SLDC', details: `WAN / TCP 2404 paused — IOA:${d.ioa} buffered`, result: 'Fault' }
+      : { id: Date.now() + Math.random(), time: ts, frameType: 'I-Frame', direction: 'GTW-01 → RCC/SLDC', details: `N(S)=${nsSeq} N(R)=${nrSeq} · ${d.iec104Type} COA=${coaMismatch ? 99 : 132} IOA=${d.ioa} COT=3 Val=${d.baseValue} ${d.unit}`, result: 'Delivered' };
+    setLogs((prev) => [entry, ...prev].slice(0, 40));
+  }, [nsSeq]);
+
+  // ResizeObserver Exact Port-to-Port Measurement
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const portRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+  const setPortRef = (id: string) => (el: HTMLSpanElement | null) => {
+    portRefs.current[id] = el;
+  };
+  const [stageSize, setStageSize] = useState<{ w: number; h: number }>({ w: 1200, h: 460 });
+  const [ports, setPorts] = useState<Record<string, { x: number; y: number }>>({});
+
+  useEffect(() => {
+    const measure = () => {
+      const wrap = stageRef.current;
+      if (!wrap) return;
+      const wr = wrap.getBoundingClientRect();
+      if (wr.width < 100) return;
+      const next: Record<string, { x: number; y: number }> = {};
+      Object.entries(portRefs.current).forEach(([k, el]) => {
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        next[k] = { x: r.left - wr.left + r.width / 2, y: r.top - wr.top + r.height / 2 };
+      });
+      setStageSize({ w: Math.round(wr.width), h: Math.round(wr.height) });
+      setPorts(next);
+    };
+    measure();
+    const t1 = window.setTimeout(measure, 120);
+    const t2 = window.setTimeout(measure, 400);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    if (ro && stageRef.current) ro.observe(stageRef.current);
+    window.addEventListener('resize', measure);
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
-      ro.disconnect();
-      window.removeEventListener('resize', measureTopology);
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
     };
   }, [activeTab]);
 
-  // Periodic background IEC-104 spontaneous I-Frame -> S-Frame Ack animation (0.5x default speed)
-  useEffect(() => {
-    if (!playing || !isDataTransferActive || inFlight || ioaEntries.length === 0) return;
-    const delayMs = Math.max(600, Math.round(1600 / speed));
-    const tid = window.setTimeout(() => {
-      const idx = cursorRef.current % Math.min(12, ioaEntries.length);
-      cursorRef.current += 1;
-      const entry = ioaEntries[idx];
-      const nextNs = faultMode === 'SEQ_NUM_ERROR' ? txSeqNs + 5 : txSeqNs + 1;
-      const typeNum = parseInt(entry.typeId, 10) || 31;
-      const coaUsed = faultMode === 'UNKNOWN_COA' ? 255 : IEC104_NET.coa;
-      const ioaUsed = faultMode === 'UNKNOWN_IOA' ? 9999 : entry.ioa;
-
-      launchPacket(
-        'I-Frame',
-        'RTU_TO_RCC',
-        `I-Frame | N(S)=${nextNs} N(R)=${rxSeqNr} | TypeID=${typeNum}`,
-        `COA=${coaUsed} · IOA=${ioaUsed} · ${entry.valueText}`,
-        nextNs,
-        rxSeqNr
-      );
-    }, delayMs);
-    return () => window.clearTimeout(tid);
-  }, [playing, speed, isDataTransferActive, inFlight, ioaEntries, txSeqNs, rxSeqNr, faultMode]);
-
-  // Smooth requestAnimationFrame packet motion along exact measured orthogonal paths
-  useEffect(() => {
-    if (!playing || !inFlight) return;
-    let rafId = 0;
-    let lastTs = performance.now();
-    const durationMs = 1900 / speed; // 0.5x = 3800ms clearly readable
-
-    const step = (now: number) => {
-      const dt = now - lastTs;
-      lastTs = now;
-      setInFlight((cur) => {
-        if (!cur) return null;
-        const nextP = cur.progress + dt / durationMs;
-        if (nextP < 1) return { ...cur, progress: nextP };
-
-        // Packet arrived at destination endpoint (idempotent guard)
-        if (!processedPktIdsRef.current.has(cur.id)) {
-          processedPktIdsRef.current.add(cur.id);
-          if (cur.format === 'I-Frame' && cur.direction === 'RTU_TO_RCC') {
-            const newNs = cur.ns ?? txSeqNs + 1;
-            setTxSeqNs(newNs);
-            setTxFramesTotal((t) => t + 1);
-
-            if (faultMode === 'SEQ_NUM_ERROR') {
-              appendFrame({
-                format: 'I-Frame',
-                dir: 'RTU → RCC',
-                apciText: `N(S)=${newNs} (OUT OF SEQ)`,
-                summary: `Sequence Number Error detected by RCC — Expected N(S)=${txSeqNs + 1}, got ${newNs}`,
-                rawHex: encodeIFrameHex(newNs, rxSeqNr, 31, 3, IEC104_NET.coa, selectedEntry?.ioa || 1001),
-                typeId: 31,
-                cot: 3,
-                coa: IEC104_NET.coa,
-                ioa: selectedEntry?.ioa || 1001,
-                quality: 'INVALID (SEQ ERR)',
-                ns: newNs,
-                nr: rxSeqNr,
-              });
-              return null;
-            }
-
-            if (faultMode === 'UNKNOWN_COA' || faultMode === 'UNKNOWN_IOA') {
-              const cotErr = faultMode === 'UNKNOWN_COA' ? 46 : 47;
-              appendFrame({
-                format: 'I-Frame',
-                dir: 'RTU → RCC',
-                apciText: `N(S)=${newNs} N(R)=${rxSeqNr}`,
-                summary:
-                  faultMode === 'UNKNOWN_COA'
-                    ? `COT=46 Unknown Common Address (COA=255 rejected)`
-                    : `COT=47 Unknown Information Object Address (IOA=9999 rejected)`,
-                rawHex: encodeIFrameHex(newNs, rxSeqNr, 31, cotErr, faultMode === 'UNKNOWN_COA' ? 255 : 132, faultMode === 'UNKNOWN_IOA' ? 9999 : 1001),
-                typeId: 31,
-                cot: cotErr,
-                coa: faultMode === 'UNKNOWN_COA' ? 255 : 132,
-                ioa: faultMode === 'UNKNOWN_IOA' ? 9999 : 1001,
-                quality: 'INVALID',
-                ns: newNs,
-                nr: rxSeqNr,
-              });
-              return null;
-            }
-
-            // Valid I-Frame received by RCC -> schedule S-Frame supervisory ACK back to RTU
-            const curEntry = ioaEntries[(cursorRef.current - 1 + ioaEntries.length) % ioaEntries.length] || selectedEntry;
-            const typeNum = parseInt(curEntry?.typeId || '31', 10) || 31;
-            appendFrame({
-              format: 'I-Frame',
-              dir: 'RTU → RCC',
-              apciText: `N(S)=${newNs} N(R)=${rxSeqNr}`,
-              summary: `${curEntry?.typeId || 'M_DP_TB_1'}, COT=3 (Spontaneous), COA=132, IOA=${curEntry?.ioa || 1001}, Val=${curEntry?.valueText || 'CLOSED'}`,
-              rawHex: encodeIFrameHex(newNs, rxSeqNr, typeNum, 3, IEC104_NET.coa, curEntry?.ioa || 1001),
-              typeId: typeNum,
-              vsq: '0x01 (1 obj)',
-              cot: 3,
-              coa: IEC104_NET.coa,
-              ioa: curEntry?.ioa || 1001,
-              quality: 'GOOD (IV=0, NT=0, SB=0, BL=0)',
-              ns: newNs,
-              nr: rxSeqNr,
-            });
-
-            // Immediately return S-Frame supervisory ACK (RCC -> RTU)
-            const sId = nextIdRef.current++;
-            return {
-              id: sId,
-              format: 'S-Frame',
-              direction: 'RCC_TO_RTU',
-              progress: 0,
-              label1: `S-Frame ACK | N(R)=${newNs + 1}`,
-              label2: 'Supervisory Ack (No ASDU Data)',
-              nr: newNs + 1,
-            };
-          }
-
-          if (cur.format === 'S-Frame') {
-            setRxFramesTotal((r) => r + 1);
-            appendFrame({
-              format: 'S-Frame',
-              dir: 'RCC → RTU',
-              apciText: `S (N(R)=${cur.nr ?? txSeqNs + 1})`,
-              summary: 'Supervisory Acknowledgement (Receiver Ready)',
-              rawHex: encodeSFrameHex(cur.nr ?? txSeqNs + 1),
-              nr: cur.nr ?? txSeqNs + 1,
-            });
-          }
-        }
-        return null;
-      });
-      rafId = window.requestAnimationFrame(step);
-    };
-
-    rafId = window.requestAnimationFrame(step);
-    return () => window.cancelAnimationFrame(rafId);
-  }, [playing, speed, inFlight?.id, faultMode, txSeqNs, rxSeqNr, ioaEntries, selectedEntry]);
-
-  // U-Frame Link Layer Control Handlers
-  const handleSendUFrame = (uType: 'STARTDT' | 'STOPDT' | 'TESTFR') => {
-    if (!isTcpUp) {
-      appendFrame({
-        format: 'U-Frame',
-        dir: 'RCC → RTU',
-        apciText: `${uType} FAILED`,
-        summary: 'TCP Port 2404 socket disconnected — Cannot transmit U-Frame',
-        rawHex: '—',
-      });
-      return;
-    }
-
-    if (uType === 'STARTDT') {
-      launchPacket('U-Frame', 'RCC_TO_RTU', 'U-Frame | STARTDT ACT (0x07)', 'RCC → RTU · Activate Data Transfer');
-      if (faultMode === 'STARTDT_FAIL' || faultMode === 'T1_TIMEOUT') {
-        appendFrame({
-          format: 'U-Frame',
-          dir: 'RCC → RTU',
-          apciText: 'STARTDT ACT (NO CON)',
-          summary: `STARTDT ACT sent — No STARTDT CON received within T1 (${IEC104_NET.t1Sec} s)`,
-          rawHex: '68 04 07 00 00 00',
+  // Test Simulation Lab Handlers
+  const handleToggleTest = (t: Iec104TestDef) => {
+    const ts = nowTimeStr();
+    const nextOn = !testState[t.id]?.enabled;
+    if (t.id === 'T32_FULL_RECOVERY' && nextOn) {
+      setTestState((prev) => {
+        const copy = { ...prev };
+        IEC104_TESTS.forEach((item) => {
+          if (item.isFault) copy[item.id] = { enabled: false, status: 'IDLE', actualResult: 'Cleared by Recovery', timestamp: ts };
         });
-        return;
-      }
-      setLinkState('STARTDT_ACTIVE');
-      setRxFramesTotal((r) => r + 1);
-      setTxFramesTotal((t) => t + 1);
-      appendFrame({
-        format: 'U-Frame',
-        dir: 'RTU → RCC',
-        apciText: 'STARTDT CON (0x0B)',
-        summary: 'STARTDT ACT (0x07) → STARTDT CON (0x0B) — Data Transfer Active',
-        rawHex: '68 04 0B 00 00 00',
-      });
-    } else if (uType === 'STOPDT') {
-      setLinkState('STOPDT_STANDBY');
-      launchPacket('U-Frame', 'RCC_TO_RTU', 'U-Frame | STOPDT ACT (0x13)', 'RCC → RTU · Stop Data Transfer');
-      appendFrame({
-        format: 'U-Frame',
-        dir: 'RTU → RCC',
-        apciText: 'STOPDT CON (0x23)',
-        summary: 'STOPDT ACT (0x13) → STOPDT CON (0x23) — Link Standby (No I-Frames)',
-        rawHex: '68 04 23 00 00 00',
+        copy[t.id] = { enabled: true, status: 'PASSED', actualResult: t.expectedResult, timestamp: ts };
+        return copy;
       });
     } else {
-      launchPacket('U-Frame', 'RCC_TO_RTU', 'U-Frame | TESTFR ACT (0x43)', 'Keep-Alive Supervision (T3)');
-      if (faultMode === 'T3_TIMEOUT') {
-        appendFrame({
-          format: 'U-Frame',
-          dir: 'RCC → RTU',
-          apciText: 'TESTFR TIMEOUT (T3)',
-          summary: `TESTFR ACT sent — No TESTFR CON received (T3=${IEC104_NET.t3Sec}s expired)`,
-          rawHex: '68 04 43 00 00 00',
-        });
-        return;
-      }
-      appendFrame({
-        format: 'U-Frame',
-        dir: 'RTU → RCC',
-        apciText: 'TESTFR CON (0x83)',
-        summary: 'TESTFR ACT (0x43) → TESTFR CON (0x83) — Link Keep-Alive OK',
-        rawHex: '68 04 83 00 00 00',
-      });
+      setTestState((prev) => ({
+        ...prev,
+        [t.id]: {
+          enabled: nextOn,
+          status: nextOn ? (t.isFault ? 'FAILED' : 'PASSED') : 'IDLE',
+          actualResult: nextOn ? t.expectedResult : 'Cleared / Restored',
+          timestamp: ts,
+        },
+      }));
     }
+    setTestHistory((prev) => [
+      { id: Date.now() + Math.random(), time: ts, testName: t.name, action: nextOn ? 'ON' : 'OFF', status: nextOn ? (t.isFault ? 'FAILED' : 'PASSED') : 'IDLE', detail: nextOn ? t.expectedResult : 'Test disabled' },
+      ...prev.slice(0, 49),
+    ]);
   };
 
-  // Accurate 4-Step Station General Interrogation (GI) Sequence
+  const handleRunAllSafe = () => {
+    const ts = nowTimeStr();
+    setTestState((prev) => {
+      const next = { ...prev };
+      IEC104_TESTS.forEach((t) => {
+        if (t.safeBatch) next[t.id] = { enabled: true, status: 'PASSED', actualResult: t.expectedResult, timestamp: ts };
+      });
+      return next;
+    });
+    setTestHistory((prev) => [
+      { id: Date.now(), time: ts, testName: 'All Safe IEC 61850 → 104 Tests', action: 'RUN_SAFE', status: 'PASSED', detail: 'Executed all safe telecontrol tests' },
+      ...prev.slice(0, 49),
+    ]);
+  };
+
+  const handleResetAll = (stopOnly: boolean) => {
+    const ts = nowTimeStr();
+    setTestState(() => {
+      const next: Record<string, Iec104TestRuntime> = {};
+      IEC104_TESTS.forEach((t) => {
+        next[t.id] = { enabled: false, status: 'IDLE', actualResult: stopOnly ? 'Stopped' : 'Not executed', timestamp: stopOnly ? ts : '—' };
+      });
+      return next;
+    });
+    setTestHistory((prev) => [
+      { id: Date.now(), time: ts, testName: stopOnly ? 'Stop All Tests' : 'Reset All Faults', action: 'RESET', status: 'IDLE', detail: 'All test toggles reset to IDLE' },
+      ...prev.slice(0, 49),
+    ]);
+  };
+
+  const handleExportCsv = () => {
+    const rows = [
+      ['#', 'Test ID', 'Test Name', 'Category', 'State', 'Status', 'Expected Result', 'Actual Result', 'Timestamp'],
+      ...IEC104_TESTS.map((t) => {
+        const r = testState[t.id];
+        return [String(t.num), t.id, t.name, t.cat, r.enabled ? 'ON' : 'OFF', r.status, t.expectedResult, r.actualResult, r.timestamp];
+      }),
+    ];
+    const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'iec104_test_simulation_results.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleTriggerGi = () => {
-    if (!isDataTransferActive) {
-      setGiStatus('Idle');
-      appendFrame({
-        format: 'I-Frame',
-        dir: 'RCC → RTU',
-        apciText: 'GI BLOCKED',
-        summary: 'Cannot start General Interrogation — Link is not in STARTDT ACTIVE state',
-        rawHex: '—',
-      });
-      return;
-    }
-
-    setGiStatus('In Progress');
-    setGiStep(1);
-    const reqNr = rxSeqNr + 1;
-    setRxSeqNr(reqNr);
-    launchPacket('I-Frame', 'RCC_TO_RTU', 'C_IC_NA_1 (TypeID=100) | COT=6', 'Station General Interrogation (QOI=20)');
-    appendFrame({
-      format: 'I-Frame',
-      dir: 'RCC → RTU',
-      apciText: `N(S)=${reqNr} N(R)=${txSeqNs}`,
-      summary: 'Step 1/4: C_IC_NA_1 (TypeID=100), COT=6 (Activation), COA=132, IOA=0, QOI=20',
-      rawHex: encodeIFrameHex(reqNr, txSeqNs, 100, 6, IEC104_NET.coa, 0, 0x14),
-      typeId: 100,
-      vsq: '0x01 (1 obj)',
-      cot: 6,
-      coa: IEC104_NET.coa,
-      ioa: 0,
-      quality: 'QOI=20',
-      ns: reqNr,
-      nr: txSeqNs,
-    });
-
-    if (faultMode === 'GI_TIMEOUT' || faultMode === 'T1_TIMEOUT') {
-      window.setTimeout(() => {
-        setGiStatus('Timeout (T1)');
-        setGiStep(1);
-        appendFrame({
-          format: 'I-Frame',
-          dir: 'RTU → RCC',
-          apciText: 'GI TIMEOUT',
-          summary: `General Interrogation failed — No COT=7/COT=10 received within T1 (${IEC104_NET.t1Sec}s)`,
-          rawHex: '—',
-        });
-      }, 650);
-      return;
-    }
-
-    // Step 2: Activation Confirmation (COT=7)
-    window.setTimeout(() => {
-      setGiStep(2);
-      setTxSeqNs((n) => n + 1);
-      appendFrame({
-        format: 'I-Frame',
-        dir: 'RTU → RCC',
-        apciText: `N(S)=${txSeqNs + 1} N(R)=${reqNr + 1}`,
-        summary: 'Step 2/4: C_IC_NA_1 (TypeID=100), COT=7 (Activation Confirmation), COA=132, QOI=20',
-        rawHex: encodeIFrameHex(txSeqNs + 1, reqNr + 1, 100, 7, IEC104_NET.coa, 0, 0x14),
-        typeId: 100,
-        cot: 7,
-        coa: IEC104_NET.coa,
-        ioa: 0,
-      });
-    }, 450);
-
-    // Step 3: Interrogated Objects (COT=20)
-    window.setTimeout(() => {
-      setGiStep(3);
-      setTxSeqNs((n) => n + 1);
-      launchPacket('I-Frame', 'RTU_TO_RCC', `GI Data (${ioaEntries.length} IOAs) | COT=20`, 'Interrogated by Station (COA=132)');
-      appendFrame({
-        format: 'I-Frame',
-        dir: 'RTU → RCC',
-        apciText: `N(S)=${txSeqNs + 2} N(R)=${reqNr + 1}`,
-        summary: `Step 3/4: ${ioaEntries.length} Information Objects transmitted with COT=20 (Interrogated by station)`,
-        rawHex: encodeIFrameHex(txSeqNs + 2, reqNr + 1, 31, 20, IEC104_NET.coa, 1001, 0x02),
-        typeId: 31,
-        cot: 20,
-        coa: IEC104_NET.coa,
-        ioa: 1001,
-      });
-    }, 950);
-
-    // Step 4: Activation Termination (COT=10) -> only now mark GI Completed!
-    window.setTimeout(() => {
-      setGiStep(4);
-      setGiCount((c) => c + 1);
-      setGiStatus('Completed (QOI=20)');
-      setTxSeqNs((n) => n + 1);
-      setTxFramesTotal((t) => t + 3);
-      appendFrame({
-        format: 'I-Frame',
-        dir: 'RTU → RCC',
-        apciText: `N(S)=${txSeqNs + 3} N(R)=${reqNr + 1}`,
-        summary: 'Step 4/4: C_IC_NA_1 (TypeID=100), COT=10 (Activation Termination) — GI Sequence Completed',
-        rawHex: encodeIFrameHex(txSeqNs + 3, reqNr + 1, 100, 10, IEC104_NET.coa, 0, 0x14),
-        typeId: 100,
-        cot: 10,
-        coa: IEC104_NET.coa,
-        ioa: 0,
-      });
-    }, 1500);
+    setGiCount((c) => c + 1);
+    setLogs((prev) => [
+      { id: Date.now(), time: nowTimeStr(), frameType: 'I-Frame', direction: 'RCC/SLDC ↔ GTW-01', details: 'C_IC_NA_1 (QOI=20) COT=6 → COT=7 → COT=20 Burst → COT=10 Terminated', result: wanHealthy ? 'Delivered' : 'Fault' },
+      ...prev.slice(0, 39),
+    ]);
   };
 
-  // Remote Command Execution (C_DC_NA_1, TypeID=46) with distinct Control Ack vs Physical Breaker Feedback
-  const handleRemoteCommand = (action: 'TRIP' | 'CLOSE') => {
-    if (!targetBay) return;
-    const bayIdx = Math.max(0, bays.indexOf(targetBay));
-    const cmdIoa = 6001 + bayIdx;
-    const dcoText = action === 'CLOSE' ? 'DCO=2 (ON)' : 'DCO=1 (OFF)';
-    const desiredBreakerState = action === 'CLOSE' ? 'CLOSED' : 'OPEN';
-
-    if (!isDataTransferActive) {
-      setCommandTraceStep('Blocked — STARTDT not active or TCP/2404 disconnected');
+  const handleSendCommand = () => {
+    if (!wanHealthy || interlockBlocked) {
+      setLastCmdMsg(interlockBlocked ? 'BLOCKED: CILO Interlock Active (Negative Con P/N=1)' : 'FAILED: WAN / TCP 2404 Link Down');
       return;
     }
-
-    setCommandTraceStep(`1/4 RCC → Gateway: C_DC_NA_1 (${controlMode}) IOA=${cmdIoa} ${dcoText} sent...`);
-    launchPacket('I-Frame', 'RCC_TO_RTU', `C_DC_NA_1 (TypeID=46) | ${dcoText}`, `${controlMode} · COA=132 · IOA=${cmdIoa}`);
-    const nextNr = rxSeqNr + 1;
-    setRxSeqNr(nextNr);
-
-    appendFrame({
-      format: 'I-Frame',
-      dir: 'RCC → RTU → IED',
-      apciText: `N(S)=${nextNr} N(R)=${txSeqNs}`,
-      summary: `C_DC_NA_1 (TypeID=46, COT=6 Act, ${controlMode}), COA=132, IOA=${cmdIoa}, ${dcoText} → ${targetBay.bayCode}`,
-      rawHex: encodeIFrameHex(nextNr, txSeqNs, 46, 6, IEC104_NET.coa, cmdIoa, action === 'CLOSE' ? 0x02 : 0x01),
-      typeId: 46,
-      cot: 6,
-      coa: IEC104_NET.coa,
-      ioa: cmdIoa,
-    });
-
-    if (!interlockOk || faultMode === 'NEG_CMD_CON') {
-      window.setTimeout(() => {
-        const reason = !interlockOk ? 'Bay Interlock Active (CILO1.EnaOpn/Cls=FALSE)' : 'Negative Command Confirmation Fault';
-        setCommandTraceStep(`Rejected (P/N=1 Negative ActCon): ${reason} — Breaker state unchanged`);
-        setLastCommandText(`REJECTED (${targetBay.bayCode} ${dcoText})`);
-        appendFrame({
-          format: 'I-Frame',
-          dir: 'RTU → RCC',
-          apciText: `N(S)=${txSeqNs + 1} N(R)=${nextNr + 1}`,
-          summary: `C_DC_NA_1 COT=7 (Negative Confirmation P/N=1) — ${reason}`,
-          rawHex: encodeIFrameHex(txSeqNs + 1, nextNr + 1, 46, 0x47, IEC104_NET.coa, cmdIoa, 0x00),
-          typeId: 46,
-          cot: 7,
-          coa: IEC104_NET.coa,
-          ioa: cmdIoa,
-          quality: 'NEGATIVE CON (P/N=1)',
-        });
-      }, 600);
-      return;
-    }
-
-    // Step 2: Command Activation Confirmation (COT=7) — NOT yet physical breaker change!
-    window.setTimeout(() => {
-      setCommandTraceStep(`2/4 Gateway → RCC: COT=7 Positive ActCon (${controlMode}) — Forwarding MMS CSWI1.Pos.Oper to Bay IED...`);
-      appendFrame({
-        format: 'I-Frame',
-        dir: 'RTU → RCC',
-        apciText: `N(S)=${txSeqNs + 1} N(R)=${nextNr + 1}`,
-        summary: `C_DC_NA_1 COT=7 (Positive ActCon) — Command accepted by Gateway (awaiting physical breaker feedback)`,
-        rawHex: encodeIFrameHex(txSeqNs + 1, nextNr + 1, 46, 7, IEC104_NET.coa, cmdIoa, action === 'CLOSE' ? 0x02 : 0x01),
-        typeId: 46,
-        cot: 7,
-        coa: IEC104_NET.coa,
-        ioa: cmdIoa,
-      });
-    }, 550);
-
-    // Step 3-4: Physical Breaker Operating & Spontaneous M_DP_TB_1 Feedback
-    window.setTimeout(() => {
-      commandBreaker(targetBay.id, desiredBreakerState);
-      setTxSeqNs((n) => n + 2);
-      setTxFramesTotal((t) => t + 2);
-      setLastCommandText(`${targetBay.bayCode} ${dcoText} → ${desiredBreakerState}`);
-      setCommandTraceStep(
-        `4/4 Confirmed: Bay IED XCBR1.Pos=${desiredBreakerState} → Spontaneous M_DP_TB_1 (IOA=${1001 + bayIdx}) & COT=10 ActTerm sent to RCC`
-      );
-      launchPacket('I-Frame', 'RTU_TO_RCC', `M_DP_TB_1 Feedback | IOA=${1001 + bayIdx}`, `${targetBay.bayCode} Breaker ${desiredBreakerState}`);
-      appendFrame({
-        format: 'I-Frame',
-        dir: 'RTU → RCC',
-        apciText: `N(S)=${txSeqNs + 2} N(R)=${nextNr + 1}`,
-        summary: `M_DP_TB_1 (TypeID=31, COT=3) IOA=${1001 + bayIdx} Feedback=${desiredBreakerState} + C_DC_NA_1 COT=10 ActTerm`,
-        rawHex: encodeIFrameHex(txSeqNs + 2, nextNr + 1, 31, 3, IEC104_NET.coa, 1001 + bayIdx, action === 'CLOSE' ? 0x02 : 0x01),
-        typeId: 31,
-        cot: 3,
-        coa: IEC104_NET.coa,
-        ioa: 1001 + bayIdx,
-      });
-    }, 1250);
+    const targetState = cmdAction === 'TRIP' ? 'OPEN' : 'CLOSED';
+    commandBreaker(cmdBayId, targetState);
+    setLastCmdMsg(`${cmdMode} C_DC_NA_1 (${cmdAction}) → ${cmdBayId} Executed & Confirmed (COT=7→10)`);
+    setLogs((prev) => [
+      { id: Date.now(), time: nowTimeStr(), frameType: 'I-Frame', direction: 'RCC/SLDC → GTW-01 → IED', details: `${cmdMode} C_DC_NA_1 (${cmdAction}) → ${cmdBayId} CSWI1.Pos`, result: 'Delivered' },
+      ...prev.slice(0, 39),
+    ]);
   };
 
-  const handleReset = () => {
-    setSpeed(0.5);
-    setPlaying(true);
-    setLinkState('STARTDT_ACTIVE');
-    setFaultMode('NONE');
-    setInterlockOk(true);
-    setInFlight(null);
-    setGiStatus('Completed (QOI=20)');
-    setGiStep(4);
-    setCommandTraceStep('Idle — Select bay IOA & issue C_DC_NA_1');
-  };
+  const visibleTests = useMemo(
+    () => (testCatFilter === 'ALL' ? IEC104_TESTS : IEC104_TESTS.filter((t) => t.cat === testCatFilter)),
+    [testCatFilter]
+  );
 
-  // Compute exact packet position along the ResizeObserver-measured physical cables
-  const pktPos = useMemo(() => {
-    if (!inFlight || !cableGeom) return null;
-    const fullForward: PortPoint[] = [...cableGeom.c1, ...cableGeom.c2, ...cableGeom.c3];
-    const route = inFlight.direction === 'RTU_TO_RCC' ? fullForward : [...fullForward].reverse();
-    return samplePolyline(route, inFlight.progress);
-  }, [inFlight, cableGeom]);
-
-  const portMap: Record<'RTU_ETH' | 'SW_P1' | 'SW_P5' | 'GW_ETH1' | 'GW_ETH2' | 'RCC_ETH', PortInspectionInfo> = {
-    RTU_ETH: {
-      title: `${IEC104_NET.rtuName} — ETH1`,
-      connectedDevice: IEC104_NET.switchName,
-      remotePort: 'Port 1',
-      protocol: 'Station LAN (IEC 61850 / Modbus / IEC-104)',
-      tcpPort: '2404',
-      linkStatus: isTcpUp ? 'UP' : 'DOWN',
-      speedDuplex: 'Simulated 100BASE-TX Full-Duplex',
-    },
-    SW_P1: {
-      title: `${IEC104_NET.switchName} — Port 1`,
-      connectedDevice: `${IEC104_NET.rtuName} (${IEC104_NET.rtuIp})`,
-      remotePort: 'ETH1',
-      protocol: 'Station LAN Ethernet',
-      tcpPort: '2404',
-      linkStatus: isTcpUp ? 'UP' : 'DOWN',
-      speedDuplex: 'Simulated 100BASE-TX Full-Duplex',
-    },
-    SW_P5: {
-      title: `${IEC104_NET.switchName} — Port 5`,
-      connectedDevice: `${IEC104_NET.gatewayName} (${IEC104_NET.gatewayIp})`,
-      remotePort: 'ETH1',
-      protocol: 'Station LAN Ethernet',
-      tcpPort: '2404',
-      linkStatus: isTcpUp ? 'UP' : 'DOWN',
-      speedDuplex: 'Simulated 100BASE-TX Full-Duplex',
-    },
-    GW_ETH1: {
-      title: `${IEC104_NET.gatewayName} — ETH1 (Station LAN)`,
-      connectedDevice: IEC104_NET.switchName,
-      remotePort: 'Port 5',
-      protocol: 'IEC 61850 MMS / Modbus TCP Southbound',
-      tcpPort: '102 / 502',
-      linkStatus: isTcpUp ? 'UP' : 'DOWN',
-      speedDuplex: 'Simulated 100BASE-TX Full-Duplex',
-    },
-    GW_ETH2: {
-      title: `${IEC104_NET.gatewayName} — ETH2 (Telecontrol WAN Uplink)`,
-      connectedDevice: `${IEC104_NET.rccName} via Routed MPLS WAN (${IEC104_NET.rccIp})`,
-      remotePort: 'RCC Ethernet Interface',
-      protocol: 'IEC 60870-5-104 (Controlled Station)',
-      tcpPort: '2404',
-      linkStatus: isTcpUp ? 'UP' : 'DOWN',
-      speedDuplex: 'Simulated Routed MPLS WAN / Ethernet',
-    },
-    RCC_ETH: {
-      title: `${IEC104_NET.rccName} — Ethernet Interface`,
-      connectedDevice: `${IEC104_NET.gatewayName} via Routed MPLS WAN (${IEC104_NET.gatewayIp})`,
-      remotePort: 'ETH2',
-      protocol: 'IEC 60870-5-104 (Controlling Station)',
-      tcpPort: '2404',
-      linkStatus: isTcpUp ? 'UP' : 'DOWN',
-      speedDuplex: 'Simulated Routed MPLS WAN / Ethernet',
-    },
-  };
-
-  const tabs: { id: Iec104LabTab; label: string }[] = [
-    { id: 'TOPOLOGY_LIVE', label: 'Topology & Live Data' },
-    { id: 'IOA_MAPPING', label: 'IOA Mapping' },
-    { id: 'GI_SEQUENCE', label: 'General Interrogation (GI)' },
-    { id: 'REMOTE_COMMANDS', label: 'Remote Commands' },
-    { id: 'APCI_ANALYZER', label: 'APCI / ASDU Analyzer' },
-    { id: 'FAULT_SIMULATION', label: 'Fault & Simulation' },
-    { id: 'LOGS_DIAGNOSTICS', label: 'Logs & Diagnostics' },
-  ];
-
-  const faultList: { id: Iec104FaultMode; label: string; group: string }[] = [
-    { id: 'NONE', label: 'Normal — TCP/2404 Connected & STARTDT Active', group: 'Healthy' },
-    { id: 'TCP_2404_DOWN', label: 'Fault 1: TCP Port 2404 Socket Disconnected', group: 'Transport' },
-    { id: 'STARTDT_FAIL', label: 'Fault 2: STARTDT Confirmation Timeout (T1)', group: 'U-Frame' },
-    { id: 'GI_TIMEOUT', label: 'Fault 3: General Interrogation Timeout (COT=10)', group: 'GI Sequence' },
-    { id: 'UNKNOWN_COA', label: 'Fault 4: Unknown Common Address (COT=46)', group: 'ASDU Error' },
-    { id: 'UNKNOWN_IOA', label: 'Fault 5: Unknown IOA Exception (COT=47)', group: 'ASDU Error' },
-    { id: 'NEG_CMD_CON', label: 'Fault 6: Negative Command Confirmation (P/N=1)', group: 'Command' },
-    { id: 'SEQ_NUM_ERROR', label: 'Fault 7: Sequence Number N(S)/N(R) Error', group: 'APCI' },
-    { id: 'T1_TIMEOUT', label: 'Fault 8: T1 APDU Ack Timeout (15 s)', group: 'Timer' },
-    { id: 'T3_TIMEOUT', label: 'Fault 9: T3 Test Frame Timeout (20 s)', group: 'Timer' },
-  ];
-
-  if (!targetBay || !selectedEntry) {
-    return (
-      <div className="p-6 text-slate-300 bg-[#030B18] rounded-xl border border-[#1B4B72]">
-        Loading IEC 60870-5-104 Lab V2 telemetry...
-      </div>
-    );
-  }
+  const stagePillLabel =
+    !mmsHealthy
+      ? 'FAULT: IEC 61850 MMS / SWITCH DOWN'
+      : simPhase === 'MMS_IN'
+      ? 'STAGE 1: IEC 61850 MMS REPORT (102)'
+      : simPhase === 'CONVERT'
+      ? `STAGE 2: LIVE 61850→104 CONVERT (${convStep}/4)`
+      : wanHealthy
+      ? 'STAGE 3: IEC-104 I-FRAME WAN TX (2404)'
+      : 'FAULT: IEC-104 WAN / 2404 BLOCKED';
 
   return (
-    <div style={{ backgroundColor: '#030B18', color: '#E9F3FF' }} className="space-y-3 pb-6 text-xs select-none overflow-x-hidden">
-      {/* 1. HEADER BAR */}
+    <div className="space-y-3 pb-8 text-[#E8F4FF]">
+      {/* 1. TOP HEADER BAR */}
       <div
-        style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }}
-        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 shadow-lg"
+        className="rounded-xl border px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5"
+        style={{
+          background: 'linear-gradient(90deg, #041628 0%, #07223B 52%, #041628 100%)',
+          borderColor: 'rgba(56, 224, 255, 0.45)',
+          boxShadow: '0 0 22px rgba(0, 212, 255, 0.14)',
+        }}
       >
-        <div className="min-w-0">
-          <h2 className="text-base sm:text-lg font-extrabold tracking-wide text-white">
-            IEC 60870-5-104 Lab V2 — RTU, Gateway &amp; RCC Communication
-          </h2>
-          <p className="text-[11px] text-[#9BC0DF] mt-0.5">
-            Station Gateway / RTU ↔ Remote Control Center (RCC / SLDC) · I-/S-/U-Frames · IOA Mapping · General Interrogation &amp; Remote Commands
+        <div>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-sm sm:text-base font-extrabold text-white tracking-tight">
+              IEC 60870-5-104 Lab V3 — Multi-IED IEC 61850 to IEC-104 Conversion
+            </h1>
+            <span className="rounded border border-[#38BDF8]/50 bg-[#082B47] px-2 py-0.5 font-mono text-[9.5px] font-bold text-[#7DD3FC]">
+              SIMULATED TELECONTROL
+            </span>
+          </div>
+          <p className="text-[11px] text-[#8CC5E8] mt-0.5">
+            IEC 61850 Ed.2 Multi-Vendor IEDs (MMS TCP/102) → Hirschmann RSP35 → IEC-104 Gateway GTW-01 → RCC / SLDC (TCP/2404, COA=132)
           </p>
         </div>
-
-        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
-          <span
-            style={{
-              backgroundColor: isFullyHealthy ? '#06291E' : '#3B0D15',
-              borderColor: isFullyHealthy ? '#22C55E' : '#EF4444',
-              color: isFullyHealthy ? '#4ADE80' : '#FCA5A5',
-            }}
-            className="rounded-lg border px-2.5 py-1"
-          >
-            ● Link State: {isFullyHealthy ? 'STARTDT ACTIVE' : faultMode !== 'NONE' ? faultMode : 'STOPDT STANDBY'}
+        <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10px] font-bold">
+          <span className={`rounded-lg border px-2.5 py-1 ${wanHealthy ? 'border-[#22C55E] bg-[#062E20] text-[#4ADE80]' : 'border-[#EF4444] bg-[#3B0D15] text-[#FCA5A5]'}`}>
+            ● Link State: {wanHealthy ? 'STARTDT ACTIVE' : 'LINK FAULT'}
           </span>
-          <span className="rounded-lg border border-[#A855F7] bg-[#241038] px-2.5 py-1 font-mono text-[#D8B4FE]">
-            IEC-104 · TCP/2404 · COA {IEC104_NET.coa}
+          <span className="rounded-lg border border-[#C084FC]/70 bg-[#2E1065]/75 px-2.5 py-1 text-[#E9D5FF]">
+            IEC-104 · TCP/2404 · COA 132
           </span>
-          <span className="rounded-lg border border-[#1E5280] bg-[#082038] px-2.5 py-1 font-mono text-[#77E7FF]">
-            N(S)={txSeqNs} · N(R)={rxSeqNr}
+          <span className="rounded-lg border border-[#38BDF8]/50 bg-[#072038] px-2.5 py-1 text-[#7DD3FC]">
+            N(S)={nsSeq} · N(R)={nrSeq}
           </span>
-          <span className="rounded-lg border border-[#0EA5E9] bg-[#061C31] px-2.5 py-1 font-mono text-[#BAE6FD]">
-            Speed: {speed}×
+          <span className="rounded-lg border border-[#F59E0B]/60 bg-[#2D1D06] px-2.5 py-1 text-[#FDE047]">
+            GI Cycles: {giCount}
           </span>
         </div>
       </div>
 
-      {/* 2. NAVIGATION TABS & PLAYBACK CONTROLS */}
-      <div
-        style={{ backgroundColor: '#061526', borderColor: '#173E61' }}
-        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2"
-      >
+      {/* 2. TAB NAVIGATION & PLAYBACK CONTROLS (DEFAULT 0.1x) */}
+      <div className="rounded-xl border border-[#174266] bg-[#051628] px-3 py-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
-          {tabs.map((tab) => {
-            const active = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                style={{
-                  backgroundColor: active ? '#00A8E8' : '#081D33',
-                  borderColor: active ? '#38BDF8' : '#183F62',
-                  color: active ? '#02101D' : '#C8E2F8',
-                }}
-                className="rounded-lg border px-2.5 py-1.5 text-[11px] font-extrabold transition hover:border-[#38BDF8]"
-              >
-                {tab.label}
-              </button>
-            );
-          })}
+          {(
+            [
+              ['TOPOLOGY_LIVE', 'Topology & Live Data'],
+              ['IOA_MAPPING', 'IOA Mapping'],
+              ['GI_SEQUENCE', 'General Interrogation (GI)'],
+              ['REMOTE_COMMANDS', 'Remote Commands'],
+              ['APCI_ANALYZER', 'APCI / ASDU Analyzer'],
+              ['LOGS_DIAGNOSTICS', 'Logs & Diagnostics'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActiveTab(id)}
+              className="rounded-lg border px-2.5 py-1 text-[11px] font-extrabold transition"
+              style={
+                activeTab === id
+                  ? { background: 'linear-gradient(180deg,#38F3FF,#00C8EA)', borderColor: '#A8FDFF', color: '#031829', boxShadow: '0 0 12px rgba(0,229,255,0.45)' }
+                  : { background: '#082038', borderColor: '#1B4B72', color: '#BAE6FD' }
+              }
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10.5px]">
           <button
             type="button"
             onClick={() => setPlaying((p) => !p)}
-            style={{
-              backgroundColor: playing ? '#06291E' : '#2B1F08',
-              borderColor: playing ? '#22C55E' : '#EAB308',
-              color: playing ? '#4ADE80' : '#FDE047',
-            }}
-            className="flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-bold"
+            className="inline-flex items-center gap-1 rounded-lg border border-[#22C55E] bg-[#062E20] px-2.5 py-1 font-extrabold text-[#4ADE80] hover:brightness-110 transition"
           >
-            {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+            {playing ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
             {playing ? 'Pause' : 'Resume'}
           </button>
-
-          <div className="flex items-center rounded-lg border border-[#184064] bg-[#04101E] p-0.5 font-mono text-[10.5px]">
-            {([0.5, 1, 2, 4] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setSpeed(s)}
-                style={{
-                  backgroundColor: speed === s ? '#00CFFF' : 'transparent',
-                  color: speed === s ? '#02101D' : '#9BC0DF',
-                }}
-                className="rounded px-2 py-0.5 font-extrabold transition"
-              >
-                {s}×
-              </button>
-            ))}
-          </div>
-
+          {([0.1, 0.25, 0.5, 1, 2, 4] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSpeed(s)}
+              className="rounded-lg border px-2 py-1 font-extrabold transition"
+              style={
+                speed === s
+                  ? { background: '#00D8F5', borderColor: '#7DF9FF', color: '#021424', boxShadow: '0 0 10px rgba(0,229,255,0.5)' }
+                  : { background: '#082038', borderColor: '#1B4B72', color: '#9BD0EE' }
+              }
+            >
+              {s}x
+            </button>
+          ))}
           <button
             type="button"
-            onClick={handleReset}
-            className="flex items-center gap-1 rounded-lg border border-[#1D4D75] bg-[#081F36] px-2.5 py-1 text-[11px] font-bold text-[#BAE6FD] hover:border-[#38BDF8]"
+            onClick={handleTriggerGi}
+            className="rounded-lg border border-[#C084FC] bg-[#2E1065]/80 px-2.5 py-1 font-extrabold text-[#E9D5FF] hover:brightness-110 transition"
+          >
+            Send GI (QOI=20)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSpeed(0.1);
+              setPlaying(true);
+              setGatewayPinned(false);
+              setGatewayManuallyClosed(false);
+              handleResetAll(false);
+            }}
+            className="inline-flex items-center gap-1 rounded-lg border border-[#1B4B72] bg-[#082038] px-2.5 py-1 font-extrabold text-[#BAE6FD] hover:border-[#38F3FF] transition"
           >
             <RotateCcw className="w-3 h-3" /> Reset
           </button>
         </div>
       </div>
 
-      {/* TAB 1: TOPOLOGY & LIVE DATA (EXACT REFERENCE IMAGE LAYOUT) */}
+      {/* 3. TOPOLOGY & LIVE DATA TAB */}
       {activeTab === 'TOPOLOGY_LIVE' && (
-        <div className="space-y-3">
-          {/* TOP 3-PANEL ROW: Station RTU | Central 4-Device Topology | RCC / SLDC */}
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 items-stretch">
-            {/* LEFT: Station Gateway / RTU (Controlled) — 3 cols */}
-            <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="xl:col-span-3 rounded-xl border p-3 flex flex-col justify-between min-w-0">
-              <div className="flex items-center justify-between border-b border-[#163B5C] pb-1.5 mb-2">
-                <div className="flex items-center gap-1.5 font-extrabold text-white text-xs truncate">
-                  <Server className="w-4 h-4 text-[#38BDF8] shrink-0" />
-                  <span className="truncate">Station Gateway / RTU (Controlled)</span>
-                </div>
-                <span className="px-2 py-0.5 rounded bg-[#241038] border border-[#A855F7] text-[#D8B4FE] font-mono text-[9.5px] font-bold shrink-0">
-                  COA = {IEC104_NET.coa}
+        <div className="space-y-3.5">
+          {/* SYSTEM TOPOLOGY CARD */}
+          <div
+            className="rounded-2xl border p-3.5 relative overflow-x-auto"
+            style={{
+              borderColor: 'rgba(56, 224, 255, 0.45)',
+              background:
+                'linear-gradient(rgba(56, 189, 248, 0.04) 1px, transparent 1px), ' +
+                'linear-gradient(90deg, rgba(56, 189, 248, 0.04) 1px, transparent 1px), ' +
+                'radial-gradient(ellipse at 50% 42%, #07203B 0%, #03101F 76%)',
+              backgroundSize: '28px 28px, 28px 28px, 100% 100%',
+              boxShadow: '0 0 26px rgba(0, 212, 255, 0.14)',
+            }}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Radio className="w-4 h-4 text-[#38F3FF]" />
+                <span className="text-[13.5px] font-extrabold text-white">
+                  System Topology — Multi-IED IEC 61850 MMS → IEC 60870-5-104 Conversion
+                </span>
+                <span className="text-[11px] font-semibold text-[#5EEAD4]">
+                  (Hover any IED / Switch for Holographic Info · Click GTW-01 to Pin Conversion)
                 </span>
               </div>
-
-              <div className="grid grid-cols-12 gap-2 items-center">
-                <div className="col-span-5 flex flex-col items-center justify-center rounded-lg border border-[#173C5E] bg-[#040E1A] p-2">
-                  <img
-                    src={HW_ASSETS.RTU}
-                    onError={(e) => {
-                      if (e.currentTarget.src !== HW_ASSETS.RTU_FALLBACK) e.currentTarget.src = HW_ASSETS.RTU_FALLBACK;
-                    }}
-                    alt="Schneider MiCOM C264 Station RTU"
-                    className="h-[112px] w-auto object-contain"
-                  />
-                  <span className="text-[9px] font-mono text-[#BAE6FD] mt-1 text-center leading-tight">
-                    Moxa MGate 5216 / MiCOM C264
-                  </span>
-                </div>
-                <div className="col-span-7 space-y-1 text-[10.5px]">
-                  <div style={{ color: isFullyHealthy ? '#4ADE80' : '#F87171' }} className="font-extrabold text-[11px]">
-                    ● {isFullyHealthy ? 'CONTROLLED STATION ONLINE' : 'TELECONTROL FAULT'}
-                  </div>
-                  {[
-                    ['Role', 'Controlled (Slave)', '#FFFFFF'],
-                    ['Gateway IP', IEC104_NET.rtuIp, '#38BDF8'],
-                    ['Common Addr', `${IEC104_NET.coa} (${IEC104_NET.coaHex})`, '#D8B4FE'],
-                    ['Southbound', 'IEC 61850 / Modbus', '#BAE6FD'],
-                    ['Northbound', 'IEC-104 (TCP/2404)', '#4ADE80'],
-                    ['Mapped IOAs', `${ioaEntries.length} Active IOAs`, '#FFFFFF'],
-                  ].map(([k, v, c]) => (
-                    <div key={k} className="flex justify-between gap-1 border-b border-[#122E49] pb-0.5 last:border-0">
-                      <span className="text-[#8BB3D4]">{k}</span>
-                      <span style={{ color: c }} className="font-mono font-bold text-right truncate">{v}</span>
-                    </div>
-                  ))}
-                </div>
+              <div className="flex flex-wrap items-center gap-3 text-[10.5px] font-semibold">
+                <span className="inline-flex items-center gap-1.5 text-[#7DD3FC]">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#00E5FF] shadow-[0_0_8px_#00E5FF]" /> IEC 61850 MMS (TCP/102)
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-[#D9F99D]">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#84CC16] shadow-[0_0_8px_#84CC16]" /> IEC-104 I-Frame (TCP/2404)
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-[#FCA5A5]">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#EF4444] shadow-[0_0_8px_#EF4444]" /> Fault / Timeout
+                </span>
               </div>
             </div>
 
-            {/* CENTER: System Topology — IEC 60870-5-104 Communication (6 cols) */}
-            <div style={{ backgroundColor: '#051324', borderColor: '#1B4B72' }} className="xl:col-span-6 rounded-xl border p-3 flex flex-col justify-between min-w-0">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <div className="flex items-center gap-1.5 font-extrabold text-white text-xs">
-                  <Layers className="w-4 h-4 text-[#00CFFF]" />
-                  <span>System Topology — IEC 60870-5-104 Communication</span>
+            <div ref={stageRef} className="min-w-[1120px] relative pt-2 pb-2">
+              {/* 4 Zone Header Pills */}
+              <div className="grid grid-cols-[1.05fr_1.15fr_1.15fr_1.05fr] gap-4 mb-3 relative z-10">
+                <div className="rounded-lg border border-[#2563EB]/60 bg-[#082240]/85 py-1.5 text-center font-mono text-[11px] font-extrabold text-[#93C5FD]">
+                  IEC 61850 IEDs (MMS · TCP/102)
                 </div>
-                <span className="rounded border border-[#0EA5E9] bg-[#061C31] px-2.5 py-0.5 font-mono text-[10px] font-bold text-[#7DD3FC]">
-                  I / S / U - Frames (IEC 60870-5-104)
-                </span>
+                <div className="rounded-lg border border-[#3B82F6]/60 bg-[#082240]/85 py-1.5 text-center font-mono text-[11px] font-extrabold text-[#93C5FD]">
+                  STATION BUS SWITCH
+                </div>
+                <div className="rounded-lg border border-[#0D9488]/70 bg-[#062934]/85 py-1.5 text-center font-mono text-[11px] font-extrabold text-[#5EEAD4]">
+                  IEC-104 GATEWAY (COA 132)
+                </div>
+                <div className="rounded-lg border border-[#16A34A]/60 bg-[#072923]/85 py-1.5 text-center font-mono text-[11px] font-extrabold text-[#86EFAC]">
+                  RCC / SLDC (MASTER)
+                </div>
               </div>
 
+              {/* AUTO-OPENING / AUTO-CLOSING 495px LIVE IEC 61850 -> IEC-104 CONVERSION POPUP ABOVE GATEWAY */}
               <div
-                ref={topoContainerRef}
-                className="relative w-full rounded-lg border border-[#14395C] bg-[#030D1A] px-2.5 pt-3 pb-12 overflow-hidden"
+                className="absolute z-40 transition-all duration-300"
+                style={{
+                  left: '46.5%',
+                  top: '10px',
+                  width: '495px',
+                  opacity: showGatewayPopup ? 1 : 0,
+                  transform: showGatewayPopup ? 'translateY(0) scale(1)' : 'translateY(10px) scale(0.96)',
+                  pointerEvents: showGatewayPopup ? 'auto' : 'none',
+                }}
               >
-                <div className="relative z-10 grid grid-cols-4 gap-2 items-end">
-                  {/* Device 1: RTU / Station Gateway */}
-                  <div className="flex flex-col items-center min-w-0">
-                    <div className="relative h-[92px] flex items-end justify-center">
-                      <img
-                        src={HW_ASSETS.RTU}
-                        onError={(e) => {
-                          if (e.currentTarget.src !== HW_ASSETS.RTU_FALLBACK) e.currentTarget.src = HW_ASSETS.RTU_FALLBACK;
-                        }}
-                        onLoad={measureTopology}
-                        alt="RTU Station Gateway"
-                        className="h-[88px] w-auto object-contain"
-                      />
-                      <button
-                        ref={rtuEthRef}
-                        type="button"
-                        onClick={() => setInspectedPort(portMap.RTU_ETH)}
-                        title="RTU ETH1"
-                        className="ml-0.5 mb-1 flex flex-col items-center rounded border border-[#38BDF8] bg-[#04182B] px-1 py-0.5"
+                <div
+                  className="rounded-2xl border-[1.5px] p-4 relative"
+                  style={{
+                    background:
+                      'radial-gradient(ellipse 65% 45% at 20% 10%, rgba(255, 255, 255, 0.24) 0%, transparent 65%), ' +
+                      'linear-gradient(135deg, rgba(255, 255, 255, 0.19) 0%, rgba(190, 240, 255, 0.14) 50%, rgba(15, 44, 68, 0.74) 100%)',
+                    backdropFilter: 'blur(24px) saturate(165%)',
+                    WebkitBackdropFilter: 'blur(24px) saturate(165%)',
+                    borderColor: !convHealthy ? '#EF4444' : 'rgba(224, 252, 255, 0.86)',
+                    boxShadow: !convHealthy
+                      ? '0 0 28px rgba(239, 68, 68, 0.45)'
+                      : '0 0 34px rgba(103, 232, 249, 0.42), inset 0 1.5px 1px rgba(255, 255, 255, 0.78)',
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2 pb-2 mb-2.5 border-b border-[#56EBFF]/25">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="w-1 h-4 rounded-full bg-[#38F3FF]" />
+                      <span className="text-[12.5px] font-extrabold text-white truncate">Live IEC 61850 → IEC-104 Conversion</span>
+                      <span className="rounded border border-[#F59E0B]/70 bg-[#3B2606] px-1.5 py-0.5 font-mono text-[9px] font-extrabold text-[#FDE047]">
+                        {activeIed.shortName}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span
+                        className="rounded-md border px-2 py-0.5 font-mono text-[9.5px] font-extrabold"
+                        style={
+                          !convHealthy
+                            ? { background: '#3B0D15', borderColor: '#EF4444', color: '#FCA5A5' }
+                            : { background: '#063326', borderColor: '#22C55E', color: '#4ADE80' }
+                        }
                       >
-                        <span className="w-2.5 h-2 rounded-[1.5px] border border-[#7DD3FC] bg-[#020B16] block" />
-                        <span className="text-[7px] font-mono font-bold text-[#7DD3FC] leading-none mt-0.5">ETH1</span>
+                        {!convHealthy
+                          ? 'CONV FAULT'
+                          : `STEP ${convStep}/4: ${convStep === 1 ? 'MMS RX' : convStep === 2 ? 'QUALITY/TIME' : convStep === 3 ? 'IOA MAP' : '104 I-FRAME'}`}
+                      </span>
+                      <button type="button" onClick={() => setGatewayPinned((p) => !p)} className="p-1 rounded hover:bg-white/10 text-[#7DD3FC]">
+                        {gatewayPinned ? <PinOff className="w-3.5 h-3.5 text-[#FDE047]" /> : <Pin className="w-3.5 h-3.5" />}
+                      </button>
+                      <button type="button" onClick={() => { setGatewayPinned(false); setGatewayManuallyClosed(true); }} className="p-1 rounded hover:bg-white/10 text-[#9BC0DF]">
+                        <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    <div className="mt-7 text-center leading-tight">
-                      <div className="text-[10px] font-extrabold text-white truncate">RTU / Station GW</div>
-                      <div className="text-[8.5px] font-mono text-[#38BDF8]">{IEC104_NET.rtuIp}</div>
-                      <div className="text-[8px] font-mono text-[#D8B4FE]">COA: {IEC104_NET.coa}</div>
-                    </div>
                   </div>
 
-                  {/* Device 2: Hirschmann RSP35 */}
-                  <div className="flex flex-col items-center min-w-0">
-                    <div className="relative h-[92px] flex items-end justify-center">
-                      <div className="relative inline-flex items-center">
-                        <img
-                          src={HW_ASSETS.SWITCH}
-                          onLoad={measureTopology}
-                          alt="Hirschmann RSP35"
-                          className="h-[72px] w-auto object-contain"
-                        />
-                        <button
-                          ref={swP1Ref}
-                          type="button"
-                          onClick={() => setInspectedPort(portMap.SW_P1)}
-                          style={{ left: '31%', bottom: '10%' }}
-                          className="absolute flex flex-col items-center"
-                        >
-                          <span className="w-3 h-2.5 rounded-[1.5px] border border-[#38BDF8] bg-[#04182B] block" />
-                          <span className="text-[7px] font-mono font-bold text-[#7DD3FC] bg-[#020B16]/90 px-0.5 rounded">P1</span>
-                        </button>
-                        <button
-                          ref={swP5Ref}
-                          type="button"
-                          onClick={() => setInspectedPort(portMap.SW_P5)}
-                          style={{ left: '64%', bottom: '10%' }}
-                          className="absolute flex flex-col items-center"
-                        >
-                          <span className="w-3 h-2.5 rounded-[1.5px] border border-[#38BDF8] bg-[#04182B] block" />
-                          <span className="text-[7px] font-mono font-bold text-[#7DD3FC] bg-[#020B16]/90 px-0.5 rounded">P5</span>
-                        </button>
+                  {/* 2x2 Multi-Color Conversion Cards */}
+                  <div className="grid grid-cols-2 gap-2.5 font-mono text-[10.5px]">
+                    <div
+                      className="rounded-lg border p-2.5 transition-all"
+                      style={{
+                        background: convStep === 1 ? 'rgba(0, 212, 255, 0.16)' : 'rgba(8, 28, 46, 0.74)',
+                        borderColor: convStep === 1 ? '#38F3FF' : 'rgba(90, 180, 220, 0.28)',
+                      }}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-extrabold text-[#38F3FF]">1. MMS REPORT RX</span>
+                        <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 1 ? 'bg-white text-[#031829]' : convStep > 1 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                          {convStep === 1 ? 'ACTIVE' : convStep > 1 ? 'DONE' : 'WAIT'}
+                        </span>
                       </div>
+                      <div className="text-[#E0F7FF] font-bold truncate">{activeIed.iedName} · {activeIed.rcbName}</div>
+                      <div className="text-[#FDE047] mt-0.5 truncate">{activeIed.lnRef}</div>
                     </div>
-                    <div className="mt-7 text-center leading-tight">
-                      <div className="text-[10px] font-extrabold text-white truncate">{IEC104_NET.switchName}</div>
-                      <div className="text-[8.5px] font-mono text-[#7DD3FC]">Station LAN</div>
-                      <div className="text-[8px] font-mono text-[#94A3B8]">{IEC104_NET.switchIp}</div>
+
+                    <div
+                      className="rounded-lg border p-2.5 transition-all"
+                      style={{
+                        background: convStep === 2 ? 'rgba(192, 132, 252, 0.18)' : 'rgba(8, 28, 46, 0.74)',
+                        borderColor: badQuality ? '#EF4444' : convStep === 2 ? '#C084FC' : 'rgba(90, 180, 220, 0.28)',
+                      }}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-extrabold text-[#D8B4FE]">2. QUALITY &amp; CP56TIME</span>
+                        <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 2 ? 'bg-[#D8B4FE] text-[#1E0836]' : convStep > 2 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                          {convStep === 2 ? 'ACTIVE' : convStep > 2 ? 'DONE' : 'WAIT'}
+                        </span>
+                      </div>
+                      <div className="text-[#F3E8FF] font-bold">q={badQuality ? '0x0100 INV' : '0x0000 GOOD'} → QDS={badQuality ? '0x80' : '0x00'}</div>
+                      <div className="text-[#4ADE80] mt-0.5 font-extrabold">Val: {activeIed.baseValue} {activeIed.unit} · CP56Time2a</div>
+                    </div>
+
+                    <div
+                      className="rounded-lg border p-2.5 transition-all"
+                      style={{
+                        background: convStep === 3 ? 'rgba(250, 204, 21, 0.16)' : 'rgba(8, 28, 46, 0.74)',
+                        borderColor: missingIoa || coaMismatch ? '#EF4444' : convStep === 3 ? '#FACC15' : 'rgba(90, 180, 220, 0.28)',
+                      }}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-extrabold text-[#FDE047]">3. COA / IOA MAPPING</span>
+                        <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 3 ? 'bg-[#FDE047] text-[#261802]' : convStep > 3 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                          {convStep === 3 ? 'ACTIVE' : convStep > 3 ? 'DONE' : 'WAIT'}
+                        </span>
+                      </div>
+                      <div className="text-[#FEF08A] font-bold">
+                        {missingIoa ? 'ERR: Unmapped LN!' : `COA:${coaMismatch ? 99 : 132} / IOA:${activeIed.ioa}`}
+                      </div>
+                      <div className="text-[#7DD3FC] mt-0.5">TypeID {activeIed.typeIdNum} ({activeIed.iec104Type}) · COT:3</div>
+                    </div>
+
+                    <div
+                      className="rounded-lg border p-2.5 transition-all"
+                      style={{
+                        background: convStep === 4 ? 'rgba(34, 197, 94, 0.18)' : 'rgba(8, 28, 46, 0.74)',
+                        borderColor: gtwOverload || !wanHealthy ? '#EF4444' : convStep === 4 ? '#4ADE80' : 'rgba(90, 180, 220, 0.28)',
+                      }}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-extrabold text-[#4ADE80]">4. IEC-104 I-FRAME TX</span>
+                        <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 4 ? 'bg-[#4ADE80] text-[#032415]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                          {convStep === 4 ? 'READY' : 'WAIT'}
+                        </span>
+                      </div>
+                      <div className="text-[#DCFCE7] font-bold">APCI: 68 15 N(S)={nsSeq} N(R)={nrSeq}</div>
+                      <div className="text-[#A3E635] mt-0.5 font-extrabold">Out: ETH1 → RCC/SLDC (2404)</div>
                     </div>
                   </div>
 
-                  {/* Device 3: IEC-104 Gateway */}
-                  <div className="flex flex-col items-center min-w-0">
-                    <div className="relative h-[92px] flex items-end justify-center">
-                      <div className="relative inline-flex items-center">
-                        <img
-                          src={HW_ASSETS.GATEWAY}
-                          onLoad={measureTopology}
-                          alt="IEC-104 Gateway"
-                          className="h-[86px] w-auto object-contain"
-                        />
-                        <button
-                          ref={gwEth1Ref}
-                          type="button"
-                          onClick={() => setInspectedPort(portMap.GW_ETH1)}
-                          style={{ left: '20%', bottom: '16%' }}
-                          className="absolute flex flex-col items-center"
-                        >
-                          <span className="w-3 h-2.5 rounded-[1.5px] border border-[#38BDF8] bg-[#04182B] block" />
-                          <span className="text-[7px] font-mono font-bold text-[#7DD3FC] bg-[#020B16]/90 px-0.5 rounded">E1</span>
-                        </button>
-                        <button
-                          ref={gwEth2Ref}
-                          type="button"
-                          onClick={() => setInspectedPort(portMap.GW_ETH2)}
-                          style={{ left: '52%', bottom: '16%' }}
-                          className="absolute flex flex-col items-center"
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <div className="flex-1 h-2 rounded-full bg-[#061828] border border-[#1E4B6E] overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-100"
+                        style={{
+                          width: `${convPct}%`,
+                          background: 'linear-gradient(90deg, #00E5FF 0%, #C084FC 40%, #FACC15 72%, #4ADE80 100%)',
+                          boxShadow: '0 0 10px rgba(0, 229, 255, 0.65)',
+                        }}
+                      />
+                    </div>
+                    <span className="font-mono text-[10px] font-extrabold text-[#7DD3FC] w-9 text-right">{convPct}%</span>
+                  </div>
+                </div>
+                <svg viewBox="0 0 360 44" className="w-[330px] h-[44px] mx-auto block pointer-events-none">
+                  <polygon points="20,0 340,0 210,44 150,44" fill="rgba(56, 232, 255, 0.11)" stroke="rgba(56, 232, 255, 0.45)" strokeWidth="1" />
+                </svg>
+              </div>
+
+              {/* 4 HARDWARE COLUMNS */}
+              <div className="grid grid-cols-[1.05fr_1.15fr_1.15fr_1.05fr] gap-4 items-center relative z-10 min-h-[430px]">
+                {/* COLUMN 1: 4 IEC 61850 IEDs (DETAILS HIDDEN; HOVER OPENS HOLOGRAPHIC POPUP) */}
+                <div className="flex flex-col justify-between gap-2.5 pl-4">
+                  {IEC61850_IEDS.map((dev, idx) => {
+                    const isAct = idx === activeIedIdx;
+                    const isHov = hoveredIedId === dev.id;
+                    const isFault = (dev.id === 'P2' && p2Offline) || mmsLost;
+                    return (
+                      <div
+                        key={dev.id}
+                        className="flex items-center justify-start relative"
+                        onMouseEnter={() => setHoveredIedId(dev.id)}
+                        onMouseLeave={() => setHoveredIedId((cur) => (cur === dev.id ? null : cur))}
+                      >
+                        <div
+                          className="relative group rounded-xl border p-1.5 transition-all cursor-pointer"
+                          style={{
+                            width: '126px',
+                            height: '92px',
+                            background: isAct || isHov ? 'linear-gradient(180deg, rgba(14, 54, 82, 0.94), rgba(6, 24, 42, 0.96))' : 'rgba(7, 24, 42, 0.86)',
+                            borderColor: isFault ? '#EF4444' : isHov ? '#FFFFFF' : isAct ? '#38F3FF' : 'rgba(56, 189, 248, 0.35)',
+                            boxShadow: isFault ? '0 0 14px rgba(239, 68, 68, 0.45)' : isHov ? '0 0 24px rgba(165, 243, 252, 0.72)' : isAct ? '0 0 18px rgba(0, 229, 255, 0.45)' : 'none',
+                          }}
                         >
                           <span
-                            className="w-3 h-2.5 rounded-[1.5px] border bg-[#021A10] block"
-                            style={{ borderColor: isTcpUp ? '#22C55E' : '#EF4444' }}
-                          />
-                          <span className="text-[7px] font-mono font-bold text-[#86EFAC] bg-[#020B16]/90 px-0.5 rounded">E2</span>
-                        </button>
-                      </div>
-                    </div>
-                    <div className="mt-7 text-center leading-tight">
-                      <div className="text-[10px] font-extrabold text-white truncate">{IEC104_NET.gatewayName}</div>
-                      <div className="text-[8.5px] font-mono text-[#4ADE80]">TCP/2404 Server</div>
-                      <div className="text-[8px] font-mono text-[#94A3B8]">WAN Uplink</div>
-                    </div>
-                  </div>
-
-                  {/* Device 4: RCC / SLDC (Master) */}
-                  <div className="flex flex-col items-center min-w-0">
-                    <div className="relative h-[92px] flex items-end justify-center">
-                      <div className="relative inline-flex items-center">
-                        <img
-                          src={HW_ASSETS.RCC}
-                          onLoad={measureTopology}
-                          alt="RCC SLDC Workstation"
-                          className="h-[88px] w-auto object-contain"
-                        />
-                        <button
-                          ref={rccEthRef}
-                          type="button"
-                          onClick={() => setInspectedPort(portMap.RCC_ETH)}
-                          style={{ left: '10%', bottom: '8%' }}
-                          className="absolute flex flex-col items-center"
-                        >
+                            className="absolute -top-2 left-2 rounded px-1.5 py-0.2 font-mono text-[9px] font-extrabold border z-20"
+                            style={{
+                              background: isAct || isHov ? '#00D8F5' : '#08253E',
+                              borderColor: isAct || isHov ? '#FFFFFF' : '#38BDF8',
+                              color: isAct || isHov ? '#021424' : '#7DD3FC',
+                            }}
+                          >
+                            {dev.id}
+                          </span>
+                          <img src={dev.image} alt={dev.fullName} className="w-full h-full object-contain rounded drop-shadow-[0_6px_10px_rgba(0,0,0,0.8)] group-hover:scale-105 transition" />
                           <span
-                            className="w-3 h-2.5 rounded-[1.5px] border bg-[#021A10] block"
-                            style={{ borderColor: isTcpUp ? '#4ADE80' : '#EF4444' }}
-                          />
-                          <span className="text-[7px] font-mono font-bold text-[#86EFAC] bg-[#020B16]/90 px-0.5 rounded">ETH</span>
-                        </button>
+                            ref={setPortRef(`ied_${dev.id}`)}
+                            className="absolute right-1 bottom-1.5 w-5 h-4 rounded-[3px] border-[1.5px] flex items-center justify-center font-mono text-[6.5px] font-extrabold text-[#E0F7FF] z-20"
+                            style={{
+                              borderColor: isFault ? '#EF4444' : '#38F3FF',
+                              background: isFault ? '#3B0D15' : '#04283D',
+                              boxShadow: isFault ? '0 0 8px #EF4444' : '0 0 10px #00E5FF',
+                            }}
+                          >
+                            ETH
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                    <div className="mt-7 text-center leading-tight">
-                      <div className="text-[10px] font-extrabold text-white truncate">{IEC104_NET.rccName}</div>
-                      <div className="text-[8.5px] font-mono text-[#86EFAC]">{IEC104_NET.rccIp}</div>
-                      <div className="text-[8px] font-mono text-[#94A3B8]">Controlling Master</div>
-                    </div>
+                    );
+                  })}
+                </div>
+
+                {/* COLUMN 2: COMPACT HIRSCHMANN RSP35 SWITCH (DETAILS HIDDEN; HOVER OPENS HOLOGRAPHIC POPUP) */}
+                <div className="flex flex-col items-center justify-center pt-[125px]">
+                  <div
+                    className="relative flex items-center justify-center cursor-pointer"
+                    onMouseEnter={() => setSwitchHovered(true)}
+                    onMouseLeave={() => setSwitchHovered(false)}
+                  >
+                    <img
+                      src="assets/devices/hirschmann-rsp35.png"
+                      alt="Hirschmann RSP35 Industrial Switch"
+                      className="h-[148px] w-auto object-contain drop-shadow-[0_12px_18px_rgba(0,0,0,0.85)]"
+                      style={{ opacity: switchDown ? 0.45 : 1 }}
+                    />
+                    {[
+                      { num: 1, left: '22%' },
+                      { num: 2, left: '36%' },
+                      { num: 3, left: '50%' },
+                      { num: 4, left: '64%' },
+                    ].map(({ num, left }) => {
+                      const isPAct = activeIed.portNum === num;
+                      const isPFault = (num === 2 && p2Offline) || !stationBusOk;
+                      return (
+                        <span
+                          key={num}
+                          ref={setPortRef(`sw_p${num}`)}
+                          style={{
+                            left,
+                            bottom: '22%',
+                            borderColor: isPFault ? '#EF4444' : isPAct ? '#4ADE80' : '#38F3FF',
+                            background: isPFault ? '#3B0D15' : '#04283D',
+                            boxShadow: isPFault ? '0 0 8px #EF4444' : '0 0 9px #00E5FF',
+                          }}
+                          className="absolute w-4 h-3.5 rounded-[3px] border-[1.5px] flex items-center justify-center font-mono text-[8px] font-extrabold text-white z-20"
+                        >
+                          {num}
+                        </span>
+                      );
+                    })}
+                    <span
+                      ref={setPortRef('sw_p5')}
+                      className="absolute right-[10%] top-[61%] w-4 h-4 rounded-[3px] border-[1.5px] flex items-center justify-center font-mono text-[8px] font-extrabold text-white z-20"
+                      style={{
+                        borderColor: !stationBusOk ? '#EF4444' : '#38F3FF',
+                        background: !stationBusOk ? '#3B0D15' : '#04283D',
+                        boxShadow: !stationBusOk ? '0 0 8px #EF4444' : '0 0 10px #00E5FF',
+                      }}
+                    >
+                      5
+                    </span>
                   </div>
                 </div>
 
-                {/* RESIZEOBSERVER SVG CABLE & BIDIRECTIONAL I/S/U FRAME OVERLAY */}
-                {cableGeom && (
-                  <svg
-                    width={cableGeom.width}
-                    height={cableGeom.height}
-                    viewBox={`0 0 ${cableGeom.width} ${cableGeom.height}`}
-                    className="absolute inset-0 z-20 pointer-events-none"
+                {/* COLUMN 3: IEC-104 GATEWAY GTW-01 */}
+                <div className="flex flex-col items-center justify-end pt-[185px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGatewayPinned((p) => !p);
+                      setGatewayManuallyClosed(false);
+                    }}
+                    title="Click to Pin / Unpin Live IEC 61850 → IEC-104 Conversion Popup"
+                    className="relative flex items-center justify-center group focus:outline-none"
                   >
-                    <path
-                      d={buildOrthogonalPath(cableGeom.c1)}
-                      fill="none"
-                      stroke={isTcpUp ? '#38BDF8' : '#EF4444'}
-                      strokeWidth="2.8"
-                      strokeLinejoin="round"
-                      strokeDasharray={isTcpUp ? undefined : '5 4'}
-                      className="pointer-events-auto cursor-pointer"
-                      onClick={() => setInspectedPort(portMap.SW_P1)}
-                    />
-                    <path
-                      d={buildOrthogonalPath(cableGeom.c2)}
-                      fill="none"
-                      stroke={isTcpUp ? '#38BDF8' : '#EF4444'}
-                      strokeWidth="2.8"
-                      strokeLinejoin="round"
-                      strokeDasharray={isTcpUp ? undefined : '5 4'}
-                      className="pointer-events-auto cursor-pointer"
-                      onClick={() => setInspectedPort(portMap.SW_P5)}
-                    />
-                    <path
-                      d={buildOrthogonalPath(cableGeom.c3)}
-                      fill="none"
-                      stroke={isTcpUp ? '#22C55E' : '#EF4444'}
-                      strokeWidth="3"
-                      strokeLinejoin="round"
-                      strokeDasharray={isTcpUp ? undefined : '5 4'}
-                      className="pointer-events-auto cursor-pointer"
-                      onClick={() => setInspectedPort(portMap.GW_ETH2)}
-                    />
+                    <img src="assets/signal-chain/station-gateway.png" alt="IEC-104 Gateway GTW-01" className="h-[124px] w-auto object-contain drop-shadow-[0_12px_18px_rgba(0,0,0,0.85)] group-hover:brightness-110 transition" />
+                    <span
+                      ref={setPortRef('gtw_eth0')}
+                      className="absolute left-[22%] top-[58%] w-5 h-4 rounded-[3px] border-[1.5px] flex items-center justify-center font-mono text-[6.5px] font-extrabold text-[#E0F7FF] z-20"
+                      style={{ borderColor: !stationBusOk ? '#EF4444' : '#38F3FF', background: '#04283D', boxShadow: !stationBusOk ? '0 0 8px #EF4444' : '0 0 10px #00E5FF' }}
+                    >
+                      E0
+                    </span>
+                    <span
+                      ref={setPortRef('gtw_eth1')}
+                      className="absolute right-[21%] top-[58%] w-5 h-4 rounded-[3px] border-[1.5px] flex items-center justify-center font-mono text-[6.5px] font-extrabold text-[#DCFCE7] z-20"
+                      style={{ borderColor: !wanHealthy ? '#EF4444' : '#4ADE80', background: '#062E20', boxShadow: !wanHealthy ? '0 0 8px #EF4444' : '0 0 10px #22C55E' }}
+                    >
+                      E1
+                    </span>
+                  </button>
+                  <div className="mt-2 text-center">
+                    <div className="text-[12px] font-extrabold text-white">IEC-104 Gateway GTW-01</div>
+                    <div className="font-mono text-[10px] text-[#38F3FF]">ETH0: 10.132.10.200 (MMS)</div>
+                    <div className="font-mono text-[10px] text-[#4ADE80]">ETH1: 10.132.20.200 (COA 132)</div>
+                  </div>
+                </div>
 
-                    {/* Routed MPLS WAN Pill */}
-                    <g className="pointer-events-auto cursor-pointer" onClick={() => setInspectedPort(portMap.GW_ETH2)}>
-                      <rect
-                        x={cableGeom.wanMid.x - 42}
-                        y={cableGeom.wanMid.y - 9}
-                        width="84"
-                        height="18"
-                        rx="9"
-                        fill="#05261A"
-                        stroke={isTcpUp ? '#22C55E' : '#EF4444'}
-                        strokeWidth="1.1"
-                      />
-                      <text
-                        x={cableGeom.wanMid.x}
-                        y={cableGeom.wanMid.y + 3}
-                        textAnchor="middle"
-                        fill={isTcpUp ? '#86EFAC' : '#FCA5A5'}
-                        fontSize="7.5"
-                        fontFamily="monospace"
-                        fontWeight="800"
-                      >
-                        WAN · 2404
-                      </text>
-                    </g>
-
-                    {/* Bidirectional Animated I/S/U Frame Packet */}
-                    {inFlight && pktPos && (
-                      <g>
-                        <g transform={`translate(${pktPos.x.toFixed(1)}, ${pktPos.y.toFixed(1)}) rotate(${pktPos.angleDeg.toFixed(1)})`}>
-                          <circle
-                            r="6"
-                            fill={
-                              inFlight.format === 'I-Frame'
-                                ? '#00E5FF'
-                                : inFlight.format === 'S-Frame'
-                                ? '#22C55E'
-                                : '#FACC15'
-                            }
-                            stroke="#FFFFFF"
-                            strokeWidth="1.2"
-                          />
-                          <polygon points="3.2,0 -2.2,-2.6 -2.2,2.6" fill="#02101D" />
-                        </g>
-                        {(() => {
-                          const bw = 188;
-                          const bx = Math.max(6, Math.min(cableGeom.width - bw - 6, pktPos.x - bw / 2));
-                          const by = Math.max(4, pktPos.y - 38);
-                          const c =
-                            inFlight.format === 'I-Frame'
-                              ? '#38BDF8'
-                              : inFlight.format === 'S-Frame'
-                              ? '#22C55E'
-                              : '#FACC15';
-                          return (
-                            <g>
-                              <rect x={bx} y={by} width={bw} height="26" rx="4" fill="#04192C" stroke={c} strokeWidth="1.1" />
-                              <text x={bx + bw / 2} y={by + 10.5} textAnchor="middle" fill={c} fontSize="7.4" fontFamily="monospace" fontWeight="800">
-                                {inFlight.label1}
-                              </text>
-                              <text x={bx + bw / 2} y={by + 21} textAnchor="middle" fill="#FFFFFF" fontSize="7" fontFamily="monospace">
-                                {inFlight.label2}
-                              </text>
-                            </g>
-                          );
-                        })()}
-                      </g>
-                    )}
-                  </svg>
-                )}
-
-                {/* Legend Footer inside Topology */}
-                <div className="absolute bottom-1.5 left-2.5 right-2.5 z-10 flex flex-wrap items-center justify-between gap-2 text-[9px] font-mono text-[#9BC0DF] bg-[#041526]/95 border border-[#15395A] rounded px-2.5 py-1">
-                  <span>Legend: <b className="text-[#38BDF8]">━ Ethernet</b> · <b className="text-[#00E5FF]">▶ I-Frame (Data)</b> · <b className="text-[#4ADE80]">▶ S-Frame (Ack)</b> · <b className="text-[#FACC15]">▶ U-Frame (STARTDT/TESTFR)</b></span>
-                  <span className="text-[#7DD3FC]">Click port/cable to inspect</span>
+                {/* COLUMN 4: RCC / SLDC MASTER */}
+                <div className="flex flex-col items-center justify-end pt-[178px]">
+                  <div className="relative flex items-center justify-center">
+                    <img src="assets/signal-chain/scada-hmi.png" alt="RCC SLDC Master Workstation" className="h-[130px] w-auto object-contain drop-shadow-[0_14px_18px_rgba(0,0,0,0.85)]" />
+                    <span
+                      ref={setPortRef('rcc_wan')}
+                      className="absolute left-[4%] top-[58%] w-5 h-4 rounded-[3px] border-[1.5px] flex items-center justify-center font-mono text-[6.5px] font-extrabold text-[#DCFCE7] z-20"
+                      style={{ borderColor: !wanHealthy ? '#EF4444' : '#4ADE80', background: '#062E20', boxShadow: !wanHealthy ? '0 0 8px #EF4444' : '0 0 10px #22C55E' }}
+                    >
+                      WAN
+                    </span>
+                  </div>
+                  <div className="mt-2 text-center">
+                    <div className="text-[12px] font-extrabold text-white">RCC / SLDC (Master)</div>
+                    <div className="font-mono text-[10px] text-[#4ADE80]">10.132.20.201 · TCP/2404</div>
+                    <div
+                      className="mt-1 inline-block rounded border px-2 py-0.5 font-mono text-[9.5px] font-extrabold"
+                      style={endToEndOk ? { background: '#062E20', borderColor: '#22C55E', color: '#4ADE80' } : { background: '#3B0D15', borderColor: '#EF4444', color: '#FCA5A5' }}
+                    >
+                      {endToEndOk ? `RX COA:132 IOA:${activeIed.ioa} OK` : 'RX LINK / CONV FAULT'}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {inspectedPort && (
-                <div className="mt-2 rounded-lg border border-[#38BDF8] bg-[#061C31] px-3 py-2 text-[10.5px]">
-                  <div className="flex justify-between items-center border-b border-[#164463] pb-1 mb-1">
-                    <b className="text-white">{inspectedPort.title}</b>
-                    <button type="button" onClick={() => setInspectedPort(null)} className="text-[#7DD3FC] font-bold">Close</button>
+              {/* TOP-LAYER (z-[80]) HOLOGRAPHIC IED INFO POPUP ON HOVER */}
+              {(() => {
+                const hovIdx = IEC61850_IEDS.findIndex((d) => d.id === hoveredIedId);
+                if (hovIdx === -1) return null;
+                const dev = IEC61850_IEDS[hovIdx];
+                const topOffsets = [38, 102, 166, 192];
+                return (
+                  <div className="absolute z-[80] pointer-events-none transition-all duration-150" style={{ left: '164px', top: `${topOffsets[hovIdx]}px`, width: '540px' }}>
+                    <svg viewBox="0 0 42 250" className="absolute -left-[40px] top-4 w-[40px] h-[225px] pointer-events-none">
+                      <polygon points="0,112 42,6 42,244 0,126" fill="rgba(125, 249, 255, 0.14)" stroke="rgba(175, 248, 255, 0.58)" strokeWidth="1" />
+                      <line x1="0" y1="117" x2="42" y2="58" stroke="rgba(255,255,255,0.48)" strokeWidth="1" />
+                      <line x1="0" y1="121" x2="42" y2="188" stroke="rgba(103,232,249,0.48)" strokeWidth="1" />
+                    </svg>
+                    <div
+                      className="rounded-2xl border-[1.5px] p-4 relative overflow-hidden"
+                      style={{
+                        background:
+                          'radial-gradient(ellipse 68% 48% at 18% 12%, rgba(165, 243, 252, 0.24) 0%, transparent 65%), ' +
+                          'linear-gradient(145deg, rgba(16, 62, 92, 0.68) 0%, rgba(10, 42, 68, 0.76) 52%, rgba(8, 32, 54, 0.80) 100%)',
+                        backdropFilter: 'blur(36px) saturate(170%)',
+                        WebkitBackdropFilter: 'blur(36px) saturate(170%)',
+                        borderColor: 'rgba(182, 248, 255, 0.90)',
+                        boxShadow: '0 0 28px rgba(56, 232, 255, 0.52), inset 0 1.5px 2px rgba(255, 255, 255, 0.85)',
+                      }}
+                    >
+                      <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#A5F3FC]/35">
+                        <div className="flex items-center gap-2 text-[12.5px] font-bold text-[#E6FAFF]">
+                          <span className="w-0.5 h-4 bg-[#7DF9FF] shadow-[0_0_8px_#7DF9FF]" />
+                          <span>IEC 61850 Ed.2 — Device Info</span>
+                        </div>
+                        <div className="flex items-center gap-2.5 font-mono text-[12px] text-[#CFFAFE]/90"><span>–</span><span>□</span><span>×</span></div>
+                      </div>
+                      <div className="grid grid-cols-[140px_1fr] gap-4 items-center">
+                        <div className="flex flex-col items-center">
+                          <div className="w-[132px] h-[132px] rounded-xl border border-[#7DF9FF]/50 p-2.5 flex items-center justify-center" style={{ background: 'radial-gradient(circle, rgba(56,232,255,0.20), rgba(6,30,50,0.42))' }}>
+                            <img src={dev.image} alt={dev.fullName} className="max-h-[112px] w-auto object-contain" style={{ filter: 'drop-shadow(0 0 14px rgba(103,232,249,0.72))' }} />
+                          </div>
+                        </div>
+                        <div className="space-y-2.5 min-w-0">
+                          <div className="text-[16.5px] font-extrabold text-white truncate">{dev.fullName}</div>
+                          <div className="rounded-xl border border-[#A5F3FC]/42 divide-y divide-[#A5F3FC]/20 text-[11px]" style={{ background: 'rgba(8, 38, 62, 0.56)' }}>
+                            {[
+                              { icon: Cpu, label: 'IED Name', val: dev.iedName, col: '#FFFFFF' },
+                              { icon: Radio, label: 'IP Address', val: dev.ip, col: '#38F3FF' },
+                              { icon: Layers, label: 'Logical Node', val: dev.lnRef, col: '#FDE047' },
+                              { icon: Activity, label: 'Report CB', val: `${dev.rcbName} (${dev.dataset})`, col: '#4ADE80' },
+                              { icon: Database, label: 'IEC-104 Map', val: `COA:132 / IOA:${dev.ioa} (${dev.iec104Type})`, col: '#E879F9' },
+                              { icon: AlertTriangle, label: 'Signals', val: dev.signals, col: '#7DD3FC' },
+                            ].map(({ icon: Icon, label, val, col }) => (
+                              <div key={label} className="grid grid-cols-[106px_1fr] items-center px-3 py-1.5">
+                                <span className="inline-flex items-center gap-1.5 text-[#E0F7FF] font-semibold"><Icon className="w-3.5 h-3.5 text-[#7DF9FF] shrink-0" /> {label}</span>
+                                <span style={{ color: col }} className="font-mono font-extrabold truncate">: {val}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2.5 mt-3.5">
+                        {[['LN / DataSet', Layers], ['Live MMS', Activity], ['IOA Mapping', Settings], ['Device Info', Info]].map(([label, IconComp]) => {
+                          const Icon = IconComp as React.FC<{ className?: string }>;
+                          return (
+                            <div key={label as string} className="rounded-xl border border-[#A5F3FC]/65 py-2.5 px-1.5 flex flex-col items-center justify-center gap-1" style={{ background: 'linear-gradient(180deg, rgba(165,243,252,0.18), rgba(12,54,84,0.48))', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55)' }}>
+                              <Icon className="w-4 h-4 text-[#E6FAFF]" />
+                              <span className="text-[10.5px] font-bold text-white">{label as string}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 font-mono text-[10px]">
-                    <div><span className="text-[#8BB3D4]">Remote:</span> <b className="text-white">{inspectedPort.connectedDevice} ({inspectedPort.remotePort})</b></div>
-                    <div><span className="text-[#8BB3D4]">Protocol:</span> <b className="text-[#7DD3FC]">{inspectedPort.protocol}</b></div>
-                    <div><span className="text-[#8BB3D4]">Link:</span> <b style={{ color: inspectedPort.linkStatus === 'UP' ? '#4ADE80' : '#F87171' }}>{inspectedPort.linkStatus}</b> ({inspectedPort.speedDuplex})</div>
+                );
+              })()}
+
+              {/* TOP-LAYER (z-[80]) HOLOGRAPHIC SWITCH INFO POPUP */}
+              {switchHovered && (
+                <div className="absolute z-[80] pointer-events-none transition-all duration-150" style={{ left: '42%', top: '34px', width: '500px' }}>
+                  <div
+                    className="rounded-2xl border-[1.5px] p-4"
+                    style={{
+                      background: 'radial-gradient(ellipse 68% 48% at 18% 12%, rgba(165,243,252,0.24), transparent 65%), linear-gradient(145deg, rgba(16,62,92,0.70), rgba(10,42,68,0.78) 52%, rgba(8,32,54,0.82))',
+                      backdropFilter: 'blur(36px) saturate(170%)',
+                      borderColor: 'rgba(182, 248, 255, 0.90)',
+                      boxShadow: '0 0 28px rgba(56, 232, 255, 0.52), inset 0 1.5px 2px rgba(255, 255, 255, 0.85)',
+                    }}
+                  >
+                    <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#A5F3FC]/35">
+                      <div className="flex items-center gap-2 text-[12.5px] font-bold text-[#E6FAFF]">
+                        <span className="w-0.5 h-4 bg-[#7DF9FF]" />
+                        <span>Station Bus Switch — Device Info</span>
+                      </div>
+                      <span className="font-mono text-[12px] text-[#CFFAFE]/90 tracking-widest">– □ ×</span>
+                    </div>
+                    <div className="grid grid-cols-[120px_1fr] gap-4 items-center">
+                      <div className="w-[114px] h-[114px] rounded-xl border border-[#7DF9FF]/50 p-2 flex items-center justify-center" style={{ background: 'radial-gradient(circle, rgba(56,232,255,0.20), rgba(6,30,50,0.42))' }}>
+                        <img src="assets/devices/hirschmann-rsp35.png" alt="Hirschmann RSP35" className="max-h-[96px] object-contain" />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="text-[16px] font-extrabold text-white">Hirschmann RSP35</div>
+                        <div className="rounded-xl border border-[#A5F3FC]/42 divide-y divide-[#A5F3FC]/20 text-[11px]" style={{ background: 'rgba(8, 38, 62, 0.56)' }}>
+                          {[
+                            { label: 'Mgmt IP', val: '10.132.10.10', col: '#38F3FF' },
+                            { label: 'Station VLAN', val: 'VLAN 10 (IEC 61850 MMS)', col: '#FDE047' },
+                            { label: 'Access Ports', val: 'P1–P4 → 7SA87, RET615, C264, D60', col: '#4ADE80' },
+                            { label: 'Uplink Port', val: 'P5 (SFP) → IEC-104 GTW-01 ETH0', col: '#E879F9' },
+                            { label: 'Link Status', val: stationBusOk ? 'HEALTHY · FORWARDING' : 'LINK FAULT / DOWN', col: stationBusOk ? '#4ADE80' : '#FCA5A5' },
+                          ].map(({ label, val, col }) => (
+                            <div key={label} className="grid grid-cols-[100px_1fr] items-center px-3 py-1.5">
+                              <span className="text-[#E0F7FF] font-semibold">{label}</span>
+                              <span style={{ color: col }} className="font-mono font-extrabold truncate">: {val}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
+
+              {/* PORT-TO-PORT GLOWING SVG CABLES & MOVING PACKET BADGES */}
+              {(() => {
+                const ready =
+                  ports.ied_P1 && ports.ied_P2 && ports.ied_P3 && ports.ied_P4 &&
+                  ports.sw_p1 && ports.sw_p2 && ports.sw_p3 && ports.sw_p4 &&
+                  ports.sw_p5 && ports.gtw_eth0 && ports.gtw_eth1 && ports.rcc_wan;
+                if (!ready) return null;
+
+                const W = stageSize.w;
+                const H = stageSize.h;
+                const swY = Math.max(ports.sw_p1.y, ports.sw_p2.y, ports.sw_p3.y, ports.sw_p4.y);
+                const swX = ports.sw_p1.x;
+                const bendXs = [swX - 96, swX - 78, swX - 60, swX - 42];
+                const dropYs = [swY + 22, swY + 34, swY + 46, swY + 58];
+
+                const iedRoutes = IEC61850_IEDS.map((dev, i) => {
+                  const a = ports[`ied_${dev.id}`];
+                  const b = ports[`sw_p${dev.portNum}`];
+                  return [a, { x: bendXs[i], y: a.y }, { x: bendXs[i], y: dropYs[i] }, { x: b.x, y: dropYs[i] }, b];
+                });
+
+                const swToGtwPts = [ports.sw_p5, { x: (ports.sw_p5.x + ports.gtw_eth0.x) / 2, y: ports.sw_p5.y }, { x: (ports.sw_p5.x + ports.gtw_eth0.x) / 2, y: ports.gtw_eth0.y }, ports.gtw_eth0];
+                const gtwToRccPts = [ports.gtw_eth1, { x: (ports.gtw_eth1.x + ports.rcc_wan.x) / 2, y: ports.gtw_eth1.y }, { x: (ports.gtw_eth1.x + ports.rcc_wan.x) / 2, y: ports.rcc_wan.y }, ports.rcc_wan];
+
+                let pktPos: { x: number; y: number } | null = null;
+                let pktColor = '#00E5FF';
+                let pktLabel = '';
+
+                if (simPhase === 'MMS_IN' && mmsHealthy) {
+                  pktPos = samplePolyline([...iedRoutes[activeIedIdx], ...swToGtwPts], cycleProgress / 0.24);
+                  pktColor = '#00E5FF';
+                  pktLabel = `MMS · ${activeIed.shortName}`;
+                } else if (simPhase === 'WAN_TX' && convHealthy && wanHealthy) {
+                  pktPos = samplePolyline(gtwToRccPts, (cycleProgress - 0.72) / 0.28);
+                  pktColor = '#A3E635';
+                  pktLabel = `IEC-104 · IOA:${activeIed.ioa}`;
+                }
+
+                const midSwGtwX = (ports.sw_p5.x + ports.gtw_eth0.x) / 2;
+                const midSwGtwY = Math.min(ports.sw_p5.y, ports.gtw_eth0.y) - 18;
+                const midGtwRccX = (ports.gtw_eth1.x + ports.rcc_wan.x) / 2;
+                const midGtwRccY = Math.min(ports.gtw_eth1.y, ports.rcc_wan.y) - 18;
+
+                return (
+                  <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="absolute inset-0 pointer-events-none z-20">
+                    <defs>
+                      <filter id="i104GlowCyan" filterUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}>
+                        <feGaussianBlur stdDeviation="3.2" result="b" />
+                        <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                      </filter>
+                      <filter id="i104GlowGreen" filterUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}>
+                        <feGaussianBlur stdDeviation="3.2" result="b" />
+                        <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                      </filter>
+                    </defs>
+
+                    {iedRoutes.map((pts, i) => {
+                      const isPAct = i === activeIedIdx;
+                      const isPFault = (i === 1 && p2Offline) || mmsLost;
+                      return (
+                        <path
+                          key={IEC61850_IEDS[i].id}
+                          d={roundedOrthPath(pts, 14)}
+                          fill="none"
+                          stroke={isPFault ? '#EF4444' : isPAct ? '#38F3FF' : '#0EA5E9'}
+                          strokeOpacity={isPFault ? 0.95 : isPAct ? 1 : 0.65}
+                          strokeWidth={isPAct ? 3.6 : 2.6}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeDasharray={isPFault ? '7 5' : undefined}
+                          filter={isPFault ? undefined : 'url(#i104GlowCyan)'}
+                        />
+                      );
+                    })}
+
+                    <path
+                      d={roundedOrthPath(swToGtwPts, 10)}
+                      fill="none"
+                      stroke={stationBusOk ? '#00E5FF' : '#EF4444'}
+                      strokeWidth="3.8"
+                      strokeLinecap="round"
+                      strokeDasharray={stationBusOk ? undefined : '7 5'}
+                      filter={stationBusOk ? 'url(#i104GlowCyan)' : undefined}
+                    />
+                    <text x={midSwGtwX} y={midSwGtwY - 6} textAnchor="middle" fill="#BAE6FD" fontSize="10.5" fontWeight="800" fontFamily="monospace">P5 → ETH0</text>
+                    <text x={midSwGtwX} y={midSwGtwY + 7} textAnchor="middle" fill="#7DD3FC" fontSize="9.5" fontWeight="700" fontFamily="monospace">(IEC 61850 MMS)</text>
+
+                    <path
+                      d={roundedOrthPath(gtwToRccPts, 10)}
+                      fill="none"
+                      stroke={wanHealthy ? '#22C55E' : '#EF4444'}
+                      strokeWidth="3.8"
+                      strokeLinecap="round"
+                      strokeDasharray={wanHealthy ? undefined : '7 5'}
+                      filter={wanHealthy ? 'url(#i104GlowGreen)' : undefined}
+                    />
+                    <text x={midGtwRccX} y={midGtwRccY - 6} textAnchor="middle" fill="#DCFCE7" fontSize="10.5" fontWeight="800" fontFamily="monospace">ETH1 → WAN</text>
+                    <text x={midGtwRccX} y={midGtwRccY + 7} textAnchor="middle" fill="#86EFAC" fontSize="9.5" fontWeight="700" fontFamily="monospace">(IEC-104 TCP/2404)</text>
+
+                    {pktPos && (
+                      <g>
+                        <circle cx={pktPos.x} cy={pktPos.y} r="7.5" fill={pktColor} fillOpacity="0.28" />
+                        <circle cx={pktPos.x} cy={pktPos.y} r="4.8" fill="#FFFFFF" stroke={pktColor} strokeWidth="2.5" filter="url(#i104GlowCyan)" />
+                        <rect
+                          x={pktPos.x - (simPhase === 'WAN_TX' ? 58 : 48)}
+                          y={pktPos.y - 28}
+                          width={simPhase === 'WAN_TX' ? 116 : 96}
+                          height="18"
+                          rx="9"
+                          fill={simPhase === 'WAN_TX' ? '#06331F' : '#041526'}
+                          stroke={pktColor}
+                          strokeWidth="1.5"
+                        />
+                        <text
+                          x={pktPos.x}
+                          y={pktPos.y - 16}
+                          textAnchor="middle"
+                          fill={simPhase === 'WAN_TX' ? '#D9F99D' : '#FFFFFF'}
+                          fontSize="9"
+                          fontWeight="800"
+                          fontFamily="monospace"
+                        >
+                          {pktLabel}
+                        </text>
+                      </g>
+                    )}
+                  </svg>
+                );
+              })()}
             </div>
 
-            {/* RIGHT: Remote Control Center (RCC / SLDC) — 3 cols */}
-            <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="xl:col-span-3 rounded-xl border p-3 flex flex-col justify-between min-w-0">
-              <div className="flex items-center justify-between border-b border-[#163B5C] pb-1.5 mb-2">
-                <div className="flex items-center gap-1.5 font-extrabold text-white text-xs truncate">
-                  <Monitor className="w-4 h-4 text-[#4ADE80] shrink-0" />
-                  <span className="truncate">Remote Control Center (RCC / SLDC)</span>
-                </div>
+            {/* Bottom Active Path Bar */}
+            <div className="mt-2 rounded-xl border border-[#17466B] bg-[#041424]/95 px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
+              <div className="flex items-center gap-2">
+                <span className={`w-2.5 h-2.5 rounded-full ${endToEndOk ? 'bg-[#22C55E] shadow-[0_0_8px_#22C55E]' : 'bg-[#EF4444] shadow-[0_0_8px_#EF4444]'}`} />
+                <span className="font-extrabold text-[#4ADE80]">ACTIVE PATH:</span>
+                <span className="text-[#E0F2FE] font-semibold">
+                  {activeIed.fullName} (MMS/102) → RSP35 (Port {activeIed.portNum} → P5) → GTW-01 (ETH0 → ETH1) → RCC/SLDC (IEC-104/2404)
+                </span>
               </div>
+              <span
+                className="rounded-lg border px-3 py-0.5 text-[10.5px] font-extrabold"
+                style={endToEndOk ? { background: '#072A42', borderColor: '#38F3FF', color: '#7DD3FC' } : { background: '#3B0D15', borderColor: '#EF4444', color: '#FCA5A5' }}
+              >
+                {stagePillLabel}
+              </span>
+            </div>
+          </div>
 
-              <div className="grid grid-cols-12 gap-2 items-center">
-                <div className="col-span-5 flex flex-col items-center justify-center rounded-lg border border-[#173C5E] bg-[#040E1A] p-2">
-                  <img
-                    src={HW_ASSETS.RCC}
-                    alt="SLDC RCC EMS Master"
-                    className="h-[112px] w-auto object-contain"
-                  />
-                  <span className="text-[9px] font-mono text-[#86EFAC] mt-1 text-center leading-tight">
-                    SLDC / RCC EMS Master
+          {/* 4. COMPREHENSIVE 32-TEST INTERACTIVE SIMULATION LAB (FROSTED CYAN GLASSMORPHISM) */}
+          <div
+            className="i104-glass-panel relative rounded-2xl p-4 sm:p-5 space-y-3.5 overflow-hidden"
+            style={{
+              background:
+                'radial-gradient(ellipse 46% 32% at 50% 0%, rgba(72, 238, 255, 0.28) 0%, transparent 72%), ' +
+                'radial-gradient(ellipse 36% 24% at 16% 100%, rgba(0, 225, 255, 0.22) 0%, transparent 72%), ' +
+                'linear-gradient(180deg, rgba(24, 78, 108, 0.78) 0%, rgba(16, 56, 82, 0.84) 52%, rgba(12, 46, 68, 0.88) 100%)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              border: '1.5px solid rgba(86, 235, 255, 0.78)',
+              boxShadow: '0 0 34px rgba(0, 224, 255, 0.34), inset 0 1px 1px rgba(190, 252, 255, 0.72), inset 0 -1px 1px rgba(0, 232, 255, 0.55)',
+            }}
+          >
+            <style>{`
+              .i104-glass-panel::before { content:''; position:absolute; top:0; left:10%; right:10%; height:2px; background:linear-gradient(90deg,transparent,rgba(160,250,255,.92),transparent); pointer-events:none; }
+              .i104-glass-panel::after { content:''; position:absolute; bottom:0; left:12%; right:12%; height:2px; background:linear-gradient(90deg,transparent,rgba(0,232,255,.85),transparent); pointer-events:none; }
+              .i104-glass-scroll::-webkit-scrollbar { width: 11px; height: 11px; }
+              .i104-glass-scroll::-webkit-scrollbar-track { background: rgba(10, 42, 64, 0.72); border-left: 1px solid rgba(90, 215, 245, 0.28); }
+              .i104-glass-scroll::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #42F8FF 0%, #00D8F5 100%); border-radius: 999px; border: 2px solid rgba(10, 42, 64, 0.85); box-shadow: 0 0 12px rgba(0, 240, 255, 0.9); }
+            `}</style>
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <svg viewBox="0 0 28 28" className="w-6 h-6 shrink-0" style={{ filter: 'drop-shadow(0 0 8px rgba(0,232,255,0.85))' }} fill="none">
+                    <path d="M14 2.5L24 8v12l-10 5.5L4 20V8l10-5.5z" stroke="#38F3FF" strokeWidth="1.7" />
+                    <path d="M4 8l10 5.5L24 8M14 13.5v12" stroke="#38F3FF" strokeWidth="1.5" strokeOpacity="0.85" />
+                  </svg>
+                  <h2 className="text-[15px] sm:text-[17px] font-extrabold text-white">
+                    IEC 61850 → IEC-104 Test Simulation &amp; Fault Injection Lab (32 Interactive Tests)
+                  </h2>
+                  <span className="rounded-full border border-[#22C55E] bg-[#0A5C2E]/70 px-3 py-0.5 text-[10px] font-extrabold text-[#4ADE80]">
+                    SAFE SIMULATION ONLY
                   </span>
                 </div>
-                <div className="col-span-7 space-y-1 text-[10.5px]">
-                  <div style={{ color: isFullyHealthy ? '#4ADE80' : '#F87171' }} className="font-extrabold text-[11px]">
-                    ● {isFullyHealthy ? 'RCC MASTER CONNECTED' : 'RCC LINK DEGRADED'}
-                  </div>
-                  {[
-                    ['Role', 'Controlling (Master)', '#FFFFFF'],
-                    ['RCC IP', IEC104_NET.rccIp, '#38BDF8'],
-                    ['T1 / T2 / T3', `${IEC104_NET.t1Sec}s / ${IEC104_NET.t2Sec}s / ${IEC104_NET.t3Sec}s`, '#FFFFFF'],
-                    ['k / w', `${IEC104_NET.kParam} / ${IEC104_NET.wParam}`, '#BAE6FD'],
-                    ['GI Cycles', `#${giCount} ${giStatus.split(' ')[0]}`, '#4ADE80'],
-                    ['Selected IOA', `${selectedEntry.ioa} (${selectedEntry.valueText.slice(0, 10)})`, '#FFFFFF'],
-                  ].map(([k, v, c]) => (
-                    <div key={k} className="flex justify-between gap-1 border-b border-[#122E49] pb-0.5 last:border-0">
-                      <span className="text-[#8BB3D4]">{k}</span>
-                      <span style={{ color: c }} className="font-mono font-bold text-right truncate">{v}</span>
-                    </div>
-                  ))}
-                </div>
+                <p className="text-[12px] text-[#D4EEF9] mt-1">
+                  Toggle any test ON/OFF independently to verify STARTDT/STOPDT/TESTFR, MMS BRCB/URCB reports, CP56Time2a quality conversion, GI (QOI=20), SBO commands, and WAN resilience.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={handleRunAllSafe} style={{ background: 'linear-gradient(180deg, rgba(34,197,94,0.46), rgba(12,92,52,0.84))', borderColor: '#4ADE80', boxShadow: '0 0 16px rgba(34,197,94,0.5)' }} className="rounded-[10px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-extrabold text-white hover:brightness-110 transition">▶ Run All Safe Tests</button>
+                <button type="button" onClick={() => handleResetAll(true)} style={{ background: 'linear-gradient(180deg, rgba(217,138,28,0.50), rgba(112,58,12,0.86))', borderColor: '#F59E0B' }} className="rounded-[10px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-extrabold text-white hover:brightness-110 transition">■ Stop All Tests</button>
+                <button type="button" onClick={() => handleResetAll(false)} style={{ background: 'linear-gradient(180deg, rgba(220,56,62,0.54), rgba(128,20,28,0.86))', borderColor: '#F87171' }} className="rounded-[10px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-extrabold text-white hover:brightness-110 transition">↺ Reset All Faults</button>
+                <button type="button" onClick={handleExportCsv} style={{ background: 'linear-gradient(180deg, rgba(28,116,164,0.55), rgba(12,60,94,0.84))', borderColor: 'rgba(96,205,250,0.72)' }} className="inline-flex items-center gap-1.5 rounded-[10px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-extrabold text-[#ECF8FF] hover:brightness-110 transition"><Download className="w-3.5 h-3.5 text-[#7DD3FC]" /> Export CSV</button>
+                <button type="button" onClick={() => setShowHistory((h) => !h)} style={{ background: 'linear-gradient(180deg, rgba(26,70,100,0.62), rgba(12,42,66,0.84))', borderColor: 'rgba(110,200,235,0.52)' }} className="inline-flex items-center gap-1.5 rounded-[10px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-extrabold text-[#E2F4FF] hover:border-[#38F3FF] transition"><History className="w-3.5 h-3.5 text-[#9BD8F4]" /> History ({testHistory.length})</button>
               </div>
             </div>
-          </div>
 
-          {/* BOTTOM 3-COLUMN ROW: Left Controls | Center IOA Table + Frame Stream | Right Live Diagnostics */}
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
-            {/* LEFT CONTROLS (3 cols) */}
-            <div className="xl:col-span-3 space-y-3 min-w-0">
-              {/* 1. U-Frame Link Layer & GI */}
-              <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="rounded-xl border p-3 space-y-2">
-                <h3 className="text-xs font-extrabold text-white border-b border-[#163B5C] pb-1.5">
-                  1. U-Frame Link Layer &amp; General Interrogation (GI)
-                </h3>
-                <div className="grid grid-cols-3 gap-1.5">
-                  <button type="button" onClick={() => handleSendUFrame('STARTDT')} className="py-1.5 rounded-lg bg-[#06291E] border border-[#22C55E] text-[#4ADE80] font-extrabold text-[10.5px]">
-                    STARTDT ACT
-                  </button>
-                  <button type="button" onClick={() => handleSendUFrame('STOPDT')} className="py-1.5 rounded-lg bg-[#2B1608] border border-[#F97316] text-[#FDBA74] font-extrabold text-[10.5px]">
-                    STOPDT ACT
-                  </button>
-                  <button type="button" onClick={() => handleSendUFrame('TESTFR')} className="py-1.5 rounded-lg bg-[#082038] border border-[#00CFFF] text-[#77E7FF] font-extrabold text-[10.5px]">
-                    TESTFR ACT
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleTriggerGi}
-                  style={{ backgroundColor: '#9333EA', color: '#FFFFFF' }}
-                  className="w-full py-2 rounded-lg font-extrabold text-[11px] flex items-center justify-center gap-1.5 shadow"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" /> Send Station General Interrogation (C_IC_NA_1, QOI=20)
-                </button>
-              </div>
-
-              {/* 2. RCC Remote Command Execution */}
-              <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="rounded-xl border p-3 space-y-2">
-                <div className="flex items-center justify-between border-b border-[#163B5C] pb-1.5">
-                  <h3 className="text-xs font-extrabold text-white">2. RCC Remote Command (C_DC_NA_1)</h3>
-                  <select
-                    value={controlMode}
-                    onChange={(e) => setControlMode(e.target.value as ControlMode)}
-                    className="rounded border border-[#1E5280] bg-[#04101E] px-1.5 py-0.5 font-mono text-[10px] text-[#7DD3FC]"
+            <div className="flex flex-wrap items-center gap-2">
+              {(
+                [
+                  ['ALL', 'All 32 Tests'],
+                  ['A_UFRAME', 'A. Link & U-Frames (6)'],
+                  ['B_MMS', 'B. IEC 61850 MMS (6)'],
+                  ['C_CONV', 'C. 61850→104 Conversion (7)'],
+                  ['D_CMD', 'D. GI & Commands (7)'],
+                  ['E_WAN', 'E. APCI & WAN (6)'],
+                ] as const
+              ).map(([cat, lbl]) => {
+                const isAct = testCatFilter === cat;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setTestCatFilter(cat)}
+                    style={
+                      isAct
+                        ? { background: 'linear-gradient(180deg, #3CF4FF 0%, #00D2EC 100%)', borderColor: '#A8FDFF', color: '#031B2E', boxShadow: '0 0 18px rgba(0,234,255,0.72)' }
+                        : { background: 'linear-gradient(180deg, rgba(32,82,110,0.52), rgba(18,54,78,0.62))', borderColor: 'rgba(125,215,242,0.48)', color: '#ECF8FF' }
+                    }
+                    className="rounded-[10px] border px-3.5 py-1.5 text-[12px] font-bold transition hover:border-[#3CF4FF]"
                   >
-                    <option value="SBO">SBO</option>
-                    <option value="DIRECT">Direct</option>
-                  </select>
-                </div>
-                <select
-                  value={targetBay.id}
-                  onChange={(e) => setCommandTargetBayId(e.target.value)}
-                  style={{ backgroundColor: '#04101E', borderColor: '#1E5280', color: '#FFFFFF' }}
-                  className="w-full rounded-lg border px-2 py-1.5 text-[11px] font-bold"
-                >
-                  {bays.slice(0, 12).map((b, idx) => (
-                    <option key={b.id} value={b.id}>
-                      IOA {6001 + idx} — {b.bayCode} ({b.breakerState})
-                    </option>
-                  ))}
-                </select>
-                <div className="flex items-center justify-between text-[10.5px]">
-                  <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input type="radio" checked={cmdAction === 'TRIP'} onChange={() => setCmdAction('TRIP')} />
-                    <span className="text-[#FCA5A5] font-bold">Trip (DCO=1 OFF)</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input type="radio" checked={cmdAction === 'CLOSE'} onChange={() => setCmdAction('CLOSE')} />
-                    <span className="text-[#4ADE80] font-bold">Close (DCO=2 ON)</span>
-                  </label>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleRemoteCommand(cmdAction)}
-                  className="w-full py-1.5 rounded-lg bg-[#06291E] border border-[#22C55E] text-[#4ADE80] font-extrabold text-[11px] flex items-center justify-center gap-1.5 hover:brightness-110"
-                >
-                  <Send className="w-3 h-3" /> Send Remote Command ({controlMode})
-                </button>
-                <div className="rounded bg-[#04101E] border border-[#15395A] px-2 py-1 font-mono text-[9.5px] text-[#9BC0DF]">
-                  {commandTraceStep}
-                </div>
-              </div>
-
-              {/* 3. Fault Simulation Quick Selector */}
-              <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="rounded-xl border p-3 space-y-1.5">
-                <h3 className="text-xs font-extrabold text-white border-b border-[#163B5C] pb-1.5 flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-[#FFB547]" />
-                  <span>3. IEC-104 Fault Simulation</span>
-                </h3>
-                <div className="space-y-1">
-                  {faultList.slice(0, 5).map((f) => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => setFaultMode(f.id)}
-                      style={{
-                        backgroundColor: faultMode === f.id ? (f.id === 'NONE' ? '#06291E' : '#3B0D15') : '#04101E',
-                        borderColor: faultMode === f.id ? (f.id === 'NONE' ? '#22C55E' : '#EF4444') : '#163856',
-                      }}
-                      className="w-full text-left px-2 py-1 rounded border text-[10px] font-bold text-white"
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+                    {lbl}
+                  </button>
+                );
+              })}
             </div>
 
-            {/* CENTER: 36-IOA MAPPING TABLE + LIVE APCI/ASDU FRAME STREAM (6 cols) */}
-            <div className="xl:col-span-6 space-y-3 min-w-0">
-              <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="rounded-xl border p-3 space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#163B5C] pb-1.5">
-                  <div className="flex items-center gap-1.5 font-extrabold text-white text-xs">
-                    <Database className="w-4 h-4 text-[#D8B4FE]" />
-                    <span>Gateway IEC 61850 / Modbus → IEC 60870-5-104 IOA Mapping Table (COA = 132)</span>
-                  </div>
-                  <span className="font-mono text-[10px] text-[#7DD3FC]">Total: {ioaEntries.length} IOAs (Active: {ioaEntries.length})</span>
-                </div>
-                <div className="overflow-x-auto max-h-[210px] overflow-y-auto">
-                  <table className="w-full text-left border-collapse text-[10.5px]">
-                    <thead style={{ backgroundColor: '#0A2540' }} className="sticky top-0 text-[#9BC0DF] font-bold">
-                      <tr>
-                        <th className="py-1.5 px-2">IOA</th>
-                        <th className="py-1.5 px-2">Type ID</th>
-                        <th className="py-1.5 px-2">COT</th>
-                        <th className="py-1.5 px-2">Signal Description</th>
-                        <th className="py-1.5 px-2">Source (IEC 61850 / Modbus)</th>
-                        <th className="py-1.5 px-2">Live Value</th>
-                        <th className="py-1.5 px-2">Quality</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#132E4A] font-mono">
-                      {ioaEntries.map((row) => {
-                        const sel = row.ioa === selectedEntry.ioa;
-                        return (
-                          <tr
-                            key={row.ioa}
-                            onClick={() => setSelectedIoa(row.ioa)}
-                            style={{ backgroundColor: sel ? 'rgba(168, 85, 247, 0.18)' : '#04101E' }}
-                            className="cursor-pointer hover:bg-[#0B2540]"
-                          >
-                            <td className="py-1.5 px-2 font-extrabold text-[#D8B4FE]">{row.ioa}</td>
-                            <td className="py-1.5 px-2 text-[#77E7FF]">{row.typeId}</td>
-                            <td className="py-1.5 px-2 text-slate-300 text-[9.5px]">{row.cot.split('/')[0]}</td>
-                            <td className="py-1.5 px-2 font-sans font-bold text-white">{row.signalDescription}</td>
-                            <td className="py-1.5 px-2 text-[9.5px] text-[#38BDF8]">{row.sourceReference}</td>
-                            <td className="py-1.5 px-2 font-bold text-[#4ADE80]">{row.valueText}</td>
-                            <td className="py-1.5 px-2 text-[9.5px]" style={{ color: isFullyHealthy ? '#4ADE80' : '#F87171' }}>
-                              {isFullyHealthy ? '✓ GOOD' : 'INVALID'}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="rounded-xl border p-3 space-y-2">
-                <div className="flex items-center justify-between border-b border-[#163B5C] pb-1.5">
-                  <div className="flex items-center gap-1.5 font-extrabold text-white text-xs">
-                    <Terminal className="w-4 h-4 text-[#00CFFF]" />
-                    <span>Live IEC-104 APCI / ASDU Frame Stream (I-Frames, S-Frames, U-Frames)</span>
-                  </div>
-                  <span className="font-mono text-[10px] text-[#77E7FF]">Start Byte: 0x68 · Port: 2404</span>
-                </div>
-                <div className="overflow-x-auto max-h-[195px] overflow-y-auto">
-                  <table className="w-full text-left border-collapse text-[10.5px] font-mono">
-                    <thead style={{ backgroundColor: '#0A2540' }} className="sticky top-0 text-[#9BC0DF]">
-                      <tr>
-                        <th className="py-1 px-2">Time</th>
-                        <th className="py-1 px-2">Frame</th>
-                        <th className="py-1 px-2">Dir</th>
-                        <th className="py-1 px-2">APCI N(S)/N(R)</th>
-                        <th className="py-1 px-2">ASDU / Details</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#132E4A]">
-                      {frameLog.slice(0, 10).map((f) => (
-                        <tr
-                          key={f.id}
-                          onClick={() => {
-                            setSelectedFrameId(f.id);
-                            setActiveTab('APCI_ANALYZER');
-                          }}
-                          className="bg-[#04101E] hover:bg-[#0B2540] cursor-pointer"
-                        >
-                          <td className="py-1 px-2 text-slate-400 whitespace-nowrap">{f.time}</td>
-                          <td className="py-1 px-2 whitespace-nowrap">
-                            <span
-                              className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold ${
-                                f.format === 'I-Frame'
-                                  ? 'bg-[#082038] text-[#77E7FF]'
-                                  : f.format === 'U-Frame'
-                                  ? 'bg-[#241038] text-[#D8B4FE]'
-                                  : 'bg-[#06291E] text-[#4ADE80]'
-                              }`}
-                            >
-                              {f.format}
-                            </span>
-                          </td>
-                          <td className="py-1 px-2 text-[#FACC15] whitespace-nowrap">{f.dir}</td>
-                          <td className="py-1 px-2 text-[#BAE6FD] whitespace-nowrap">{f.apciText}</td>
-                          <td className="py-1 px-2 text-white truncate max-w-[260px]" title={f.summary}>{f.summary}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-
-            {/* RIGHT: LIVE DIAGNOSTICS (3 cols) */}
-            <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="xl:col-span-3 rounded-xl border p-3 space-y-2 min-w-0">
-              <div className="flex items-center gap-1.5 font-extrabold text-white text-xs border-b border-[#163B5C] pb-1.5">
-                <Activity className="w-4 h-4 text-[#4ADE80]" />
-                <span>Live Diagnostics</span>
-              </div>
-              <div className="space-y-1.5 text-[10.5px]">
-                {[
-                  ['IEC-104 Link Status', isFullyHealthy ? 'STARTDT ACTIVE' : faultMode !== 'NONE' ? faultMode : 'STOPDT STANDBY', isFullyHealthy ? '#4ADE80' : '#F87171'],
-                  ['TCP Connection', isTcpUp ? `Connected (${IEC104_NET.rccIp}:2404)` : 'Disconnected (2404)', isTcpUp ? '#4ADE80' : '#F87171'],
-                  ['Controlling Station', `RCC Master (${IEC104_NET.rccIp})`, '#7DD3FC'],
-                  ['Controlled Station', `RTU/GW (${IEC104_NET.rtuIp})`, '#BAE6FD'],
-                  ['Common Address', `${IEC104_NET.coa} (${IEC104_NET.coaHex})`, '#D8B4FE'],
-                  ['Tx / Rx Frames', `${txFramesTotal} / ${rxFramesTotal}`, '#FFFFFF'],
-                  ['N(S) / N(R)', `${txSeqNs} / ${rxSeqNr}`, '#77E7FF'],
-                  ['GI Status', giStatus, giStatus.startsWith('Completed') ? '#4ADE80' : '#FBBF24'],
-                  ['Last Command', lastCommandText, '#FDBA74'],
-                  ['T1 / T2 / T3 Timers', faultMode === 'T1_TIMEOUT' ? 'T1 EXPIRED' : faultMode === 'T3_TIMEOUT' ? 'T3 EXPIRED' : '15s / 10s / 20s OK', faultMode === 'T1_TIMEOUT' || faultMode === 'T3_TIMEOUT' ? '#F87171' : '#4ADE80'],
-                  ['Comm. Quality', isFullyHealthy ? 'GOOD (No Errors)' : 'DEGRADED / FAULT', isFullyHealthy ? '#4ADE80' : '#F87171'],
-                  ['Last Update', lastUpdateTs, '#9BC0DF'],
-                ].map(([k, v, c]) => (
-                  <div key={k} className="flex justify-between gap-2 border-b border-[#122E49] pb-1 last:border-0">
-                    <span className="text-[#9BC0DF] shrink-0">{k}</span>
-                    <span style={{ color: c }} className="font-mono font-bold text-right break-all">{v}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 2: FULL 36-IOA MAPPING & INSPECTOR */}
-      {activeTab === 'IOA_MAPPING' && (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
-          <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="xl:col-span-8 rounded-xl border p-4 space-y-2">
-            <h3 className="text-sm font-extrabold text-white border-b border-[#163B5C] pb-2">
-              All {ioaEntries.length} Configured IEC 60870-5-104 IOAs (COA = {IEC104_NET.coa})
-            </h3>
-            <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
-              <table className="w-full text-left border-collapse text-[11px] font-mono">
-                <thead style={{ backgroundColor: '#0A2540' }} className="sticky top-0 text-[#9BC0DF]">
+            {/* 2-COLUMN SPLIT: LEFT = 32-TEST TABLE | RIGHT = STEP-BY-STEP EXECUTION INSPECTOR */}
+            <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-3.5 items-start">
+              {/* LEFT SIDE: 32-TEST SIMULATION TABLE */}
+            <div
+              style={{ border: '1.5px solid rgba(100, 224, 248, 0.62)', background: 'linear-gradient(180deg, rgba(26, 76, 104, 0.52) 0%, rgba(14, 52, 76, 0.64) 100%)' }}
+              className="i104-glass-scroll overflow-x-auto max-h-[385px] overflow-y-auto rounded-xl"
+            >
+              <table className="w-full text-left border-collapse font-sans text-[12.5px]">
+                <thead style={{ background: 'linear-gradient(180deg, rgba(64,126,158,0.68), rgba(36,86,116,0.76))', borderBottom: '1px solid rgba(120,218,245,0.38)' }} className="sticky top-0 z-10 text-[#F0FAFF] font-bold">
                   <tr>
-                    <th className="py-2 px-2">IOA</th>
-                    <th className="py-2 px-2">Type ID</th>
-                    <th className="py-2 px-2">COT</th>
-                    <th className="py-2 px-2">Signal Description</th>
-                    <th className="py-2 px-2">Source</th>
-                    <th className="py-2 px-2">Value</th>
-                    <th className="py-2 px-2">Status</th>
+                    <th className="py-2.5 px-3.5 w-12">#</th>
+                    <th className="py-2.5 px-3.5">Test Name</th>
+                    <th className="py-2.5 px-3.5 text-center w-28">Toggle</th>
+                    <th className="py-2.5 px-3.5 text-center w-28">Status</th>
+                    <th className="py-2.5 px-3.5">Expected Result</th>
+                    <th className="py-2.5 px-3.5">Actual Result</th>
+                    <th className="py-2.5 px-3.5 text-right w-28">Timestamp</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#132E4A]">
-                  {ioaEntries.map((r) => (
-                    <tr
-                      key={r.ioa}
-                      onClick={() => setSelectedIoa(r.ioa)}
-                      style={{ backgroundColor: r.ioa === selectedEntry.ioa ? 'rgba(168,85,247,0.2)' : '#04101E' }}
-                      className="cursor-pointer hover:bg-[#0B2540]"
-                    >
-                      <td className="py-1.5 px-2 font-bold text-[#D8B4FE]">{r.ioa}</td>
-                      <td className="py-1.5 px-2 text-[#77E7FF]">{r.typeId}</td>
-                      <td className="py-1.5 px-2 text-slate-300">{r.cot}</td>
-                      <td className="py-1.5 px-2 font-sans font-bold text-white">{r.signalDescription}</td>
-                      <td className="py-1.5 px-2 text-[#38BDF8]">{r.sourceReference}</td>
-                      <td className="py-1.5 px-2 font-bold text-[#4ADE80]">{r.valueText}</td>
-                      <td className="py-1.5 px-2 text-[#4ADE80]">Mapped</td>
-                    </tr>
-                  ))}
+                <tbody>
+                  {visibleTests.map((t) => {
+                    const r = testState[t.id];
+                    const isSel = selectedTestId === t.id;
+                    return (
+                      <tr
+                        key={t.id}
+                        onClick={() => setSelectedTestId(t.id)}
+                        style={
+                          isSel
+                            ? { background: 'linear-gradient(90deg, rgba(0,216,238,0.42), rgba(0,186,216,0.28), rgba(0,210,236,0.36))', boxShadow: 'inset 0 0 0 1.5px rgba(82,242,255,0.88)' }
+                            : r.enabled
+                            ? { background: t.isFault ? 'rgba(239,68,68,0.16)' : 'rgba(16,185,129,0.14)', borderTop: '1px solid rgba(130,210,238,0.18)' }
+                            : { borderTop: '1px solid rgba(130,210,238,0.18)' }
+                        }
+                        className="cursor-pointer transition-colors hover:bg-[#196488]/45"
+                      >
+                        <td className="py-2.5 px-3.5 text-[#C4E2F2] font-medium">{t.num}</td>
+                        <td className="py-2.5 px-3.5 font-bold text-white whitespace-nowrap">{t.name}</td>
+                        <td className="py-2.5 px-3.5 text-center">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedTestId(t.id);
+                              handleToggleTest(t);
+                            }}
+                            style={{
+                              background: r.enabled ? (t.isFault ? 'linear-gradient(90deg,#dc2626,#ef4444)' : 'linear-gradient(90deg,#16a34a,#22c55e)') : 'rgba(14,42,62,0.82)',
+                              borderColor: r.enabled ? (t.isFault ? '#fca5a5' : '#86efac') : 'rgba(130,215,242,0.58)',
+                            }}
+                            className="inline-flex items-center justify-between w-[54px] h-[24px] rounded-full border-[1.5px] px-1 transition-all"
+                          >
+                            {r.enabled ? (<><span className="text-[9px] font-extrabold text-white pl-1.5">ON</span><span className="w-4 h-4 rounded-full bg-white shadow" /></>) : (<><span className="w-4 h-4 rounded-full bg-white shadow" /><span className="text-[9px] font-bold text-[#CBE8F6] pr-1">OFF</span></>)}
+                          </button>
+                        </td>
+                        <td className="py-2.5 px-3.5 text-center">
+                          <span
+                            style={
+                              r.status === 'PASSED'
+                                ? { background: 'rgba(16,185,129,0.28)', borderColor: '#4ADE80', color: '#DCFCE7' }
+                                : r.status === 'FAILED'
+                                ? { background: 'rgba(239,68,68,0.28)', borderColor: '#F87171', color: '#FEE2E2' }
+                                : { background: 'rgba(18,86,118,0.65)', borderColor: 'rgba(90,222,248,0.68)', color: '#DCF8FF' }
+                            }
+                            className="inline-block rounded-full border-[1.5px] px-3 py-0.5 text-[10px] font-extrabold"
+                          >
+                            {r.status}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3.5 text-[#E0F3FC]">{t.expectedResult}</td>
+                        <td className="py-2.5 px-3.5 text-[#D2ECF9]">{r.actualResult}</td>
+                        <td className="py-2.5 px-3.5 text-right text-[#B8D8EA] whitespace-nowrap">{r.timestamp}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-          </div>
 
-          <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="xl:col-span-4 rounded-xl border p-4 space-y-2">
-            <h3 className="text-sm font-extrabold text-white border-b border-[#163B5C] pb-2">
-              Selected IOA Configuration — IOA {selectedEntry.ioa}
-            </h3>
-            {[
-              ['Information Object Address', String(selectedEntry.ioa)],
-              ['Common Address (COA)', `${selectedEntry.commonAddress} (${IEC104_NET.coaHex})`],
-              ['ASDU Type ID', selectedEntry.typeId],
-              ['Type Description', selectedEntry.typeDescription],
-              ['Cause of Transmission', selectedEntry.cot],
-              ['Bay Code', selectedEntry.bayCode],
-              ['Signal Description', selectedEntry.signalDescription],
-              ['Southbound Protocol', selectedEntry.sourceProtocol],
-              ['Source Reference', selectedEntry.sourceReference],
-              ['Live Value', selectedEntry.valueText],
-              ['Quality Descriptor', isFullyHealthy ? selectedEntry.quality : 'INVALID (IV=1)'],
-              ['Timestamp', selectedEntry.timestamp],
-            ].map(([k, v]) => (
-              <div key={k} className="flex justify-between gap-2 border-b border-[#122E49] pb-1 text-[11px]">
-                <span className="text-[#9BC0DF]">{k}</span>
-                <span className="font-mono font-bold text-white text-right break-all">{v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
-      {/* TAB 3: GENERAL INTERROGATION (GI) SEQUENCE */}
-      {activeTab === 'GI_SEQUENCE' && (
-        <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="rounded-xl border p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#163B5C] pb-2">
-            <h3 className="text-sm font-extrabold text-white">Station General Interrogation (C_IC_NA_1, TypeID=100, QOI=20)</h3>
-            <button type="button" onClick={handleTriggerGi} className="rounded-lg bg-[#9333EA] px-3.5 py-1.5 font-extrabold text-white text-xs">
-              Execute 4-Step GI Sequence
-            </button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            {[
-              [1, 'Step 1: Activation', 'RCC → RTU: C_IC_NA_1 (COT=6, QOI=20)'],
-              [2, 'Step 2: ActCon', 'RTU → RCC: C_IC_NA_1 (COT=7 Activation Confirmation)'],
-              [3, 'Step 3: Interrogated Data', `RTU → RCC: ${ioaEntries.length} IOAs transmitted with COT=20`],
-              [4, 'Step 4: ActTerm', 'RTU → RCC: C_IC_NA_1 (COT=10 Activation Termination)'],
-            ].map(([num, title, desc]) => {
-              const done = giStep >= (num as number);
-              return (
-                <div
-                  key={String(num)}
-                  style={{
-                    backgroundColor: done ? '#06291E' : '#04101E',
-                    borderColor: done ? '#22C55E' : '#163856',
-                  }}
-                  className="rounded-lg border p-3 space-y-1"
-                >
-                  <div className="font-extrabold text-white text-xs">{title}</div>
-                  <div className="font-mono text-[10.5px] text-[#9BC0DF]">{desc}</div>
-                  <div className="font-mono text-[10px] font-bold" style={{ color: done ? '#4ADE80' : '#94A3B8' }}>
-                    {done ? '✓ COMPLETED' : 'PENDING'}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 4: REMOTE COMMANDS */}
-      {activeTab === 'REMOTE_COMMANDS' && (
-        <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="rounded-xl border p-4 space-y-3">
-          <h3 className="text-sm font-extrabold text-white border-b border-[#163B5C] pb-2">
-            Remote Command Execution (C_DC_NA_1, TypeID=46) — Control vs Breaker Feedback Separation
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2.5">
-              <label className="block text-[11px] text-[#9BC0DF]">Target Bay Command IOA (6001–6012)</label>
-              <select
-                value={targetBay.id}
-                onChange={(e) => setCommandTargetBayId(e.target.value)}
-                className="w-full rounded-lg border border-[#1E5280] bg-[#04101E] px-3 py-2 text-xs font-bold text-white"
-              >
-                {bays.slice(0, 12).map((b, idx) => (
-                  <option key={b.id} value={b.id}>
-                    IOA {6001 + idx} — {b.bayCode} ({b.name}) · Breaker: {b.breakerState}
-                  </option>
-                ))}
-              </select>
-              <div className="flex gap-3 items-center text-xs">
-                <span className="text-[#9BC0DF]">Control Mode:</span>
-                {(['SBO', 'DIRECT'] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setControlMode(m)}
-                    className={`px-3 py-1 rounded border font-mono font-bold ${controlMode === m ? 'bg-[#00CFFF] text-[#02101D] border-[#38BDF8]' : 'bg-[#04101E] text-[#9BC0DF] border-[#1E5280]'}`}
-                  >
-                    {m === 'SBO' ? 'Select-Before-Operate' : 'Direct Execute'}
-                  </button>
-                ))}
-              </div>
-              <label className="flex items-center gap-2 text-xs cursor-pointer">
-                <input type="checkbox" checked={interlockOk} onChange={(e) => setInterlockOk(e.target.checked)} />
-                <span className="text-[#BAE6FD]">Bay Interlocking Permissive Healthy (CILO1.EnaOpn / EnaCls = TRUE)</span>
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={() => handleRemoteCommand('TRIP')} className="py-2 rounded-lg bg-[#3B0D15] border border-[#EF4444] text-[#FCA5A5] font-extrabold">
-                  Send Trip (DCO=1 OFF)
-                </button>
-                <button type="button" onClick={() => handleRemoteCommand('CLOSE')} className="py-2 rounded-lg bg-[#06291E] border border-[#22C55E] text-[#4ADE80] font-extrabold">
-                  Send Close (DCO=2 ON)
-                </button>
-              </div>
-            </div>
-            <div className="rounded-lg border border-[#164463] bg-[#04101E] p-3.5 space-y-2 font-mono text-[11px]">
-              <div className="font-extrabold text-[#7DD3FC]">End-to-End Command Trace</div>
-              <div className="text-slate-300">RCC → Gateway/RTU → IEC 61850 CSWI1.Pos.Oper → Bay IED → XCBR1 Breaker Feedback</div>
-              <div className="p-2 rounded bg-[#020913] border border-[#163B5C] text-[#4ADE80]">{commandTraceStep}</div>
-              <div className="text-[10.5px] text-[#9BC0DF]">
-                Current Breaker State ({targetBay.bayCode}): <b className="text-white">{targetBay.breakerState}</b>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 5: WIRESHARK-STYLE APCI / ASDU PACKET ANALYZER */}
-      {activeTab === 'APCI_ANALYZER' && (
-        <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="rounded-xl border p-4 space-y-3">
-          <h3 className="text-sm font-extrabold text-white border-b border-[#163B5C] pb-2 flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-[#00CFFF]" />
-            <span>Wireshark-Style IEC 60870-5-104 APCI / ASDU Packet Analyzer</span>
-          </h3>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 font-mono text-[11px]">
-            <div className="rounded-lg bg-[#020913] border border-[#193E63] p-3 space-y-1.5">
-              <div className="text-[#FDBA74] font-bold">▾ APCI (Application Protocol Control Information)</div>
-              <div className="pl-3 text-slate-200">Start Byte: 0x68 · Frame Format: {selectedFrame.format}</div>
-              <div className="pl-3 text-slate-200">Direction: {selectedFrame.dir} · APCI Control: {selectedFrame.apciText}</div>
-              <div className="pl-3 text-slate-200">N(S): {selectedFrame.ns ?? 'N/A'} · N(R): {selectedFrame.nr ?? 'N/A'}</div>
-              <div className="text-[#4ADE80] font-bold mt-2">▾ ASDU (Application Service Data Unit)</div>
-              <div className="pl-3 text-slate-200">
-                {selectedFrame.format === 'I-Frame'
-                  ? `Type ID: ${selectedFrame.typeId ?? 31} · VSQ: ${selectedFrame.vsq ?? '0x01'} · COT: ${selectedFrame.cot ?? 3} · OA: ${IEC104_NET.originatorAddr} · COA: ${selectedFrame.coa ?? 132} · IOA: ${selectedFrame.ioa ?? 1001}`
-                  : 'No ASDU payload (Supervisory / Unnumbered control frame only)'}
-              </div>
-              <div className="pl-3 text-[#7DD3FC]">Details: {selectedFrame.summary}</div>
-            </div>
-            <div className="rounded-lg bg-[#020913] border border-[#193E63] p-3 space-y-2">
-              <div className="text-[#D8B4FE] font-bold">Raw Hexadecimal Frame Bytes (TCP/2404)</div>
-              <div className="p-2.5 rounded bg-[#07192C] border border-[#1E5280] text-[#4ADE80] tracking-wider break-all">
-                {selectedFrame.rawHex}
-              </div>
-              <div className="text-[#9BC0DF] text-[10.5px]">
-                Click any row in the Live Frame Stream or Logs tab to decode its exact APCI/ASDU bytes here.
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 6: FAULT & SIMULATION */}
-      {activeTab === 'FAULT_SIMULATION' && (
-        <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="rounded-xl border p-4 space-y-3">
-          <div className="flex items-center justify-between border-b border-[#163B5C] pb-2">
-            <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-[#FFB547]" />
-              <span>IEC 60870-5-104 Fault Injection Matrix</span>
-            </h3>
-            <span className="font-mono text-xs text-[#FDBA74]">Active Fault: {faultMode}</span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-            {faultList.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => setFaultMode(f.id)}
-                style={{
-                  backgroundColor: faultMode === f.id ? (f.id === 'NONE' ? '#06291E' : '#3B0D15') : '#04101E',
-                  borderColor: faultMode === f.id ? (f.id === 'NONE' ? '#22C55E' : '#EF4444') : '#163856',
-                }}
-                className="p-3 rounded-lg border text-left transition hover:border-[#38BDF8]"
-              >
-                <div className="text-[10px] font-mono text-[#9BC0DF]">{f.group}</div>
-                <div className="font-extrabold text-white text-xs mt-0.5">{f.label}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 7: LOGS & DIAGNOSTICS */}
-      {activeTab === 'LOGS_DIAGNOSTICS' && (
-        <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="rounded-xl border p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#163B5C] pb-2">
-            <h3 className="text-sm font-extrabold text-white">Complete IEC-104 APCI / ASDU Frame Log</h3>
-            <div className="flex gap-1.5">
-              {(['ALL', 'I-Frame', 'S-Frame', 'U-Frame'] as const).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setLogFilter(f)}
-                  className={`px-2.5 py-1 rounded border text-[10.5px] font-bold ${logFilter === f ? 'bg-[#00CFFF] text-[#02101D] border-[#38BDF8]' : 'bg-[#04101E] text-[#9BC0DF] border-[#1E5280]'}`}
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="overflow-x-auto max-h-[360px] overflow-y-auto">
-            <table className="w-full text-left border-collapse text-[11px] font-mono">
-              <thead style={{ backgroundColor: '#0A2540' }} className="sticky top-0 text-[#9BC0DF]">
-                <tr>
-                  <th className="py-1.5 px-2">Time</th>
-                  <th className="py-1.5 px-2">Format</th>
-                  <th className="py-1.5 px-2">Direction</th>
-                  <th className="py-1.5 px-2">APCI</th>
-                  <th className="py-1.5 px-2">Summary</th>
-                  <th className="py-1.5 px-2">Raw Hex</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#132E4A]">
-                {filteredFrames.map((f) => (
-                  <tr
-                    key={f.id}
-                    onClick={() => {
-                      setSelectedFrameId(f.id);
-                      setActiveTab('APCI_ANALYZER');
+              {/* RIGHT SIDE: LIVE STEP-BY-STEP TEST EXECUTION DETAILS BOX */}
+              {(() => {
+                const selTest = IEC104_TESTS.find((x) => x.id === selectedTestId) || IEC104_TESTS[0];
+                const selRt = testState[selTest.id];
+                const info = buildIec104TestSteps(selTest, selRt, nsSeq, nrSeq);
+                return (
+                  <div
+                    style={{
+                      border: '1.5px solid rgba(125, 249, 255, 0.65)',
+                      background:
+                        'radial-gradient(ellipse 65% 40% at 50% 0%, rgba(56, 232, 255, 0.18), transparent 72%), ' +
+                        'linear-gradient(180deg, rgba(14, 52, 78, 0.78) 0%, rgba(8, 32, 52, 0.90) 100%)',
+                      boxShadow: 'inset 0 1px 0 rgba(210, 252, 255, 0.42), 0 0 22px rgba(0, 224, 255, 0.16)',
                     }}
-                    className="bg-[#04101E] hover:bg-[#0B2540] cursor-pointer"
+                    className="rounded-xl p-3.5 space-y-2.5 max-h-[385px] overflow-y-auto i104-glass-scroll"
                   >
-                    <td className="py-1.5 px-2 text-slate-400">{f.time}</td>
-                    <td className="py-1.5 px-2 font-bold text-[#77E7FF]">{f.format}</td>
-                    <td className="py-1.5 px-2 text-[#FACC15]">{f.dir}</td>
-                    <td className="py-1.5 px-2 text-[#BAE6FD]">{f.apciText}</td>
-                    <td className="py-1.5 px-2 text-white">{f.summary}</td>
-                    <td className="py-1.5 px-2 text-[#4ADE80]">{f.rawHex}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    <div className="flex items-start justify-between gap-2 pb-2 border-b border-[#56EBFF]/30">
+                      <div className="min-w-0">
+                        <div className="font-mono text-[10px] font-extrabold text-[#38F3FF]">
+                          STEP-BY-STEP TEST INSPECTOR · TEST #{selTest.num}
+                        </div>
+                        <div className="text-[14px] font-extrabold text-white leading-snug mt-0.5">
+                          {selTest.name}
+                        </div>
+                      </div>
+                      <span
+                        className="shrink-0 rounded-full border-[1.5px] px-2.5 py-0.5 font-mono text-[9.5px] font-extrabold"
+                        style={
+                          selRt.status === 'PASSED'
+                            ? { background: 'rgba(16,185,129,0.28)', borderColor: '#4ADE80', color: '#DCFCE7' }
+                            : selRt.status === 'FAILED'
+                            ? { background: 'rgba(239,68,68,0.28)', borderColor: '#F87171', color: '#FEE2E2' }
+                            : { background: 'rgba(18,86,118,0.65)', borderColor: 'rgba(90,222,248,0.68)', color: '#DCF8FF' }
+                        }
+                      >
+                        {selRt.enabled ? (selTest.isFault ? 'FAULT ACTIVE' : 'PASSED') : 'IDLE'}
+                      </span>
+                    </div>
+
+                    <div className="rounded-lg border border-[#56EBFF]/30 bg-[#051C30]/75 px-2.5 py-1.5 font-mono text-[10px]">
+                      <span className="text-[#9BD3EC] font-bold">Affected Path: </span>
+                      <span className="text-[#E0F7FF]">{info.path}</span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {info.steps.map((st) => (
+                        <div
+                          key={st.num}
+                          className="rounded-lg border border-[#56EBFF]/25 bg-[#062138]/75 px-2.5 py-2 flex items-start gap-2.5"
+                        >
+                          <span
+                            style={{ backgroundColor: st.color, color: '#031829' }}
+                            className="w-5 h-5 rounded-full shrink-0 inline-flex items-center justify-center font-mono text-[10px] font-black mt-0.5"
+                          >
+                            {st.num}
+                          </span>
+                          <div className="min-w-0">
+                            <div style={{ color: st.color }} className="text-[11px] font-extrabold">
+                              Step {st.num}: {st.title}
+                            </div>
+                            <div className="text-[11px] text-[#E0F3FC] leading-relaxed mt-0.5">
+                              {st.detail}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="rounded-lg border border-[#FACC15]/45 bg-[#041424]/90 p-2 font-mono text-[10px]">
+                      <div className="text-[#FDE047] font-extrabold mb-0.5">Wire Frame / APCI Hex Trace:</div>
+                      <div className="text-[#A3E635] break-all">{info.frameHex}</div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {showHistory && (
+              <div className="rounded-xl border border-[#38F3FF]/45 bg-[#04182B]/90 p-3 space-y-1.5">
+                <div className="text-xs font-extrabold text-[#7DD3FC]">Test Execution History</div>
+                {testHistory.length === 0 ? (
+                  <div className="text-[11px] text-[#9BC0DF]">No test actions recorded yet.</div>
+                ) : (
+                  <div className="max-h-[140px] overflow-y-auto font-mono text-[10.5px] space-y-1">
+                    {testHistory.map((h) => (
+                      <div key={h.id} className="flex justify-between gap-2 border-b border-[#123A59] pb-1">
+                        <span className="text-[#94B8D7]">{h.time}</span>
+                        <span className="text-white font-bold">{h.testName} ({h.action})</span>
+                        <span style={{ color: h.status === 'FAILED' ? '#FCA5A5' : '#4ADE80' }}>{h.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+        </div>
+      )}
+
+      {/* SECONDARY TABS */}
+      {activeTab !== 'TOPOLOGY_LIVE' && (
+        <div className="rounded-2xl border border-[#1B4B72] bg-[#06182B] p-4 space-y-3">
+          {activeTab === 'IOA_MAPPING' && (
+            <>
+              <h3 className="text-sm font-extrabold text-white flex items-center gap-2"><Layers className="w-4 h-4 text-[#FDE047]" /> Gateway IEC 61850 → IEC 60870-5-104 IOA Mapping Table ({ioaTable.length} IOAs · COA=132)</h3>
+              <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
+                <table className="w-full text-left border-collapse font-mono text-[11px]">
+                  <thead className="bg-[#0B2A46] text-[#9BC0DF] sticky top-0">
+                    <tr><th className="py-2 px-2.5">IOA</th><th className="py-2 px-2.5">Type ID</th><th className="py-2 px-2.5">COT</th><th className="py-2 px-2.5">Signal Description</th><th className="py-2 px-2.5">IEC 61850 Source</th><th className="py-2 px-2.5">Live Value</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#133252]">
+                    {ioaTable.map((row) => (
+                      <tr key={row.ioa} className="hover:bg-[#0B2A46]/60">
+                        <td className="py-1.5 px-2.5 text-[#38F3FF] font-bold">{row.ioa}</td>
+                        <td className="py-1.5 px-2.5 text-[#D8B4FE]">{row.typeId}</td>
+                        <td className="py-1.5 px-2.5 text-[#FDE047]">{row.cot}</td>
+                        <td className="py-1.5 px-2.5 text-white font-sans font-semibold">{row.description}</td>
+                        <td className="py-1.5 px-2.5 text-[#7DD3FC]">{row.sourceRef}</td>
+                        <td className="py-1.5 px-2.5 text-[#4ADE80] font-bold">{row.valueText}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'GI_SEQUENCE' && (
+            <div className="space-y-3 text-xs">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-extrabold text-white">Station General Interrogation Sequence (C_IC_NA_1, QOI=20)</h3>
+                <button type="button" onClick={handleTriggerGi} className="rounded-lg border border-[#C084FC] bg-[#2E1065] px-3 py-1.5 font-extrabold text-[#E9D5FF]">Trigger Station GI Now</button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 font-mono">
+                {[
+                  ['Step 1 · COT=6', 'RCC → GTW-01: C_IC_NA_1 Activation (QOI=20)'],
+                  ['Step 2 · COT=7', 'GTW-01 → RCC: Activation Confirm'],
+                  ['Step 3 · COT=20', `GTW-01 → RCC: ${ioaTable.length} IOAs Snapshot Burst`],
+                  ['Step 4 · COT=10', 'GTW-01 → RCC: Activation Termination'],
+                ].map(([t, d]) => (
+                  <div key={t} className="rounded-xl border border-[#1E5280] bg-[#041222] p-3">
+                    <div className="font-extrabold text-[#38F3FF]">{t}</div>
+                    <div className="text-[#D2ECF9] mt-1">{d}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'REMOTE_COMMANDS' && (
+            <div className="space-y-3 text-xs max-w-xl">
+              <h3 className="text-sm font-extrabold text-white flex items-center gap-2"><Send className="w-4 h-4 text-[#4ADE80]" /> RCC Remote Telecontrol Command (C_DC_NA_1 → IEC 61850 CSWI1)</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <select value={cmdBayId} onChange={(e) => setCmdBayId(e.target.value)} className="rounded-lg border border-[#1E5280] bg-[#041222] p-2 font-mono text-white">
+                  {bays.map((b) => <option key={b.id} value={b.id}>{b.bayCode} ({b.breakerState})</option>)}
+                </select>
+                <select value={cmdMode} onChange={(e) => setCmdMode(e.target.value as 'SBO' | 'DIRECT')} className="rounded-lg border border-[#1E5280] bg-[#041222] p-2 font-mono text-white">
+                  <option value="SBO">SBO (Select-Before-Operate)</option>
+                  <option value="DIRECT">Direct Execute</option>
+                </select>
+                <select value={cmdAction} onChange={(e) => setCmdAction(e.target.value as 'TRIP' | 'CLOSE')} className="rounded-lg border border-[#1E5280] bg-[#041222] p-2 font-mono text-white">
+                  <option value="TRIP">TRIP (DCO=1 OFF)</option>
+                  <option value="CLOSE">CLOSE (DCO=2 ON)</option>
+                </select>
+              </div>
+              <button type="button" onClick={handleSendCommand} className="rounded-lg border border-[#22C55E] bg-[#062E20] px-4 py-2 font-extrabold text-[#4ADE80]">Send Remote Command ({cmdMode})</button>
+              <div className="rounded-lg border border-[#1E5280] bg-[#041222] p-2.5 font-mono text-[#7DD3FC]">{lastCmdMsg}</div>
+            </div>
+          )}
+
+          {activeTab === 'APCI_ANALYZER' && (
+            <div className="space-y-2 font-mono text-xs">
+              <h3 className="text-sm font-extrabold text-white flex items-center gap-2"><FileCode2 className="w-4 h-4 text-[#D8B4FE]" /> APCI / ASDU Hex Frame Dissector ({activeIed.fullName})</h3>
+              <div className="rounded-xl border border-[#1E5280] bg-[#03101F] p-3 space-y-1.5">
+                <div className="text-[#38F3FF]">IEC 61850 MMS Report: {activeIed.iedName} / {activeIed.rcbName} → {activeIed.lnRef} = {activeIed.baseValue} {activeIed.unit}</div>
+                <div className="text-[#4ADE80]">IEC-104 I-Frame TX:   68 15 {(nsSeq << 1).toString(16).padStart(4, '0').toUpperCase()} {(nrSeq << 1).toString(16).padStart(4, '0').toUpperCase()} {activeIed.typeIdNum.toString(16).padStart(2, '0').toUpperCase()} 01 03 00 84 00 {activeIed.ioa.toString(16).padStart(6, '0').toUpperCase()} {badQuality ? '80' : '00'}</div>
+                <div className="text-[#FDE047]">IEC-104 S-Frame Ack:  68 04 01 00 {(nsSeq << 1).toString(16).padStart(4, '0').toUpperCase()}</div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'LOGS_DIAGNOSTICS' && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-extrabold text-white flex items-center gap-2"><Terminal className="w-4 h-4 text-[#38F3FF]" /> Live IEC 61850 MMS &amp; IEC-104 APCI/ASDU Stream</h3>
+              <div className="max-h-[380px] overflow-y-auto space-y-1 font-mono text-[11px]">
+                {logs.map((l) => (
+                  <div key={l.id} className="flex flex-wrap justify-between gap-2 border-b border-[#133252] pb-1">
+                    <span className="text-[#94B8D7]">{l.time}</span>
+                    <span className="text-[#38F3FF] font-bold">{l.frameType}</span>
+                    <span className="text-[#E0F2FE]">{l.direction}</span>
+                    <span className="text-[#FDE047]">{l.details}</span>
+                    <span style={{ color: l.result === 'Success' || l.result === 'Delivered' ? '#4ADE80' : '#FCA5A5' }} className="font-extrabold">{l.result}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
