@@ -222,6 +222,7 @@ export const SignalMappingSclPage: React.FC = () => {
     networkRedundancyMode,
     selectedBayId,
     setSelectedBayId,
+    setSelectedIedId,
     commandBreaker,
     triggerProtectionTrip,
     resetProtectionTrip,
@@ -243,7 +244,12 @@ export const SignalMappingSclPage: React.FC = () => {
   const [selectedPointId, setSelectedPointId] = useState<string>('SIG-132-L1-01');
 
   // Interactive Signal-Chain Fault Simulation (Section 11)
-  const [chainFaultMode, setChainFaultMode] = useState<SignalChainFaultMode>('NONE');
+  const [faultModeByBay, setFaultModeByBay] = useState<Record<string, SignalChainFaultMode>>({});
+  const activeBayKey = selectedBayId || bays[0]?.id || 'BAY-132-L1';
+  const chainFaultMode: SignalChainFaultMode = faultModeByBay[activeBayKey] || 'NONE';
+  const setChainFaultMode = (mode: SignalChainFaultMode) => {
+    setFaultModeByBay((prev) => ({ ...prev, [activeBayKey]: mode }));
+  };
   const [selectedStageIndex, setSelectedStageIndex] = useState<number | null>(null);
   const [selectedProtocolMapMode, setSelectedProtocolMapMode] = useState<'MMS' | 'GOOSE' | 'MODBUS' | 'IEC104' | 'OPCUA'>('MMS');
 
@@ -888,6 +894,17 @@ export const SignalMappingSclPage: React.FC = () => {
       <SignalChainDashboard
         activeChain={activeChain}
         ied={ieds.find((x) => x.id === activeChain.bay.iedId)}
+        ieds={ieds}
+        bays={bays}
+        onSelectBay={(bayId) => {
+          setSelectedBayId(bayId);
+          const matchedBay = bays.find((b) => b.id === bayId);
+          if (matchedBay) {
+            setSelectedIedId(matchedBay.iedId);
+            const matchedSig = signals.find((s) => s.bayId === bayId && s.catalogNumber === selectedCatalogNo);
+            if (matchedSig) setSelectedPointId(matchedSig.id);
+          }
+        }}
         networkLinks={networkLinks}
         gooseControlBlocks={gooseControlBlocks}
         networkRedundancyMode={networkRedundancyMode}
