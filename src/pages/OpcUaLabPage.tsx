@@ -8,9 +8,7 @@ import {
   ChevronRight,
   Cloud,
   Database,
-  Download,
   FolderTree,
-  History,
   Layers,
   Lock,
   Pause,
@@ -31,16 +29,23 @@ type OpcUaV3Tab =
   | 'READ_WRITE'
   | 'SECURITY_CERTS'
   | 'DMZ_GATEWAY'
+  | 'WHY_NO_DATA'
   | 'DIAGNOSTICS_LOGS'
   | 'CLOUD_ANALYTICS';
 
 type TestCategory = 'A_CONNECTION' | 'B_DATA' | 'C_SECURITY' | 'D_NETWORK' | 'E_CLOUD';
-type TestStatus = 'IDLE' | 'RUNNING' | 'PASSED' | 'FAILED';
+type TestStatus = 'IDLE' | 'RUNNING' | 'PASSED' | 'FAILED' | 'ACTIVE' | 'UNVERIFIED';
 
 interface PortPoint {
   x: number;
   y: number;
 }
+
+type LabNode = Omit<OpcUaNodeEntry, 'statusCode'> & {
+  statusCode: OpcUaNodeEntry['statusCode'] | 'UncertainLastUsableValue (0x40900000)';
+};
+
+const OPC_FLOW_HOPS = 20;
 
 interface OpcUaLogEntry {
   id: number;
@@ -93,14 +98,17 @@ const V3_HW = {
   PRP_SWITCH: 'assets/devices/hirschmann-rack-prp.png',
   CENTRAL_SWITCH: 'assets/devices/station-central-switch.png',
   GATEWAY_BLUE: 'assets/devices/sas-gateway-blue.png',
-  DMZ_TOWER: 'assets/devices/dmz-tower-server.png',
+  AGGREGATION_SERVER: 'assets/devices/dmz-tower-server.png',
+  HISTORIAN_COLLECTOR: 'assets/devices/advantech-uno-2484g.webp',
   SCADA: 'assets/signal-chain/scada-hmi.png',
-  WORKSTATION: 'assets/devices/historian-workstation.png',
-  FIREWALL: 'assets/devices/industrial-firewall.png',
+  ENGINEERING_WORKSTATION: 'assets/devices/engineering-workstation.png',
+  ANALYTICS_WORKSTATION: 'assets/devices/historian-workstation.png',
+  OT_FIREWALL: 'assets/devices/hirschmann-eagle40-07.webp',
+  ENTERPRISE_FIREWALL: 'assets/devices/fortigate-100f.webp',
   RACK_SERVER: 'assets/devices/industrial-rack-server.png',
 } as const;
 
-const OPC_UA_45_TESTS: TestDefinition[] = [
+const OPC_UA_SCENARIOS: TestDefinition[] = [
   // A. OPC UA Connection Tests (1-7)
   { id: 'T01_DISCOVERY', num: 1, name: 'Endpoint Discovery', category: 'A_CONNECTION', isFault: false, safeAuto: true, expectedResult: 'GetEndpoints returns opc.tcp://10.132.10.200:4840 (Good)' },
   { id: 'T02_SECURE_CHANNEL', num: 2, name: 'SecureChannel Establishment', category: 'A_CONNECTION', isFault: false, safeAuto: true, expectedResult: 'OpenSecureChannel Basic256Sha256 Sign & Encrypt OK' },
@@ -118,7 +126,7 @@ const OPC_UA_45_TESTS: TestDefinition[] = [
   { id: 'T13_DATACHANGE_SUB', num: 13, name: 'DataChange Subscription', category: 'B_DATA', isFault: false, safeAuto: true, expectedResult: 'Sub_01 delivers periodic DataChange notifications' },
   { id: 'T14_MONITORED_ITEM', num: 14, name: 'Monitored Item Creation', category: 'B_DATA', isFault: false, safeAuto: true, expectedResult: 'CreateMonitoredItems adds signal to Sub_01' },
   { id: 'T15_PUB_INTERVAL', num: 15, name: 'Publishing Interval Change', category: 'B_DATA', isFault: false, safeAuto: true, expectedResult: 'Sub_01 publishing interval updates (500ms ↔ 250ms)' },
-  { id: 'T16_SUB_TIMEOUT', num: 16, name: 'Subscription Timeout', category: 'B_DATA', isFault: true, safeAuto: false, expectedResult: 'BadSubscriptionIdInvalid (0x80280000); publish stops' },
+  { id: 'T16_SUB_TIMEOUT', num: 16, name: 'Subscription Timeout', category: 'B_DATA', isFault: true, safeAuto: false, expectedResult: 'Subscription becomes inactive and Publish stops. The session remains available for Read.' },
   { id: 'T17_QUEUE_OVERFLOW', num: 17, name: 'Queue Overflow', category: 'B_DATA', isFault: true, safeAuto: false, expectedResult: 'Overflow bit set in MonitoredItem DataValue' },
   { id: 'T18_DEADBAND', num: 18, name: 'Deadband Filtering', category: 'B_DATA', isFault: false, safeAuto: true, expectedResult: 'Analog jitter below ±0.2% suppressed by deadband' },
   // C. Security Tests (19-26)
@@ -151,7 +159,147 @@ const OPC_UA_45_TESTS: TestDefinition[] = [
   { id: 'T43_CLOUD_RECONNECT', num: 43, name: 'Cloud Reconnection', category: 'E_CLOUD', isFault: false, safeAuto: true, expectedResult: 'Cloud TLS 1.3 link restored; dashboard synced' },
   { id: 'T44_FWD_FAIL', num: 44, name: 'Data Forwarding Failure', category: 'E_CLOUD', isFault: true, safeAuto: false, expectedResult: 'Enterprise Data Platform ingest rejected (HTTP 503)' },
   { id: 'T45_DELAYED_CLOUD', num: 45, name: 'Delayed Cloud Data Delivery', category: 'E_CLOUD', isFault: true, safeAuto: false, expectedResult: 'Cloud telemetry lag +4.5 s flagged in diagnostics' },
+  { id: 'T46_DATA_QUALITY', num: 46, name: 'Data Quality and Stale Value', category: 'B_DATA', isFault: false, safeAuto: true, expectedResult: 'Field loss marks the last usable value Uncertain. Live quality reflects the selected source.' },
 ];
+
+const coreScenarios = [
+  { id: 'T01_DISCOVERY', label: 'Endpoint Validation' },
+  { id: 'T02_SECURE_CHANNEL', label: 'SecureChannel' },
+  { id: 'T23_WRONG_CREDS', label: 'Authentication' },
+  { id: 'T09_READ', label: 'Node Read' },
+  { id: 'T10_WRITE', label: 'Node Write' },
+  { id: 'T14_MONITORED_ITEM', label: 'Subscription & Monitored Item' },
+  { id: 'T16_SUB_TIMEOUT', label: 'Subscription Timeout' },
+  { id: 'T27_PRP_LANA_FAIL', label: 'PRP Single LAN Failure' },
+  { id: 'T29_PRP_BOTH_FAIL', label: 'PRP Dual LAN Failure' },
+  { id: 'T05_SESSION_RECONNECT', label: 'Reconnect & Recovery' },
+] as const;
+
+const prpScenarioIds = ['T27_PRP_LANA_FAIL', 'T28_PRP_LANB_FAIL', 'T29_PRP_BOTH_FAIL'];
+const coreScenarioIds = new Set<string>([...coreScenarios.map(test => test.id), 'T28_PRP_LANB_FAIL']);
+
+const categoryGuides: Record<TestCategory, readonly string[]> = {
+  A_CONNECTION: ['Verify the endpoint URL in Server & Field Config.', 'Check the simulated SecureChannel and Session status.', 'Inspect the latest Connect or Scenario entry in Diagnostics & Logs.'],
+  B_DATA: ['Confirm the session is active.', 'In Read / Write, select the intended NodeId and check whether it is read-only or writable.', 'Compare the returned value and StatusCode or inspect the Publish log.'],
+  C_SECURITY: ['Compare Security Policy and Message Security Mode.', 'Check Authentication and certificate status.', 'Reset the selected fault and reconnect to verify recovery.'],
+  D_NETWORK: ['Compare LAN A and LAN B in Live Diagnostics.', 'Trace the active payload badge to the affected device.', 'Reset the fault and verify field data and subscription delivery recover.'],
+  E_CLOUD: ['Check OT Firewall and DMZ status.', 'Compare the historian buffer and cloud indicators with the active scenario.', 'Restore the affected path and inspect Diagnostics & Logs.'],
+};
+
+const scenarioGuides: Record<string, { description: string; steps: readonly string[] }> = {
+  T01_DISCOVERY: { description: 'Validate the endpoint currently entered in Server & Field Config against the lab directory.',
+    steps: ['Enter a valid or invalid endpoint URL.', 'Run this scenario to check the URL and endpoint configuration.', 'Correct the URL and use Connect to verify the session.'] },
+  T05_SESSION_RECONNECT: { description: 'Disconnect and reconnect the simulated client using the current endpoint and security settings.',
+    steps: ['Verify the endpoint, policy, security mode and identity.', 'Run this scenario and check the new session and subscription states.', 'If reconnect fails, check active session, network or certificate faults before trying again.'] },
+  T10_WRITE: { description: 'Verify the latest explicit Write result recorded in the current session.',
+    steps: ['Open Read / Write and choose a writable breaker command node.', 'Use Execute Simulated Write to record an acknowledgement or rejection.', 'Return here and run the check against that result.'] },
+  T14_MONITORED_ITEM: { description: 'Add the currently selected read-only node to the simulated subscription.',
+    steps: ['Open Read / Write and choose a node marked RO.', 'Return here and run the scenario while the subscription is active.', 'Confirm the node appears in Sub_01, then use Reset Selected to remove the added item.'] },
+  T16_SUB_TIMEOUT: { description: 'Expire the subscription while leaving the client session available for Read.',
+    steps: ['Verify the session starts active.', 'Run the fault and compare Session with Subscription in Live Diagnostics.', 'Use Read Node to verify service access. Reset the fault and check that publishing resumes.'] },
+  T29_PRP_BOTH_FAIL: { description: 'Interrupt the field acquisition path while keeping the local OPC UA session independent.',
+    steps: ['Run the fault and confirm both PRP LANs are down.', 'Open Address Space Browser and check that cached points are UncertainLastUsableValue.', 'Reset the fault and verify that fresh data resumes.'] },
+  T46_DATA_QUALITY: { description: 'Check the selected node’s reported quality against the current field acquisition state.',
+    steps: ['Run once with the field connection healthy.', 'Run Both PRP Networks Failed, then return to this scenario and run again.', 'Compare the node’s cached value, source timestamp and quality in Read / Write.'] },
+};
+
+const scenarioButtonClass = 'rounded-lg border border-[#326985] bg-[#0B253A] px-3 py-2 font-bold text-white hover:border-[#38BDF8] disabled:opacity-50';
+
+const diagnosticSlots = [
+  { key: 'before', label: 'Before fault' },
+  { key: 'fault', label: 'During fault' },
+  { key: 'recovery', label: 'After recovery' },
+] as const;
+type DiagnosticSlot = typeof diagnosticSlots[number]['key'];
+
+interface DiagnosticSnapshot {
+  nodeId: string;
+  captured: string;
+  session: string;
+  subscription: string;
+  value: string;
+  quality: string;
+  sourceTime: string;
+  read: string;
+  firstIssue: string;
+}
+
+interface DiagnosticStage {
+  name: string;
+  ok: boolean;
+  evidence: string;
+  check: string;
+}
+
+function OpcUaDataTroubleshooting({ stages, failover, current, captures, onCapture, onClear }: {
+  stages: DiagnosticStage[];
+  failover: string;
+  current: DiagnosticSnapshot;
+  captures: Partial<Record<DiagnosticSlot, DiagnosticSnapshot>>;
+  onCapture: (slot: DiagnosticSlot) => void;
+  onClear: () => void;
+}) {
+  const firstFailure = stages.findIndex(stage => !stage.ok);
+  const capturedNodes = new Set(Object.values(captures).map(snapshot => snapshot.nodeId));
+  const fields: Array<[keyof DiagnosticSnapshot, string]> = [
+    ['captured', 'Captured at'], ['nodeId', 'NodeId'], ['session', 'Session'],
+    ['subscription', 'Subscription'], ['read', 'Local Read'], ['value', 'Value'],
+    ['quality', 'Quality'], ['sourceTime', 'Source timestamp'], ['firstIssue', 'First blocked stage'],
+  ];
+  return (
+    <section className="min-w-0 space-y-3" aria-labelledby="opcua-data-troubleshooting-title">
+      <h3 id="opcua-data-troubleshooting-title" className="text-base font-bold text-white">Why No Data?</h3>
+      <div className="rounded-md border border-[#326985] bg-[#0C2538] p-3">
+        <p className={`font-bold ${firstFailure >= 0 ? 'text-[#FECACA]' : 'text-[#86EFAC]'}`}>
+          {firstFailure >= 0 ? `First blocked stage: ${stages[firstFailure].name}` : 'Field-to-cloud delivery path available'}
+        </p>
+        {failover && <p className="mt-1 text-[#FCD394]">{failover}</p>}
+        <p className="mt-1 break-words text-[#D7EEFD]">Local Read: {current.read}</p>
+        <p className="mt-1 break-words text-[#D7EEFD]">{current.nodeId} · {current.value} · {current.quality}</p>
+        <p className="mt-1 break-words text-[#B6D4EA]">Source timestamp: {current.sourceTime}</p>
+      </div>
+      <ol className="grid gap-2 md:grid-cols-2">
+        {stages.map((stage, index) => {
+          const blocked = index === firstFailure;
+          const waiting = firstFailure >= 0 && index > firstFailure;
+          return (
+            <li key={stage.name} className="min-w-0 rounded-md border border-[#25445C] bg-[#061522] px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="font-bold text-white">{index + 1}. {stage.name}</h4>
+                <span className={`font-bold ${blocked ? 'text-[#FECACA]' : waiting ? 'text-[#B6D4EA]' : 'text-[#86EFAC]'}`}>
+                  {blocked ? 'BLOCKED' : waiting ? 'WAIT' : 'READY'}
+                </span>
+              </div>
+              <p className="mt-1 break-words text-[#D7EEFD]">{waiting ? 'Waiting for the earlier stage to recover.' : stage.evidence}</p>
+              {blocked && <p className="mt-1 break-words text-[#84DCF6]">Next check: {stage.check}</p>}
+            </li>
+          );
+        })}
+      </ol>
+      <div className="min-w-0 space-y-2 rounded-md border border-[#25445C] bg-[#061522] p-3">
+        <h4 className="font-bold text-white">Before, fault and recovery snapshots</h4>
+        <div className="flex flex-wrap gap-2">
+          {diagnosticSlots.map(slot => <button type="button" key={slot.key} className={scenarioButtonClass}
+            onClick={() => onCapture(slot.key)}>{`Capture ${slot.label.toLowerCase()}`}</button>)}
+          <button type="button" className={scenarioButtonClass} disabled={capturedNodes.size === 0} onClick={onClear}>Clear snapshots</button>
+        </div>
+        {capturedNodes.size > 1 && <p className="text-[#FCD394]">Snapshots use different NodeIds. Capture the same node for a direct comparison.</p>}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[33rem] table-fixed text-left">
+            <thead><tr><th scope="col" className="w-28 p-2">Signal</th>{diagnosticSlots.map(slot =>
+              <th scope="col" key={slot.key} className="p-2">{slot.label}</th>)}</tr></thead>
+            <tbody>{fields.map(([key, label]) => (
+              <tr key={key} className="border-t border-[#25445C]">
+                <th scope="row" className="p-2 text-[#B6D4EA]">{label}</th>
+                {diagnosticSlots.map(slot => <td key={slot.key} className="p-2 [overflow-wrap:anywhere]">{captures[slot.key]?.[key] ?? '—'}</td>)}
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function nowTimeMs(): string {
   const d = new Date();
@@ -161,30 +309,6 @@ function nowTimeMs(): string {
 
 function buildPath(pts: PortPoint[]): string {
   return pts.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(' ');
-}
-
-function samplePoly(pts: PortPoint[], t: number): { x: number; y: number } | null {
-  if (pts.length < 2) return null;
-  let tot = 0;
-  const lens: number[] = [];
-  for (let i = 0; i < pts.length - 1; i++) {
-    const l = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
-    lens.push(l);
-    tot += l;
-  }
-  if (tot <= 0.1) return pts[0];
-  let tgt = Math.max(0, Math.min(1, t)) * tot;
-  for (let i = 0; i < lens.length; i++) {
-    if (tgt <= lens[i] || i === lens.length - 1) {
-      const r = lens[i] > 0 ? tgt / lens[i] : 0;
-      return {
-        x: pts[i].x + (pts[i + 1].x - pts[i].x) * r,
-        y: pts[i].y + (pts[i + 1].y - pts[i].y) * r,
-      };
-    }
-    tgt -= lens[i];
-  }
-  return pts[pts.length - 1];
 }
 
 export const OpcUaLabPage: React.FC = () => {
@@ -198,8 +322,10 @@ export const OpcUaLabPage: React.FC = () => {
   // Server & Security Config (Simulated)
   const [endpointUrl, setEndpointUrl] = useState<string>('opc.tcp://10.132.10.200:4840');
   const [securityPolicy, setSecurityPolicy] = useState<'Basic256Sha256' | 'Aes128_Sha256_RsaOaep' | 'None'>('Basic256Sha256');
-  const [authMode, setAuthMode] = useState<'Sign & Encrypt' | 'Sign' | 'Username / Password'>('Sign & Encrypt');
+  const [securityMode, setSecurityMode] = useState<'Sign & Encrypt' | 'Sign' | 'None'>('Sign & Encrypt');
+  const [authMode, setAuthMode] = useState<'Anonymous' | 'Username / Password'>('Username / Password');
   const [clientConnected, setClientConnected] = useState<boolean>(true);
+  const [connectionFeedback, setConnectionFeedback] = useState('Connected to the simulated endpoint.');
   const [pubIntervalMs, setPubIntervalMs] = useState<number>(500);
 
   // Address Space & Read/Write
@@ -210,22 +336,24 @@ export const OpcUaLabPage: React.FC = () => {
   const [expandedVl, setExpandedVl] = useState<Record<string, boolean>>({ '132kV': true, '33kV': false, '11kV': false });
 
   // 45-Test Simulation & Fault Injection State
-  const [testCatFilter, setTestCatFilter] = useState<'ALL' | TestCategory>('ALL');
-  const [selectedTestId, setSelectedTestId] = useState<string>('T03_SESSION_CREATE');
-  const [showHistory, setShowHistory] = useState<boolean>(false);
+  const [diagnosticSnapshots, setDiagnosticSnapshots] = useState<Partial<Record<DiagnosticSlot, DiagnosticSnapshot>>>({});
+  const [selectedTestId, setSelectedTestId] = useState<string>(coreScenarios[0].id);
+  const [singlePrpLan, setSinglePrpLan] = useState<'A' | 'B'>('A');
   const [testHistory, setTestHistory] = useState<TestHistoryItem[]>([]);
   const [testState, setTestState] = useState<Record<string, TestRuntimeRecord>>(() => {
     const init: Record<string, TestRuntimeRecord> = {};
-    for (const t of OPC_UA_45_TESTS) {
+    for (const t of OPC_UA_SCENARIOS) {
       init[t.id] = { enabled: false, status: 'IDLE', actualResult: 'Not executed', timestamp: '—' };
     }
     return init;
   });
 
   // Live Animation Phase (0 -> 1 continuous cycle driven by rAF at 0.5x default speed)
-  const [animPhase, setAnimPhase] = useState<number>(0);
+  const [flow, setFlow] = useState<{ phase: number; cycle: number; sample?: LabNode }>({ phase: 0, cycle: 0 });
+  const flowSvg = useRef<SVGSVGElement>(null);
   const [pubCounter, setPubCounter] = useState<number>(142);
   const [bufferedSamples, setBufferedSamples] = useState<number>(0);
+  const [extraMonitoredNode, setExtraMonitoredNode] = useState<string | null>(null);
 
   const [logs, setLogs] = useState<OpcUaLogEntry[]>(() => [
     { id: 5, time: nowTimeMs(), service: 'Publish', direction: 'DMZ → Cloud (HTTPS/MQTT)', nodeId: 'Sub_01', details: 'Enterprise Cloud telemetry synced (TLS 1.3)', statusCode: '200 OK', result: 'Success' },
@@ -236,6 +364,7 @@ export const OpcUaLabPage: React.FC = () => {
   ]);
 
   const nextLogIdRef = useRef<number>(50);
+  const recentSessionStart = useRef(50);
   const topoWrapRef = useRef<HTMLDivElement | null>(null);
 
   // DOM Port Anchor Refs for ResizeObserver SVG Overlay
@@ -279,13 +408,20 @@ export const OpcUaLabPage: React.FC = () => {
 
   const lanAUp = !isOn('T27_PRP_LANA_FAIL') && !isOn('T29_PRP_BOTH_FAIL');
   const lanBUp = !isOn('T28_PRP_LANB_FAIL') && !isOn('T29_PRP_BOTH_FAIL');
+  const prpFailover = lanAUp !== lanBUp;
   const fieldLinkUp = lanAUp || lanBUp; // PRP dual-attached devices survive single LAN failure!
   const aggSwitchUp = !isOn('T30_SWITCH_FAIL');
   const scadaAUp = !isOn('T31_SCADA_A_FAIL');
   const activeScadaServer = scadaAUp && !isOn('T32_SCADA_B_FAILOVER') ? 'SCADA Server A (Primary)' : 'SCADA Server B (Failover Active)';
   const certHealthy = !isOn('T20_EXPIRED_CERT') && !isOn('T21_UNTRUSTED_CERT') && !isOn('T22_REJECTED_CERT');
   const securityHealthy = certHealthy && !isOn('T23_WRONG_CREDS') && !isOn('T24_POLICY_MISMATCH') && !isOn('T25_CHANNEL_EXPIRY');
-  const sessionActive = clientConnected && aggSwitchUp && securityHealthy && !isOn('T06_SESSION_TIMEOUT') && !isOn('T16_SUB_TIMEOUT');
+  const fieldAcquisitionUp = fieldLinkUp && aggSwitchUp;
+  const sessionActive = clientConnected && aggSwitchUp && securityHealthy && !isOn('T06_SESSION_TIMEOUT');
+  const subscriptionActive = sessionActive && !isOn('T16_SUB_TIMEOUT');
+  const dataDeliveryActive = subscriptionActive && fieldAcquisitionUp;
+  useEffect(() => {
+    if (sessionActive) recentSessionStart.current = nextLogIdRef.current;
+  }, [sessionActive]);
   const otFirewallOk = !isOn('T33_FIREWALL_BLOCK');
   const dmzOk = otFirewallOk && !isOn('T34_DMZ_FAIL');
   const aggServerOk = dmzOk && !isOn('T41_AGG_SRV_FAIL');
@@ -293,14 +429,32 @@ export const OpcUaLabPage: React.FC = () => {
   const cloudOk = dmzOk && !isOn('T42_CLOUD_LOSS') && !isOn('T44_FWD_FAIL');
   const highLatency = isOn('T35_HIGH_LATENCY') || isOn('T45_DELAYED_CLOUD');
 
+  const endpointError = (ignoreFaults = false) => {
+    try {
+      const url = new URL(endpointUrl.trim());
+      if (url.protocol !== 'opc.tcp:' || url.port !== '4840' || !url.hostname ||
+          url.username || url.password || url.search || url.hash) return 'BadTcpEndpointUrlInvalid: use opc.tcp://host:4840.';
+      if (url.hostname !== '10.132.10.200' || !['', '/'].includes(url.pathname)) {
+        return 'BadServerNotConnected: this endpoint is not in the lab directory.';
+      }
+    } catch {
+      return 'BadTcpEndpointUrlInvalid: use opc.tcp://host:4840.';
+    }
+    if ((securityPolicy === 'None') !== (securityMode === 'None')) return 'BadSecurityModeRejected: select a mode supported by the policy.';
+    if (securityMode === 'None' && authMode === 'Username / Password') return 'BadIdentityTokenRejected: this lab requires a secured endpoint for username authentication.';
+    if (!ignoreFaults && !securityHealthy) return 'Security or identity check rejected by the active fault.';
+    if (!ignoreFaults && (!aggSwitchUp || isOn('T06_SESSION_TIMEOUT'))) return 'The active network or session fault prevents connection.';
+    return '';
+  };
+
   // Detect conflicting active test toggles
   const conflictWarnings = useMemo(() => {
     const warns: string[] = [];
-    for (const t of OPC_UA_45_TESTS) {
+    for (const t of OPC_UA_SCENARIOS) {
       if (!testState[t.id]?.enabled || !t.conflictsWith) continue;
       for (const cid of t.conflictsWith) {
         if (testState[cid]?.enabled) {
-          const other = OPC_UA_45_TESTS.find((x) => x.id === cid);
+          const other = OPC_UA_SCENARIOS.find((x) => x.id === cid);
           if (other && t.num < other.num) {
             warns.push(`Conflict: "${t.name}" and "${other.name}" are both ON.`);
           }
@@ -311,10 +465,17 @@ export const OpcUaLabPage: React.FC = () => {
   }, [testState]);
 
   // Shared Address Space from useSubstationStore bays
-  const addressSpaceNodes: OpcUaNodeEntry[] = useMemo(() => {
-    const base = buildOpcUaAddressSpace(bays).map((n) =>
-      n.nodeId.endsWith('XCBR1.Pos.stVal') ? { ...n, accessLevel: 'CurrentRead' as const } : n
-    );
+  const liveNodes: OpcUaNodeEntry[] = useMemo(() => {
+    const byBay = new Map(bays.map(bay => [bay.bayCode, bay]));
+    const base = buildOpcUaAddressSpace(bays).map((node): OpcUaNodeEntry => {
+      const bay = byBay.get(node.bayCode);
+      return {
+        ...node,
+        accessLevel: 'CurrentRead' as const,
+        statusCode: bay?.quality === 'GOOD' ? 'Good (0x00000000)' : 'Bad (0x80000000)',
+        sourceTimestamp: bay?.lastUpdated ?? node.sourceTimestamp,
+      };
+    });
     const ts = nowTimeMs();
     const cmdNodes: OpcUaNodeEntry[] = bays.slice(0, 6).map((bay) => ({
       nodeId: `ns=2;s=SAS.${bay.voltageKv}kV.${bay.bayCode.replace(/-/g, '_')}.CB.Pos.ctlVal`,
@@ -328,11 +489,23 @@ export const OpcUaLabPage: React.FC = () => {
       sourceIecRef: `${bay.iedId.replace(/-/g, '_')}Application/CSWI1.Pos.Oper.ctlVal`,
       valueText: bay.breakerState,
       statusCode: bay.quality === 'GOOD' ? 'Good (0x00000000)' : 'Bad (0x80000000)',
-      sourceTimestamp: ts,
+      sourceTimestamp: bay.lastUpdated,
       serverTimestamp: ts,
     }));
     return [...cmdNodes, ...base];
   }, [bays]);
+
+  const [lastFieldNodes, setLastFieldNodes] = useState(liveNodes);
+  useEffect(() => {
+    if (fieldAcquisitionUp) setLastFieldNodes(liveNodes);
+  }, [fieldAcquisitionUp, liveNodes]);
+  const addressSpaceNodes = useMemo<LabNode[]>(() => fieldAcquisitionUp ? liveNodes : lastFieldNodes.map(node => ({
+    ...node, statusCode: 'UncertainLastUsableValue (0x40900000)',
+  })), [fieldAcquisitionUp, liveNodes, lastFieldNodes]);
+  const monitoredNodes = useMemo(() => {
+    const readable = addressSpaceNodes.filter(node => node.accessLevel === 'CurrentRead' && node.bayCode);
+    return [...readable.slice(0, 12), ...readable.slice(12).filter(node => node.nodeId === extraMonitoredNode)];
+  }, [addressSpaceNodes, extraMonitoredNode]);
 
   const selectedNode = useMemo(
     () => addressSpaceNodes.find((n) => n.nodeId === selectedNodeId) || addressSpaceNodes[0],
@@ -437,31 +610,39 @@ export const OpcUaLabPage: React.FC = () => {
     };
   }, [activeTab]);
 
-  // Synchronized 0.5x Default Animation Loop (pauses cleanly without corrupting state)
+  // One cycle owns one payload. It advances only in the topology view and pauses in place.
+  const flowNodes = useRef(monitoredNodes);
+  useEffect(() => { flowNodes.current = monitoredNodes; }, [monitoredNodes]);
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || activeTab !== 'TOPOLOGY_LIVE') return;
     let rafId = 0;
     let lastTs = performance.now();
-    const latencyFactor = highLatency ? 0.45 : 1;
-    const cycleMs = 3400 / (speed * latencyFactor);
-
+    const cycleMs = OPC_FLOW_HOPS * 520 / speed * (highLatency ? 1.6 : 1);
     const step = (now: number) => {
-      const dt = now - lastTs;
+      const delta = Math.max(0, Math.min(100, now - lastTs));
       lastTs = now;
-      setAnimPhase((p) => (p + dt / cycleMs) % 1);
+      setFlow(previous => {
+        const elapsed = previous.phase + delta / cycleMs;
+        const cycle = previous.cycle + Math.floor(elapsed);
+        const nodes = flowNodes.current;
+        const sampleIndex = (cycle % 4) * 3 + cycle % 3;
+        const sample = previous.sample && cycle === previous.cycle
+          ? previous.sample : nodes[sampleIndex] ?? nodes[0];
+        return { phase: elapsed % 1, cycle, sample };
+      });
       rafId = window.requestAnimationFrame(step);
     };
     rafId = window.requestAnimationFrame(step);
     return () => window.cancelAnimationFrame(rafId);
-  }, [playing, speed, highLatency]);
+  }, [activeTab, playing, speed, highLatency]);
 
   // Periodic DataChange & Historian/Cloud Sync Tick
   useEffect(() => {
-    if (!playing || !sessionActive || !fieldLinkUp) return;
-    const delayMs = Math.max(600, Math.round((pubIntervalMs * 3) / speed));
+    if (!playing || !dataDeliveryActive || !monitoredNodes.length) return;
+    const delayMs = pubIntervalMs + (isOn('T35_HIGH_LATENCY') ? 320 : 0);
     const tid = window.setTimeout(() => {
       setPubCounter((c) => c + 1);
-      const node = addressSpaceNodes[pubCounter % Math.min(8, addressSpaceNodes.length)];
+      const node = monitoredNodes[pubCounter % monitoredNodes.length];
       if (node) {
         setHighlightedNodeId(node.nodeId);
         window.setTimeout(() => setHighlightedNodeId(null), 480);
@@ -469,103 +650,229 @@ export const OpcUaLabPage: React.FC = () => {
       if (!historianOk && isOn('T39_HIST_BUFFER')) {
         setBufferedSamples((b) => b + 1);
       }
-      if (cloudOk && node) {
+      if (node) {
         appendLog({
           service: 'Publish',
-          direction: 'SCADA → DMZ → Cloud',
+          direction: cloudOk && aggServerOk ? 'SCADA → DMZ → Cloud' : 'OPC UA Server → Local Client',
           nodeId: node.nodeId,
           details: `Sub_01 DataChange (${node.valueText}) → ${activeScadaServer}`,
-          statusCode: 'Good (0x00000000)',
+          statusCode: node.statusCode,
           result: 'Delivered',
         });
       }
     }, delayMs);
     return () => window.clearTimeout(tid);
-  }, [playing, speed, pubIntervalMs, sessionActive, fieldLinkUp, historianOk, cloudOk, pubCounter, addressSpaceNodes, activeScadaServer]);
+  }, [playing, pubIntervalMs, dataDeliveryActive, historianOk, cloudOk, aggServerOk, pubCounter, monitoredNodes, activeScadaServer, testState]);
 
-  // Toggle any of the 45 Tests with genuine technical consequences
-  const handleToggleTest = (test: TestDefinition) => {
-    const currentlyOn = !!testState[test.id]?.enabled;
-    const nextOn = !currentlyOn;
-    const ts = nowTimeMs();
-
-    if (test.id === 'T15_PUB_INTERVAL') {
-      setPubIntervalMs(nextOn ? 250 : 500);
+  const observeTest = (test: TestDefinition, ranReconnect = false): Pick<TestRuntimeRecord, 'status' | 'actualResult'> => {
+    const result = (pass: boolean, actualResult: string) =>
+      ({ status: pass ? 'PASSED' as const : 'FAILED' as const, actualResult });
+    const observedService = (service: 'Read' | 'Write') => {
+      if (!sessionActive) return result(false, 'Session is down; service is unavailable.');
+      const observed = logs.find(entry => entry.service === service && entry.id >= recentSessionStart.current);
+      if (!observed) return { status: 'UNVERIFIED' as const, actualResult: `Use Read / Write to capture a ${service} result.` };
+      return result(observed.result === 'Success' && observed.statusCode.startsWith('Good'), `${observed.time} · ${observed.details}`);
+    };
+    switch (test.id) {
+      case 'T01_DISCOVERY':
+        return result(!endpointError(true), endpointError(true) || 'Configured endpoint is in the simulator directory.');
+      case 'T02_SECURE_CHANNEL':
+        return result(sessionActive && securityMode !== 'None', sessionActive ? `Active · ${securityPolicy} · ${securityMode}` : 'No active simulated channel.');
+      case 'T05_SESSION_RECONNECT':
+        if (!ranReconnect) return { status: 'UNVERIFIED', actualResult: 'Run the reconnect scenario individually to record a reconnect result.' };
+        return result(sessionActive && subscriptionActive, `After reconnect: session ${sessionActive ? 'active' : 'down'} · Subscription ${subscriptionActive ? 'active' : 'inactive'}.`);
+      case 'T03_SESSION_CREATE':
+      case 'T04_SESSION_ACTIVATE':
+        return result(sessionActive, sessionActive ? `Simulated session active · ${authMode}` : 'Session inactive.');
+      case 'T08_BROWSE':
+        return result(sessionActive && addressSpaceNodes.length > 0,
+          sessionActive ? `${addressSpaceNodes.length} nodes visible in the simulated Address Space.` : 'Session is down.');
+      case 'T09_READ': return observedService('Read');
+      case 'T10_WRITE': return observedService('Write');
+      case 'T13_DATACHANGE_SUB':
+        if (!dataDeliveryActive) return result(false, 'No current field-to-client delivery.');
+        return pubCounter > 142 ? result(true, `${pubCounter - 142} Publish ticks observed in this lab run.`)
+          : { status: 'UNVERIFIED', actualResult: 'Wait for the first Publish tick.' };
+      case 'T14_MONITORED_ITEM':
+        return result(subscriptionActive && selectedNode?.accessLevel === 'CurrentRead' && selectedNode.nodeId === extraMonitoredNode
+          && monitoredNodes.some(node => node.nodeId === extraMonitoredNode),
+          extraMonitoredNode ? `Monitored NodeId: ${extraMonitoredNode} · ${monitoredNodes.length} items.` : 'No item added. Select a readable node and confirm the subscription is active.');
+      case 'T46_DATA_QUALITY': {
+        if (!sessionActive || !selectedNode) return result(false, 'No connected session for the quality check.');
+        const liveNode = liveNodes.find(node => node.nodeId === selectedNode.nodeId);
+        const expected = fieldAcquisitionUp ? liveNode?.statusCode : 'UncertainLastUsableValue (0x40900000)';
+        return result(selectedNode.statusCode === expected,
+          `${selectedNode.displayName} = ${selectedNode.valueText} · ${selectedNode.statusCode} · Source ${selectedNode.sourceTimestamp}`);
+      }
+      case 'T15_PUB_INTERVAL':
+        return result(subscriptionActive && (pubIntervalMs === 250 || pubIntervalMs === 500),
+          `Configured interval: ${pubIntervalMs} ms · Subscription ${subscriptionActive ? 'active' : 'inactive'}.`);
+      case 'T19_VALID_CERT':
+        return result(sessionActive && certHealthy && securityMode !== 'None',
+          sessionActive && certHealthy && securityMode !== 'None' ? 'Simulated certificate accepted for the active secured session.' : 'No active secured session with a trusted certificate.');
+      case 'T32_SCADA_B_FAILOVER':
+        return result(sessionActive && activeScadaServer.startsWith('SCADA Server B'), `Observed primary: ${activeScadaServer}.`);
+      case 'T37_NET_RECOVERY':
+        return result(fieldAcquisitionUp && lanAUp && lanBUp && dmzOk, `LAN A ${lanAUp ? 'UP' : 'DOWN'} / LAN B ${lanBUp ? 'UP' : 'DOWN'} · DMZ ${dmzOk ? 'UP' : 'DOWN'}.`);
+      case 'T39_HIST_BUFFER':
+        return bufferedSamples > 0 ? result(true, `${bufferedSamples} samples buffered.`)
+          : { status: 'UNVERIFIED', actualResult: 'Enable buffering and simulate historian loss to collect samples.' };
+      default:
+        return { status: 'UNVERIFIED', actualResult: 'No automated service evidence for this case.' };
     }
-    if (test.id === 'T37_NET_RECOVERY' && nextOn) {
-      // Clear network faults on recovery
-      setTestState((prev) => ({
-        ...prev,
-        T27_PRP_LANA_FAIL: { enabled: false, status: 'IDLE', actualResult: 'Cleared by Network Recovery', timestamp: ts },
-        T28_PRP_LANB_FAIL: { enabled: false, status: 'IDLE', actualResult: 'Cleared by Network Recovery', timestamp: ts },
-        T29_PRP_BOTH_FAIL: { enabled: false, status: 'IDLE', actualResult: 'Cleared by Network Recovery', timestamp: ts },
-        T30_SWITCH_FAIL: { enabled: false, status: 'IDLE', actualResult: 'Cleared by Network Recovery', timestamp: ts },
-        T33_FIREWALL_BLOCK: { enabled: false, status: 'IDLE', actualResult: 'Cleared by Network Recovery', timestamp: ts },
-        T34_DMZ_FAIL: { enabled: false, status: 'IDLE', actualResult: 'Cleared by Network Recovery', timestamp: ts },
-        [test.id]: { enabled: true, status: 'PASSED', actualResult: test.expectedResult, timestamp: ts },
-      }));
-      appendLog({ service: 'NetworkRecovery', direction: 'Station ↔ DMZ', nodeId: 'PRP_LAN_A_B', details: 'All PRP, Switch, Firewall & DMZ links restored', statusCode: 'Good (0x00000000)', result: 'Recovered' });
-      appendHistory(test.name, 'ON', 'PASSED', test.expectedResult);
+  };
+
+
+  const readError = () => !sessionActive ? 'BadSessionIdInvalid'
+    : isOn('T11_INVALID_NODE') ? 'BadNodeIdUnknown' : isOn('T12_BAD_USER_ACCESS') ? 'BadUserAccessDenied' : '';
+
+  const writeRejection = (): [string, string] | undefined => {
+    if (!sessionActive) return ['BadSessionIdInvalid', 'OPC UA session is not active.'];
+    if (isOn('T11_INVALID_NODE')) return ['BadNodeIdUnknown', 'The injected NodeId is invalid.'];
+    if (authMode === 'Anonymous' || isOn('T26_UNAUTH_WRITE') || isOn('T12_BAD_USER_ACCESS')) {
+      return ['BadUserAccessDenied', 'This identity cannot operate the simulated breaker.'];
+    }
+    if (!selectedNode?.accessLevel.includes('CurrentWrite')) return ['BadNotWritable', 'The selected node is read-only.'];
+    if (!fieldAcquisitionUp) return ['BadNoCommunication', 'The field device cannot be reached.'];
+  };
+
+  const checked = (passed: boolean, actualResult: string): Pick<TestRuntimeRecord, 'status' | 'actualResult'> =>
+    ({ status: passed ? 'PASSED' : 'FAILED', actualResult });
+
+  const observeInjectedFault = (test: TestDefinition) => {
+    const uaNetwork = `Session ${sessionActive ? 'active' : 'down'} · Subscription ${subscriptionActive ? 'active' : 'inactive'}`;
+    const field = `LAN A ${lanAUp ? 'UP' : 'DOWN'} · LAN B ${lanBUp ? 'UP' : 'DOWN'} · Field data ${fieldAcquisitionUp ? 'live' : 'stale'}`;
+    const observedRead = readError();
+    switch (test.id) {
+      case 'T06_SESSION_TIMEOUT': return checked(!sessionActive && !subscriptionActive, uaNetwork);
+      case 'T11_INVALID_NODE': return checked(observedRead === 'BadNodeIdUnknown', `Read result: ${observedRead || 'Good'}`);
+      case 'T12_BAD_USER_ACCESS': return checked(observedRead === 'BadUserAccessDenied', `Read result: ${observedRead || 'Good'}`);
+      case 'T16_SUB_TIMEOUT': return checked(sessionActive && !subscriptionActive, uaNetwork);
+      case 'T20_EXPIRED_CERT':
+      case 'T21_UNTRUSTED_CERT':
+      case 'T22_REJECTED_CERT': return checked(!certHealthy && !sessionActive, `Certificate ${certHealthy ? 'accepted' : 'rejected'} · ${uaNetwork}`);
+      case 'T23_WRONG_CREDS':
+      case 'T24_POLICY_MISMATCH':
+      case 'T25_CHANNEL_EXPIRY': return checked(!securityHealthy && !sessionActive, `Security gate ${securityHealthy ? 'accepted' : 'rejected'} · ${uaNetwork}`);
+      case 'T26_UNAUTH_WRITE': {
+        const [status] = writeRejection() ?? ['Good'];
+        return checked(status === 'BadUserAccessDenied', `Write authorization: ${status}. No breaker command submitted.`);
+      }
+      case 'T27_PRP_LANA_FAIL': return checked(!lanAUp && lanBUp && fieldAcquisitionUp, field);
+      case 'T28_PRP_LANB_FAIL': return checked(lanAUp && !lanBUp && fieldAcquisitionUp, field);
+      case 'T29_PRP_BOTH_FAIL': return checked(!lanAUp && !lanBUp && !fieldAcquisitionUp, field);
+      case 'T30_SWITCH_FAIL': return checked(!aggSwitchUp && !fieldAcquisitionUp, `Station switch ${aggSwitchUp ? 'up' : 'down'} · ${field}`);
+      case 'T31_SCADA_A_FAIL': return checked(!scadaAUp && activeScadaServer.startsWith('SCADA Server B'), activeScadaServer);
+      case 'T33_FIREWALL_BLOCK': return checked(!otFirewallOk && !dmzOk, `OT firewall ${otFirewallOk ? 'permitting' : 'blocking'} · DMZ ${dmzOk ? 'up' : 'down'}`);
+      case 'T34_DMZ_FAIL': return checked(!dmzOk && !cloudOk, `DMZ ${dmzOk ? 'up' : 'down'} · Cloud ${cloudOk ? 'online' : 'offline'}`);
+      case 'T35_HIGH_LATENCY': return checked(highLatency, `Publish interval + ${highLatency ? 320 : 0} ms simulated delay.`);
+      case 'T38_HIST_LOSS': return checked(!historianOk, `Historian ${historianOk ? 'online' : 'offline'} · Buffered samples: ${bufferedSamples}`);
+      case 'T41_AGG_SRV_FAIL': return checked(!aggServerOk, `DMZ aggregation ${aggServerOk ? 'online' : 'offline'}`);
+      case 'T42_CLOUD_LOSS':
+      case 'T44_FWD_FAIL': return checked(!cloudOk, `Cloud forwarding ${cloudOk ? 'available' : 'unavailable'} · ${uaNetwork}`);
+      case 'T45_DELAYED_CLOUD': return { status: 'UNVERIFIED' as const, actualResult: 'Slow animation is active. Cloud delivery lag is not measured by this simulator.' };
+      default: return { status: 'UNVERIFIED' as const, actualResult: 'This case is documented. The simulator does not expose evidence for it.' };
+    }
+  };
+
+  const [pendingScenario, setPendingScenario] = useState<{ id: string; reconnect: boolean }>();
+  useEffect(() => {
+    if (!pendingScenario) return;
+    const test = OPC_UA_SCENARIOS.find(item => item.id === pendingScenario.id);
+    if (!test) return;
+    if (pendingScenario.reconnect) {
+      handleConnect();
+      setPendingScenario({ id: test.id, reconnect: false });
       return;
     }
-    if (test.id === 'T40_HIST_RECONNECT' && nextOn) {
-      setBufferedSamples(0);
-    }
 
-    const nextStatus: TestStatus = !nextOn ? 'IDLE' : test.isFault ? 'FAILED' : 'PASSED';
-    const actual = !nextOn ? 'Restored / Cleared' : test.expectedResult;
+    const evidence = test.isFault ? observeInjectedFault(test) : observeTest(test, test.id === 'T05_SESSION_RECONNECT');
+    setTestState(previous => ({ ...previous, [test.id]: { ...previous[test.id], ...evidence, timestamp: nowTimeMs() } }));
+    appendHistory(test.name, 'RUN', evidence.status, evidence.actualResult);
+    appendLog({ service: 'Scenario', direction: 'Simulator', nodeId: test.id, details: evidence.actualResult,
+      statusCode: evidence.status, result: evidence.status === 'PASSED' ? 'Success' : evidence.status === 'FAILED' ? 'Failed' : 'Rejected' });
+    setPendingScenario(undefined);
+  }, [pendingScenario]);
 
-    setTestState((prev) => ({
-      ...prev,
-      [test.id]: { enabled: nextOn, status: nextStatus, actualResult: actual, timestamp: ts },
-    }));
-
-    appendLog({
-      service: test.name.replace(/\s+/g, ''),
-      direction: test.category === 'E_CLOUD' ? 'DMZ → Cloud' : test.category === 'D_NETWORK' ? 'Station Network' : 'Client ↔ Server',
-      nodeId: test.id,
-      details: nextOn ? `Test ON: ${test.expectedResult}` : `Test OFF: ${test.name} cleared & recovered`,
-      statusCode: !nextOn ? 'Good (0x00000000)' : test.isFault ? 'Bad (Simulated Fault)' : 'Good (0x00000000)',
-      result: !nextOn ? 'Recovered' : test.isFault ? 'Failed' : 'Success',
+  const runScenario = (test: TestDefinition) => {
+    const ts = nowTimeMs();
+    const reconnect = test.id === 'T05_SESSION_RECONNECT';
+    setTestState(previous => {
+      const next = { ...previous };
+      if (prpScenarioIds.includes(test.id)) {
+        for (const id of prpScenarioIds) {
+          if (id !== test.id && next[id].enabled) {
+            next[id] = { enabled: false, status: 'IDLE', actualResult: 'Cleared by the selected PRP scenario.', timestamp: ts };
+          }
+        }
+      }
+      if (test.id === 'T37_NET_RECOVERY') {
+        for (const id of ['T27_PRP_LANA_FAIL', 'T28_PRP_LANB_FAIL', 'T29_PRP_BOTH_FAIL', 'T30_SWITCH_FAIL', 'T33_FIREWALL_BLOCK', 'T34_DMZ_FAIL']) {
+          next[id] = { enabled: false, status: 'IDLE', actualResult: 'Cleared by Network Recovery', timestamp: ts };
+        }
+      }
+      next[test.id] = { enabled: true, status: 'RUNNING', actualResult: 'Collecting simulator evidence.', timestamp: ts };
+      return next;
     });
-    appendHistory(test.name, nextOn ? 'ON' : 'OFF', nextStatus, actual);
+    if (test.id === 'T09_READ') handleOpcUaRead();
+    if (test.id === 'T14_MONITORED_ITEM' && subscriptionActive && selectedNode?.accessLevel === 'CurrentRead' && !readError()) {
+      setExtraMonitoredNode(selectedNode.nodeId);
+    }
+    if (test.id === 'T15_PUB_INTERVAL') setPubIntervalMs(250);
+    if (test.id === 'T40_HIST_RECONNECT' && historianOk) setBufferedSamples(0);
+    if (reconnect) handleDisconnect();
+    setPendingScenario({ id: test.id, reconnect });
   };
+
+  const resetScenario = (test: TestDefinition) => {
+    if (test.id === 'T14_MONITORED_ITEM') setExtraMonitoredNode(null);
+    if (test.id === 'T15_PUB_INTERVAL') setPubIntervalMs(500);
+    setTestState(previous => ({ ...previous, [test.id]: { enabled: false, status: 'IDLE', actualResult: 'Not executed', timestamp: '—' } }));
+    appendHistory(test.name, 'OFF', 'IDLE', 'Selected scenario reset.');
+  };
+
 
   const handleRunAllSafeTests = () => {
     const ts = nowTimeMs();
-    setTestState((prev) => {
-      const next = { ...prev };
-      for (const t of OPC_UA_45_TESTS) {
-        if (t.safeAuto) {
-          next[t.id] = { enabled: true, status: 'PASSED', actualResult: t.expectedResult, timestamp: ts };
-        }
-      }
-      return next;
+    const observed = OPC_UA_SCENARIOS.filter(test => test.safeAuto && coreScenarioIds.has(test.id))
+      .map(test => ({ id: test.id, ...observeTest(test) }));
+    setTestState(previous => {
+      const entries = observed.map(({ id, ...result }) => [id, { ...previous[id], ...result, timestamp: ts }]);
+      return { ...previous, ...Object.fromEntries(entries) };
     });
-    appendLog({ service: 'TestSuite', direction: 'Simulator', nodeId: 'SAFE_TESTS', details: 'Executed all safe non-fault OPC UA verification tests (PASSED)', statusCode: 'Good (0x00000000)', result: 'Success' });
-    appendHistory('Run All Safe Tests', 'RUN', 'PASSED', 'All safe connection, data, security & recovery tests passed');
+    const passed = observed.filter(item => item.status === 'PASSED').length;
+    const failed = observed.filter(item => item.status === 'FAILED').length;
+    const summary = `${passed} passed · ${failed} failed · ${observed.length - passed - failed} unverified. No commands were sent.`;
+    appendLog({ service: 'TestSuite', direction: 'Simulator', nodeId: 'SAFE_TESTS', details: summary,
+      statusCode: failed ? 'FAILED' : 'Checked', result: failed ? 'Failed' : 'Success' });
+    appendHistory('Run All Safe Tests', 'RUN', failed ? 'FAILED' : passed === observed.length ? 'PASSED' : 'UNVERIFIED', summary);
   };
 
   const handleStopAndResetAllFaults = (clearAll: boolean) => {
     const ts = nowTimeMs();
     setTestState((prev) => {
       const next = { ...prev };
-      for (const t of OPC_UA_45_TESTS) {
+      for (const t of OPC_UA_SCENARIOS) {
         if (clearAll || t.isFault) {
           next[t.id] = { enabled: false, status: 'IDLE', actualResult: 'Reset to baseline', timestamp: ts };
         }
       }
       return next;
     });
-    setClientConnected(true);
-    setPubIntervalMs(500);
+    const error = endpointError(true);
+    if (clearAll) setClientConnected(!error);
+    setConnectionFeedback(error || (clearAll || clientConnected ? 'Simulated endpoint ready.' : 'Faults reset. Select Connect to start a session.'));
+    if (clearAll) {
+      setPubIntervalMs(500);
+      setExtraMonitoredNode(null);
+    }
     setBufferedSamples(0);
-    appendLog({ service: 'FaultReset', direction: 'All Zones', nodeId: 'SYSTEM', details: clearAll ? 'All 45 tests stopped & reset' : 'All injected faults cleared', statusCode: 'Good (0x00000000)', result: 'Recovered' });
+    appendLog({ service: 'FaultReset', direction: 'All Zones', nodeId: 'SYSTEM', details: clearAll ? 'All scenarios stopped and reset' : 'All injected faults cleared', statusCode: 'Good (0x00000000)', result: 'Recovered' });
   };
 
   const handleExportTestResults = () => {
     const header = 'TestNum,TestName,Category,Toggle,Status,ExpectedResult,ActualResult,Timestamp\n';
-    const rows = OPC_UA_45_TESTS.map((t) => {
+    const rows = OPC_UA_SCENARIOS.filter(test => coreScenarioIds.has(test.id)).map((t) => {
       const r = testState[t.id];
       return `${t.num},"${t.name}",${t.category},${r.enabled ? 'ON' : 'OFF'},${r.status},"${t.expectedResult}","${r.actualResult}","${r.timestamp}"`;
     }).join('\n');
@@ -578,28 +885,60 @@ export const OpcUaLabPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const handleOpcUaWrite = () => {
-    if (!sessionActive) {
-      setRwFeedback('Write failed: OPC UA Session is not active.');
-      return;
-    }
-    if (isOn('T26_UNAUTH_WRITE') || isOn('T12_BAD_USER_ACCESS') || !selectedNode.accessLevel.includes('CurrentWrite')) {
-      setRwFeedback(`Write rejected: BadNotWritable / BadUserAccessDenied on ${selectedNode.nodeId}`);
-      appendLog({ service: 'Write', direction: 'Client → Server', nodeId: selectedNode.nodeId, details: 'Unauthorized or read-only write blocked', statusCode: 'BadNotWritable (0x803B0000)', result: 'Rejected' });
-      return;
-    }
-    const bay = bays.find((b) => b.bayCode === selectedNode.bayCode);
-    if (bay) {
-      commandBreaker(bay.id, writeDesired);
-      setRwFeedback(`Simulated Write OK · ${selectedNode.nodeId} = ${writeDesired} (Good 0x00000000)`);
-      appendLog({ service: 'Write', direction: 'Client → Server', nodeId: selectedNode.nodeId, details: `Simulated CB command → ${bay.bayCode} ${writeDesired}`, statusCode: 'Good (0x00000000)', result: 'Success' });
-    }
+  const handleConnect = () => {
+    const error = endpointError();
+    setClientConnected(!error);
+    setConnectionFeedback(error || 'Connected to the simulated endpoint.');
+    appendLog({
+      service: 'Connect', direction: 'Client → Server', nodeId: endpointUrl.trim(), details: error || 'Simulated endpoint accepted',
+      statusCode: error || 'Good (0x00000000)', result: error ? 'Rejected' : 'Success',
+    });
   };
 
-  const visibleTests = useMemo(
-    () => (testCatFilter === 'ALL' ? OPC_UA_45_TESTS : OPC_UA_45_TESTS.filter((t) => t.category === testCatFilter)),
-    [testCatFilter]
-  );
+  const handleDisconnect = () => {
+    setClientConnected(false);
+    setConnectionFeedback('Client disconnected.');
+  };
+
+  const handleOpcUaRead = () => {
+    if (!selectedNode) return;
+    const serviceError = readError();
+    const details = serviceError ? `Read rejected: ${serviceError}`
+      : `Read · ${selectedNode.displayName} = ${selectedNode.valueText} · ${selectedNode.statusCode} · Source ${selectedNode.sourceTimestamp}`;
+    setRwFeedback(details);
+    appendLog({ service: 'Read', direction: 'Client ↔ Server', nodeId: selectedNode.nodeId, details,
+      statusCode: serviceError || selectedNode.statusCode, result: serviceError ? 'Rejected' : 'Success' });
+  };
+
+  const handleOpcUaWrite = () => {
+    if (!selectedNode) return;
+    const reject = (statusCode: string, details: string) => {
+      setRwFeedback(`Write rejected: ${statusCode} · ${details}`);
+      appendLog({ service: 'Write', direction: 'Client → Server', nodeId: selectedNode.nodeId, details, statusCode, result: 'Rejected' });
+    };
+    const rejection = writeRejection();
+    if (rejection) return reject(...rejection);
+    const bay = bays.find(item => item.bayCode === selectedNode.bayCode);
+    if (!bay) return reject('BadNodeIdUnknown', 'No bay is mapped to this command node.');
+    if (!commandBreaker(bay.id, writeDesired)) {
+      return reject('BadInvalidState', useSubstationStore.getState().lastCommandFeedback?.message ?? 'The breaker simulator rejected the command.');
+    }
+    const details = `Simulated Write OK · ${selectedNode.nodeId} = ${writeDesired} (Good 0x00000000)`;
+    setRwFeedback(details);
+    appendLog({ service: 'Write', direction: 'Client → Server', nodeId: selectedNode.nodeId, details,
+      statusCode: 'Good (0x00000000)', result: 'Success' });
+  };
+
+  const selectedScenarioId = selectedTestId === 'T27_PRP_LANA_FAIL' && singlePrpLan === 'B'
+    ? 'T28_PRP_LANB_FAIL' : selectedTestId;
+  const selectedScenario = OPC_UA_SCENARIOS.find(test => test.id === selectedScenarioId) ?? OPC_UA_SCENARIOS[0];
+  const scenarioRecord = testState[selectedScenario.id];
+  const scenarioGuide = scenarioGuides[selectedScenario.id] ?? {
+    description: selectedScenario.isFault ? `Simulate ${selectedScenario.name.toLowerCase()} and inspect the affected path.`
+      : `Check ${selectedScenario.name.toLowerCase()} in the current simulated lab state.`,
+    steps: categoryGuides[selectedScenario.category],
+  };
+  const activeFaultNames = OPC_UA_SCENARIOS.filter(test => test.isFault && isOn(test.id)).map(test => test.name);
 
   const tabs: { id: OpcUaV3Tab; label: string }[] = [
     { id: 'TOPOLOGY_LIVE', label: 'Topology & Live Data' },
@@ -608,6 +947,7 @@ export const OpcUaLabPage: React.FC = () => {
     { id: 'READ_WRITE', label: 'Read / Write' },
     { id: 'SECURITY_CERTS', label: 'Security & Certificates' },
     { id: 'DMZ_GATEWAY', label: 'DMZ & Gateway' },
+    { id: 'WHY_NO_DATA', label: 'Why No Data?' },
     { id: 'DIAGNOSTICS_LOGS', label: 'Diagnostics & Logs' },
     { id: 'CLOUD_ANALYTICS', label: 'Cloud Analytics' },
   ];
@@ -669,7 +1009,7 @@ export const OpcUaLabPage: React.FC = () => {
             {endpointUrl}
           </span>
           <span className="rounded-lg border border-[#22C55E] bg-[#06291E] px-2.5 py-1 font-mono text-[#4ADE80]">
-            {securityPolicy} ({authMode})
+            {securityPolicy} · {securityMode} · {authMode}
           </span>
         </div>
       </div>
@@ -736,6 +1076,7 @@ export const OpcUaLabPage: React.FC = () => {
             type="button"
             onClick={() => {
               setSpeed(0.1);
+              setFlow({ phase: 0, cycle: 0, sample: undefined });
               setPlaying(true);
               handleStopAndResetAllFaults(true);
             }}
@@ -779,59 +1120,67 @@ export const OpcUaLabPage: React.FC = () => {
               const stationToEng = 'M 1096 456 L 1096 408 Q 1096 398 1086 398 L 1014 398 Q 1004 398 1004 388 L 1004 322';
 
               // Zone 3 -> Zone 4 Complete Connections (endpoints seated inside Industrial Firewall, DMZ Switch, Aggregation Tower, Collector Tower & Enterprise Firewall)
-              const stationToFw = 'M 1050 298 L 1172 298 Q 1184 298 1184 286 L 1184 146 Q 1184 134 1196 134 L 1262 134';
+              const stationToFw = 'M 1050 298 L 1172 298 Q 1184 298 1184 286 L 1184 146 Q 1184 134 1196 134 L 1280 134';
               const stationToDmz = 'M 1050 314 L 1230 314';
-              const fwToAggSrv = 'M 1336 134 L 1460 134 Q 1472 134 1472 146 L 1472 274';
+              const fwToAggSrv = 'M 1317 134 L 1460 134 Q 1472 134 1472 146 L 1472 274';
               const dmzToAggSrv = 'M 1366 314 L 1450 314';
               const dmzToCollector = 'M 1296 326 L 1296 450';
-              const dmzToEntFw = 'M 1340 326 L 1340 484 Q 1340 496 1352 496 L 1444 496';
-              const aggSrvToEntFw = 'M 1494 334 L 1532 334 Q 1542 334 1542 344 L 1542 462 Q 1542 472 1532 472 L 1510 472';
+              const dmzToEntFw = 'M 1340 326 L 1340 484 Q 1340 496 1352 496 L 1421 496';
+              const aggSrvToEntFw = 'M 1494 334 L 1532 334 Q 1542 334 1542 344 L 1542 481 Q 1542 491 1532 491 L 1525 491';
 
               // Zone 4 -> Zone 5 Complete Connections (endpoints seated inside Aggregation Tower, Historian 1U Server, Analytics WS, Enterprise Data Platform & Cloud)
               const aggToDataPlat = 'M 1494 314 L 1596 314';
               const histToDataPlat = 'M 1646 144 L 1646 280';
               const analToDataPlat = 'M 1816 176 L 1816 302 Q 1816 314 1804 314 L 1696 314';
               const dataPlatToCloud = 'M 1696 330 L 1804 330 Q 1816 330 1816 342 L 1816 442';
-              const entFwToCloud = 'M 1514 496 L 1748 496';
+              const entFwToCloud = 'M 1534 496 L 1748 496';
 
-              const dotAt = (pts: PortPoint[], t: number) => samplePoly(pts, t);
+              const payload = flow.sample;
+              const reading = payload ? `${payload.bayCode} · ${payload.valueText} · ${payload.statusCode.split(/\s|Last/)[0]}` : 'Awaiting sample';
+              const sourceIndex = flow.cycle % 4;
+              const fieldPayload = payload?.nodeId.includes('.XCBR1.') ? 'Breaker status' : 'Measurement';
+              const stationUp = fieldAcquisitionUp;
+              const uaReady = dataDeliveryActive;
+              const dmzReady = uaReady && dmzOk;
+              const aggregateReady = uaReady && aggServerOk;
+              const publishReady = aggregateReady && cloudOk;
+              type BadgeHop = { path: string; label: string; enabled: boolean; reverse?: boolean; violet?: boolean };
+              const hop = (path: string, label: string, enabled: boolean, reverse = false, violet = false): BadgeHop =>
+                ({ path, label, enabled, reverse, violet });
+              const stages: BadgeHop[][] = [
+                [hop(`field-a-${sourceIndex}`, `PRP-A · ${fieldPayload}`, lanAUp),
+                  hop(`field-b-${sourceIndex}`, `PRP-B · ${fieldPayload}`, lanBUp, false, true)],
+                [hop('uplink-a', 'LAN A trunk · field report', lanAUp && aggSwitchUp),
+                  hop('uplink-b', 'LAN B trunk · field report', lanBUp && aggSwitchUp, false, true)],
+                [hop('gw', 'Gateway · mapped field value', stationUp, true)],
+                [hop('sca', 'SCADA A · MMS report', stationUp && scadaAUp, true)],
+                [hop('scb', 'SCADA B · MMS report', stationUp, true)],
+                [hop('opc', 'OPC UA server · DataValue + quality', uaReady, true)],
+                [hop('hmi', 'HMI · display value + quality', stationUp, true)],
+                [hop('eng', 'Engineering WS · diagnostic value', stationUp, true)],
+                [hop('ot', 'OT firewall · OPC UA TCP/4840', uaReady && otFirewallOk)],
+                [hop('fw-agg', 'Aggregator · UA Publish DataValue', aggregateReady)],
+                [hop('dmz', 'DMZ · permitted telemetry', dmzReady, false, true)],
+                [hop('dmz-agg', 'Aggregator · value + source time', aggregateReady, false, true)],
+                [hop('collector', 'Collector · time-series sample', dmzReady, false, true)],
+                [hop('dmz-ef', 'Enterprise firewall · forwarded sample', aggregateReady, false, true)],
+                [hop('agg-ef', 'Enterprise firewall · aggregated telemetry', aggregateReady, false, true)],
+                [hop('platform', 'Data platform · normalized value', aggregateReady)],
+                [hop('historian', 'Historian · sample + timestamp', aggregateReady && historianOk, true)],
+                [hop('analytics', 'Analytics WS · display value', aggregateReady, true)],
+                [hop('platform-cloud', 'Cloud dashboard · display update', publishReady)],
+                [hop('ef-cloud', 'Cloud · HTTPS/MQTT telemetry', publishReady, false, true)],
+              ];
+              const step = Math.min(stages.length - 1, Math.floor(flow.phase * stages.length));
+              const progress = flow.phase * stages.length - step;
+              const activeHops = payload ? stages[step].filter(item => item.enabled) : [];
+              const badgeStatus = activeHops.length ? activeHops.map(item => item.label).join(' / ')
+                : payload ? `${stages[step][0].label} · path unavailable` : 'Waiting for a simulated sample';
 
-              // Simple keypoint polylines for exact packet motion along the major routes
-              const laPktRoutes: PortPoint[][] = [
-                [{ x: 194, y: 114 }, { x: 322, y: 114 }, { x: 322, y: 234 }, { x: 586, y: 234 }, { x: 586, y: 158 }],
-                [{ x: 194, y: 240 }, { x: 604, y: 246 }, { x: 604, y: 158 }],
-                [{ x: 194, y: 366 }, { x: 354, y: 366 }, { x: 354, y: 258 }, { x: 621, y: 258 }, { x: 621, y: 158 }],
-                [{ x: 194, y: 494 }, { x: 380, y: 494 }, { x: 380, y: 270 }, { x: 638, y: 270 }, { x: 638, y: 158 }],
-              ];
-              const lbPktRoutes: PortPoint[][] = [
-                [{ x: 194, y: 146 }, { x: 300, y: 146 }, { x: 300, y: 486 }, { x: 586, y: 486 }, { x: 586, y: 410 }],
-                [{ x: 194, y: 272 }, { x: 326, y: 272 }, { x: 326, y: 498 }, { x: 604, y: 498 }, { x: 604, y: 410 }],
-                [{ x: 194, y: 398 }, { x: 352, y: 398 }, { x: 352, y: 510 }, { x: 621, y: 510 }, { x: 621, y: 410 }],
-                [{ x: 194, y: 526 }, { x: 638, y: 526 }, { x: 638, y: 410 }],
-              ];
-              const z2To3A: PortPoint[] = [{ x: 712, y: 158 }, { x: 712, y: 296 }, { x: 860, y: 296 }];
-              const z2To3B: PortPoint[] = [{ x: 712, y: 410 }, { x: 712, y: 504 }, { x: 760, y: 504 }, { x: 760, y: 318 }, { x: 860, y: 318 }];
-              const z3GwP: PortPoint[] = [{ x: 896, y: 296 }, { x: 896, y: 254 }, { x: 826, y: 254 }, { x: 826, y: 166 }];
-              const z3ScAP: PortPoint[] = [{ x: 956, y: 296 }, { x: 956, y: 162 }];
-              const z3ScBP: PortPoint[] = [{ x: 1016, y: 296 }, { x: 1016, y: 254 }, { x: 1088, y: 254 }, { x: 1088, y: 162 }];
-              const z3OpcP: PortPoint[] = [{ x: 916, y: 322 }, { x: 916, y: 375 }, { x: 846, y: 375 }];
-              const z3HmiP: PortPoint[] = [{ x: 948, y: 322 }, { x: 948, y: 398 }, { x: 873, y: 398 }, { x: 873, y: 458 }];
-              const z3EngP: PortPoint[] = [{ x: 1004, y: 322 }, { x: 1004, y: 398 }, { x: 1096, y: 398 }, { x: 1096, y: 456 }];
-              const z3ToFw: PortPoint[] = [{ x: 1054, y: 298 }, { x: 1184, y: 298 }, { x: 1184, y: 134 }, { x: 1256, y: 134 }];
-              const z3ToDmzP: PortPoint[] = [{ x: 1054, y: 314 }, { x: 1226, y: 314 }];
-              const fwToAggP: PortPoint[] = [{ x: 1342, y: 134 }, { x: 1474, y: 134 }, { x: 1474, y: 266 }];
-              const dmzToAggP: PortPoint[] = [{ x: 1370, y: 314 }, { x: 1436, y: 314 }];
-              const dmzToEfP: PortPoint[] = [{ x: 1340, y: 330 }, { x: 1340, y: 496 }, { x: 1438, y: 496 }];
-              const aggToEfP: PortPoint[] = [{ x: 1494, y: 334 }, { x: 1542, y: 334 }, { x: 1542, y: 472 }, { x: 1510, y: 472 }];
-              const aggToDpP: PortPoint[] = [{ x: 1508, y: 314 }, { x: 1592, y: 314 }];
-              const dmzToColP: PortPoint[] = [{ x: 1296, y: 326 }, { x: 1296, y: 450 }];
-              const dpToHistP: PortPoint[] = [{ x: 1646, y: 280 }, { x: 1646, y: 144 }];
-              const dpToAnalP: PortPoint[] = [{ x: 1696, y: 314 }, { x: 1816, y: 314 }, { x: 1816, y: 176 }];
-              const dpToCldP: PortPoint[] = [{ x: 1700, y: 330 }, { x: 1816, y: 330 }, { x: 1816, y: 434 }];
-              const efToCldP: PortPoint[] = [{ x: 1518, y: 496 }, { x: 1742, y: 496 }];
 
               return (
-                <svg
+                <>
+                <svg ref={flowSvg}
                   viewBox="0 0 1920 610"
                   className="w-full h-auto block"
                   role="img"
@@ -865,7 +1214,7 @@ export const OpcUaLabPage: React.FC = () => {
                   {/* ZONE 1 -> ZONE 2: 4 Independent Neon Blue PRP LAN A Cables */}
                   {lanAPaths.map((d, idx) => (
                     <path
-                      key={`la-${idx}`}
+                      key={`la-${idx}`} id={`opc-flow-field-a-${idx}`}
                       d={d}
                       fill="none"
                       stroke={lanAUp ? '#1DA8FF' : '#EF4444'}
@@ -880,7 +1229,7 @@ export const OpcUaLabPage: React.FC = () => {
                   {/* ZONE 1 -> ZONE 2: 4 Independent Neon Violet PRP LAN B Cables */}
                   {lanBPaths.map((d, idx) => (
                     <path
-                      key={`lb-${idx}`}
+                      key={`lb-${idx}`} id={`opc-flow-field-b-${idx}`}
                       d={d}
                       fill="none"
                       stroke={lanBUp ? '#C864FF' : '#EF4444'}
@@ -893,29 +1242,29 @@ export const OpcUaLabPage: React.FC = () => {
                   ))}
 
                   {/* ZONE 2 -> ZONE 3: Independent LAN A (Blue) & LAN B (Violet) into Central Station Switch */}
-                  <path d={lanAToStation} fill="none" stroke={lanAUp && aggSwitchUp ? '#1DA8FF' : '#EF4444'} strokeWidth="3.6" strokeDasharray={lanAUp && aggSwitchUp ? undefined : '8 6'} filter={lanAUp && aggSwitchUp ? 'url(#glowBlue)' : undefined} />
-                  <path d={lanBToStation} fill="none" stroke={lanBUp && aggSwitchUp ? '#C864FF' : '#EF4444'} strokeWidth="3.6" strokeDasharray={lanBUp && aggSwitchUp ? undefined : '8 6'} filter={lanBUp && aggSwitchUp ? 'url(#glowViolet)' : undefined} />
+                  <path id="opc-flow-uplink-a" d={lanAToStation} fill="none" stroke={lanAUp && aggSwitchUp ? '#1DA8FF' : '#EF4444'} strokeWidth="3.6" strokeDasharray={lanAUp && aggSwitchUp ? undefined : '8 6'} filter={lanAUp && aggSwitchUp ? 'url(#glowBlue)' : undefined} />
+                  <path id="opc-flow-uplink-b" d={lanBToStation} fill="none" stroke={lanBUp && aggSwitchUp ? '#C864FF' : '#EF4444'} strokeWidth="3.6" strokeDasharray={lanBUp && aggSwitchUp ? undefined : '8 6'} filter={lanBUp && aggSwitchUp ? 'url(#glowViolet)' : undefined} />
 
                   {/* ZONE 3 Physical Station Bus Links (Cyan) — Every Device Connected to Central Station Switch */}
                   {[stationToGw, stationToScA, stationToScB, stationToOpc, stationToHmi, stationToEng].map((d, idx) => (
-                    <path key={`z3-${idx}`} d={d} fill="none" stroke={aggSwitchUp ? '#24C8FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" filter={aggSwitchUp ? 'url(#glowBlue)' : undefined} />
+                    <path key={`z3-${idx}`} id={`opc-flow-${['gw', 'sca', 'scb', 'opc', 'hmi', 'eng'][idx]}`} d={d} fill="none" stroke={aggSwitchUp ? '#24C8FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" filter={aggSwitchUp ? 'url(#glowBlue)' : undefined} />
                   ))}
 
                   {/* ZONE 3 -> ZONE 4: OT Firewall, DMZ Switch, Aggregation Server, Historian Collector & Enterprise Firewall */}
-                  <path d={stationToFw} fill="none" stroke={sessionActive && otFirewallOk ? '#24C8FF' : '#EF4444'} strokeWidth="3.6" strokeLinecap="round" strokeDasharray={sessionActive && otFirewallOk ? undefined : '8 6'} filter={sessionActive && otFirewallOk ? 'url(#glowBlue)' : undefined} />
-                  <path d={stationToDmz} fill="none" stroke={sessionActive && dmzOk ? '#C864FF' : '#EF4444'} strokeWidth="3.6" strokeLinecap="round" strokeDasharray={sessionActive && dmzOk ? undefined : '8 6'} filter={sessionActive && dmzOk ? 'url(#glowViolet)' : undefined} />
-                  <path d={fwToAggSrv} fill="none" stroke={sessionActive && otFirewallOk && aggServerOk ? '#C864FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" strokeDasharray={sessionActive && otFirewallOk && aggServerOk ? undefined : '8 6'} filter={sessionActive && otFirewallOk && aggServerOk ? 'url(#glowViolet)' : undefined} />
-                  <path d={dmzToAggSrv} fill="none" stroke={sessionActive && aggServerOk ? '#C864FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" filter={sessionActive && aggServerOk ? 'url(#glowViolet)' : undefined} />
-                  <path d={dmzToCollector} fill="none" stroke={sessionActive && dmzOk ? '#C864FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" filter={sessionActive && dmzOk ? 'url(#glowViolet)' : undefined} />
-                  <path d={dmzToEntFw} fill="none" stroke={sessionActive && dmzOk ? '#C864FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" filter={sessionActive && dmzOk ? 'url(#glowViolet)' : undefined} />
-                  <path d={aggSrvToEntFw} fill="none" stroke={sessionActive && aggServerOk && dmzOk ? '#C864FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" strokeDasharray={sessionActive && aggServerOk && dmzOk ? undefined : '8 6'} filter={sessionActive && aggServerOk && dmzOk ? 'url(#glowViolet)' : undefined} />
+                  <path id="opc-flow-ot" d={stationToFw} fill="none" stroke={sessionActive && otFirewallOk ? '#24C8FF' : '#EF4444'} strokeWidth="3.6" strokeLinecap="round" strokeDasharray={sessionActive && otFirewallOk ? undefined : '8 6'} filter={sessionActive && otFirewallOk ? 'url(#glowBlue)' : undefined} />
+                  <path id="opc-flow-dmz" d={stationToDmz} fill="none" stroke={sessionActive && dmzOk ? '#C864FF' : '#EF4444'} strokeWidth="3.6" strokeLinecap="round" strokeDasharray={sessionActive && dmzOk ? undefined : '8 6'} filter={sessionActive && dmzOk ? 'url(#glowViolet)' : undefined} />
+                  <path id="opc-flow-fw-agg" d={fwToAggSrv} fill="none" stroke={sessionActive && otFirewallOk && aggServerOk ? '#C864FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" strokeDasharray={sessionActive && otFirewallOk && aggServerOk ? undefined : '8 6'} filter={sessionActive && otFirewallOk && aggServerOk ? 'url(#glowViolet)' : undefined} />
+                  <path id="opc-flow-dmz-agg" d={dmzToAggSrv} fill="none" stroke={sessionActive && aggServerOk ? '#C864FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" filter={sessionActive && aggServerOk ? 'url(#glowViolet)' : undefined} />
+                  <path id="opc-flow-collector" d={dmzToCollector} fill="none" stroke={sessionActive && dmzOk ? '#C864FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" filter={sessionActive && dmzOk ? 'url(#glowViolet)' : undefined} />
+                  <path id="opc-flow-dmz-ef" d={dmzToEntFw} fill="none" stroke={sessionActive && dmzOk ? '#C864FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" filter={sessionActive && dmzOk ? 'url(#glowViolet)' : undefined} />
+                  <path id="opc-flow-agg-ef" d={aggSrvToEntFw} fill="none" stroke={sessionActive && aggServerOk && dmzOk ? '#C864FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" strokeDasharray={sessionActive && aggServerOk && dmzOk ? undefined : '8 6'} filter={sessionActive && aggServerOk && dmzOk ? 'url(#glowViolet)' : undefined} />
 
                   {/* ZONE 4 -> ZONE 5: Historian Server, Analytics WS, Enterprise Data Platform & Enterprise Cloud */}
-                  <path d={aggToDataPlat} fill="none" stroke={sessionActive && aggServerOk && historianOk ? '#24C8FF' : '#EF4444'} strokeWidth="3.6" strokeLinecap="round" strokeDasharray={sessionActive && aggServerOk && historianOk ? undefined : '8 6'} filter={sessionActive && aggServerOk && historianOk ? 'url(#glowBlue)' : undefined} />
-                  <path d={histToDataPlat} fill="none" stroke={historianOk ? '#24C8FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" filter={historianOk ? 'url(#glowBlue)' : undefined} />
-                  <path d={analToDataPlat} fill="none" stroke={historianOk ? '#24C8FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" filter={historianOk ? 'url(#glowBlue)' : undefined} />
-                  <path d={dataPlatToCloud} fill="none" stroke={sessionActive && cloudOk ? '#24C8FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" strokeDasharray={sessionActive && cloudOk ? undefined : '8 6'} filter={sessionActive && cloudOk ? 'url(#glowBlue)' : undefined} />
-                  <path d={entFwToCloud} fill="none" stroke={sessionActive && dmzOk && cloudOk ? '#C864FF' : '#EF4444'} strokeWidth="3.6" strokeLinecap="round" strokeDasharray={sessionActive && dmzOk && cloudOk ? undefined : '8 6'} filter={sessionActive && dmzOk && cloudOk ? 'url(#glowViolet)' : undefined} />
+                  <path id="opc-flow-platform" d={aggToDataPlat} fill="none" stroke={sessionActive && aggServerOk && historianOk ? '#24C8FF' : '#EF4444'} strokeWidth="3.6" strokeLinecap="round" strokeDasharray={sessionActive && aggServerOk && historianOk ? undefined : '8 6'} filter={sessionActive && aggServerOk && historianOk ? 'url(#glowBlue)' : undefined} />
+                  <path id="opc-flow-historian" d={histToDataPlat} fill="none" stroke={historianOk ? '#24C8FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" filter={historianOk ? 'url(#glowBlue)' : undefined} />
+                  <path id="opc-flow-analytics" d={analToDataPlat} fill="none" stroke={historianOk ? '#24C8FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" filter={historianOk ? 'url(#glowBlue)' : undefined} />
+                  <path id="opc-flow-platform-cloud" d={dataPlatToCloud} fill="none" stroke={sessionActive && cloudOk ? '#24C8FF' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" strokeDasharray={sessionActive && cloudOk ? undefined : '8 6'} filter={sessionActive && cloudOk ? 'url(#glowBlue)' : undefined} />
+                  <path id="opc-flow-ef-cloud" d={entFwToCloud} fill="none" stroke={sessionActive && dmzOk && cloudOk ? '#C864FF' : '#EF4444'} strokeWidth="3.6" strokeLinecap="round" strokeDasharray={sessionActive && dmzOk && cloudOk ? undefined : '8 6'} filter={sessionActive && dmzOk && cloudOk ? 'url(#glowViolet)' : undefined} />
 
 
 
@@ -965,10 +1314,10 @@ export const OpcUaLabPage: React.FC = () => {
                   <image href={V3_HW.GATEWAY_BLUE} x="786" y="76" width="80" height="100" preserveAspectRatio="xMidYMid meet" />
                   <text x="826" y="196" textAnchor="middle" fill="#FFFFFF" fontSize="14" fontWeight="700">SAS Gateway</text>
 
-                  <image href={V3_HW.SCADA} x="896" y="80" width="120" height="96" preserveAspectRatio="xMidYMid meet" opacity={scadaAUp ? 1 : 0.35} />
+                  <image href={V3_HW.RACK_SERVER} x="896" y="80" width="120" height="96" preserveAspectRatio="xMidYMid meet" opacity={scadaAUp ? 1 : 0.35} />
                   <text x="956" y="196" textAnchor="middle" fill={scadaAUp ? '#FFFFFF' : '#F87171'} fontSize="14" fontWeight="700">SCADA Server A</text>
 
-                  <image href={V3_HW.SCADA} x="1028" y="80" width="120" height="96" preserveAspectRatio="xMidYMid meet" />
+                  <image href={V3_HW.RACK_SERVER} x="1028" y="80" width="120" height="96" preserveAspectRatio="xMidYMid meet" />
                   <text x="1088" y="196" textAnchor="middle" fill={!scadaAUp ? '#4ADE80' : '#FFFFFF'} fontSize="14" fontWeight="700">SCADA Server B</text>
                   <text x="1088" y="213" textAnchor="middle" fill={!scadaAUp ? '#4ADE80' : '#9BC0DF'} fontSize="12.5" fontWeight="700">
                     {!scadaAUp ? '(ACTIVE FAILOVER)' : '(Redundant)'}
@@ -996,12 +1345,14 @@ export const OpcUaLabPage: React.FC = () => {
                   <image href={V3_HW.SCADA} x="808" y="438" width="130" height="104" preserveAspectRatio="xMidYMid meet" />
                   <text x="873" y="562" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">Operator HMI</text>
 
-                  <image href={V3_HW.WORKSTATION} x="1028" y="438" width="136" height="104" preserveAspectRatio="xMidYMid meet" />
+                  <image href={V3_HW.ENGINEERING_WORKSTATION} x="1028" y="438" width="136" height="104" preserveAspectRatio="xMidYMid meet" />
                   <text x="1096" y="562" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">Engineering</text>
                   <text x="1096" y="580" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">Workstation</text>
 
                   {/* ================= ZONE 4 DEVICES (OT SECURITY & DMZ) ================= */}
-                  <image href={V3_HW.FIREWALL} x="1254" y="76" width="90" height="106" preserveAspectRatio="xMidYMid meet" opacity={otFirewallOk ? 1 : 0.4} />
+                  <image href={V3_HW.OT_FIREWALL} x="1254" y="76" width="90" height="106" preserveAspectRatio="xMidYMid meet" opacity={otFirewallOk ? 1 : 0.4}>
+                    <title>Hirschmann EAGLE40-07 industrial firewall</title>
+                  </image>
                   <text x="1299" y="202" textAnchor="middle" fill={otFirewallOk ? '#FFFFFF' : '#F87171'} fontSize="14.5" fontWeight="700">
                     Industrial Firewall {!otFirewallOk && '(BLK)'}
                   </text>
@@ -1011,28 +1362,32 @@ export const OpcUaLabPage: React.FC = () => {
                   <text x="1299" y="362" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">DMZ Switch</text>
 
                   {/* OPC UA Aggregation Server */}
-                  <image href={V3_HW.DMZ_TOWER} x="1434" y="264" width="76" height="86" preserveAspectRatio="xMidYMid meet" opacity={aggServerOk ? 1 : 0.4} />
+                  <image href={V3_HW.AGGREGATION_SERVER} x="1434" y="264" width="76" height="86" preserveAspectRatio="xMidYMid meet" opacity={aggServerOk ? 1 : 0.4} />
                   <circle cx="1496" cy="322" r="14" fill="#062A47" stroke="#24C8FF" strokeWidth="2" />
                   <text x="1496" y="327" textAnchor="middle" fill="#7DD3FC" fontSize="13" fontWeight="900">🔒</text>
                   <text x="1474" y="368" textAnchor="middle" fill="#FFFFFF" fontSize="14" fontWeight="700">OPC UA</text>
                   <text x="1474" y="386" textAnchor="middle" fill="#FFFFFF" fontSize="14" fontWeight="700">Aggregation Server</text>
 
                   {/* Historian Collector */}
-                  <image href={V3_HW.DMZ_TOWER} x="1256" y="440" width="82" height="94" preserveAspectRatio="xMidYMid meet" />
-                  <text x="1298" y="558" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">
+                  <image href={V3_HW.HISTORIAN_COLLECTOR} x="1211" y="442" width="122" height="40" preserveAspectRatio="xMidYMid meet">
+                    <title>Advantech UNO-2484G industrial PC used as the simulated Historian Collector</title>
+                  </image>
+                  <text x="1272" y="516" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">
                     Historian Collector {bufferedSamples > 0 ? `(Buf:${bufferedSamples})` : ''}
                   </text>
 
                   {/* Enterprise Firewall */}
-                  <image href={V3_HW.FIREWALL} x="1436" y="444" width="84" height="98" preserveAspectRatio="xMidYMid meet" />
-                  <text x="1478" y="564" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">Enterprise</text>
-                  <text x="1478" y="582" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">Firewall</text>
+                  <image href={V3_HW.ENTERPRISE_FIREWALL} x="1418" y="482" width="120" height="27" preserveAspectRatio="xMidYMid meet">
+                    <title>Fortinet FortiGate 100F enterprise firewall</title>
+                  </image>
+                  <text x="1478" y="532" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">Enterprise</text>
+                  <text x="1478" y="550" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">Firewall</text>
 
                   {/* ================= ZONE 5 DEVICES (HISTORIAN & CLOUD) ================= */}
                   <image href={V3_HW.RACK_SERVER} x="1558" y="102" width="174" height="64" preserveAspectRatio="xMidYMid meet" opacity={historianOk ? 1 : 0.4} />
                   <text x="1645" y="196" textAnchor="middle" fill={historianOk ? '#FFFFFF' : '#F87171'} fontSize="14.5" fontWeight="700">Historian Server</text>
 
-                  <image href={V3_HW.WORKSTATION} x="1748" y="84" width="136" height="106" preserveAspectRatio="xMidYMid meet" />
+                  <image href={V3_HW.ANALYTICS_WORKSTATION} x="1748" y="84" width="136" height="106" preserveAspectRatio="xMidYMid meet" />
                   <text x="1816" y="210" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">Analytics Workstation</text>
 
                   {/* Enterprise Data Platform Cloud Icon */}
@@ -1069,183 +1424,31 @@ export const OpcUaLabPage: React.FC = () => {
                   <text x="1816" y="556" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">Enterprise Cloud</text>
                   <text x="1816" y="574" textAnchor="middle" fill="#FFFFFF" fontSize="14.5" fontWeight="700">Platform &amp; Dashboard</text>
 
-                  {/* ================= SYNCHRONIZED LIVE PACKET ANIMATIONS (0.5x DEFAULT) ================= */}
-                  {playing && lanAUp && laPktRoutes.map((rt, i) => {
-                    const pt = dotAt(rt, (animPhase + i * 0.22) % 1);
-                    return pt ? <circle key={`pa-d-${i}`} cx={pt.x} cy={pt.y} r="5.5" fill="#E0F7FF" stroke="#00D4FF" strokeWidth="2" filter="url(#glowBlue)" /> : null;
-                  })}
-                  {playing && lanBUp && lbPktRoutes.map((rt, i) => {
-                    const pt = dotAt(rt, (animPhase + i * 0.24 + 0.12) % 1);
-                    return pt ? <circle key={`pb-d-${i}`} cx={pt.x} cy={pt.y} r="5.5" fill="#F5E8FF" stroke="#C864FF" strokeWidth="2" filter="url(#glowViolet)" /> : null;
-                  })}
-                  {playing && lanAUp && aggSwitchUp && (() => {
-                    const pt = dotAt(z2To3A, animPhase);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="6" fill="#E0F7FF" stroke="#1DA8FF" strokeWidth="2" filter="url(#glowBlue)" /> : null;
-                  })()}
-                  {playing && lanBUp && aggSwitchUp && (() => {
-                    const pt = dotAt(z2To3B, (animPhase + 0.35) % 1);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="6" fill="#F5E8FF" stroke="#C864FF" strokeWidth="2" filter="url(#glowViolet)" /> : null;
-                  })()}
-                  {playing && fieldLinkUp && aggSwitchUp && (() => {
-                    const routes: Array<[PortPoint[], number, boolean]> = [
-                      [z3GwP, 0.15, true],
-                      [z3ScAP, 0.3, scadaAUp],
-                      [z3ScBP, 0.48, true],
-                      [z3OpcP, 0.62, sessionActive],
-                      [z3HmiP, 0.74, true],
-                      [z3EngP, 0.88, true],
-                    ];
-                    return routes.map(([rt, off, ok], idx) => {
-                      if (!ok) return null;
-                      const pt = dotAt(rt, (animPhase + off) % 1);
-                      return pt ? <circle key={`z3p-${idx}`} cx={pt.x} cy={pt.y} r="5.2" fill="#E0F7FF" stroke="#24C8FF" strokeWidth="1.8" filter="url(#glowBlue)" /> : null;
-                    });
-                  })()}
-                  {playing && sessionActive && otFirewallOk && (() => {
-                    const pt = dotAt(z3ToFw, (animPhase + 0.1) % 1);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="6" fill="#E0F7FF" stroke="#24C8FF" strokeWidth="2" filter="url(#glowBlue)" /> : null;
-                  })()}
-                  {playing && sessionActive && dmzOk && (() => {
-                    const pt = dotAt(z3ToDmzP, (animPhase + 0.22) % 1);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="6" fill="#F5E8FF" stroke="#C864FF" strokeWidth="2" filter="url(#glowViolet)" /> : null;
-                  })()}
-                  {playing && sessionActive && otFirewallOk && aggServerOk && (() => {
-                    const pt = dotAt(fwToAggP, (animPhase + 0.34) % 1);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="5.8" fill="#F5E8FF" stroke="#C864FF" strokeWidth="2" filter="url(#glowViolet)" /> : null;
-                  })()}
-                  {playing && sessionActive && aggServerOk && (() => {
-                    const pt = dotAt(dmzToAggP, (animPhase + 0.44) % 1);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="5.5" fill="#F5E8FF" stroke="#C864FF" strokeWidth="2" filter="url(#glowViolet)" /> : null;
-                  })()}
-                  {playing && sessionActive && dmzOk && (() => {
-                    const pt = dotAt(dmzToEfP, (animPhase + 0.54) % 1);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="5.8" fill="#F5E8FF" stroke="#C864FF" strokeWidth="2" filter="url(#glowViolet)" /> : null;
-                  })()}
-                  {playing && sessionActive && aggServerOk && dmzOk && (() => {
-                    const pt = dotAt(aggToEfP, (animPhase + 0.6) % 1);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="5.8" fill="#F5E8FF" stroke="#C864FF" strokeWidth="2" filter="url(#glowViolet)" /> : null;
-                  })()}
-                  {playing && sessionActive && aggServerOk && historianOk && (() => {
-                    const pt = dotAt(aggToDpP, (animPhase + 0.66) % 1);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="6" fill="#E0F7FF" stroke="#24C8FF" strokeWidth="2" filter="url(#glowBlue)" /> : null;
-                  })()}
-                  {playing && sessionActive && dmzOk && (() => {
-                    const pt = dotAt(dmzToColP, (animPhase + 0.48) % 1);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="5.8" fill="#F5E8FF" stroke="#C864FF" strokeWidth="2" filter="url(#glowViolet)" /> : null;
-                  })()}
-                  {playing && sessionActive && historianOk && (() => {
-                    const ptH = dotAt(dpToHistP, (animPhase + 0.72) % 1);
-                    const ptA = dotAt(dpToAnalP, (animPhase + 0.8) % 1);
+                  {activeHops.map(item => {
+                    const path = flowSvg.current?.querySelector<SVGPathElement>(`#opc-flow-${item.path}`);
+                    if (!path) return null;
+                    const point = path.getPointAtLength(path.getTotalLength() * (item.reverse ? 1 - progress : progress));
+                    const color = item.violet ? '#C864FF' : '#55DBFF';
+                    const width = Math.max(158, item.label.length * 7 + 18, reading.length * 7 + 18);
+                    const left = Math.max(12, Math.min(1908 - width, point.x - width / 2));
+                    const top = Math.max(45, Math.min(565, point.y + (item.violet ? 14 : -46)));
                     return (
-                      <>
-                        {ptH && <circle cx={ptH.x} cy={ptH.y} r="5.8" fill="#E0F7FF" stroke="#24C8FF" strokeWidth="2" filter="url(#glowBlue)" />}
-                        {ptA && <circle cx={ptA.x} cy={ptA.y} r="5.8" fill="#E0F7FF" stroke="#24C8FF" strokeWidth="2" filter="url(#glowBlue)" />}
-                      </>
+                      <g key={item.path} data-flow-hop={item.path} pointerEvents="none">
+                        <circle cx={point.x} cy={point.y} r="5.5" fill="#E0F7FF" stroke={color} strokeWidth="2" />
+                        <rect x={left} y={top} width={width} height="34" rx="7" fill={item.violet ? '#23103D' : '#05233A'} stroke={color} strokeWidth="1.5" />
+                        <text x={left + width / 2} y={top + 13} fill={color} fontSize="11" textAnchor="middle" fontWeight="700">{item.label}</text>
+                        <text x={left + width / 2} y={top + 27} fill="#F0FAFF" fontSize="12" textAnchor="middle" fontFamily="monospace">{reading}</text>
+                      </g>
                     );
-                  })()}
-                  {playing && sessionActive && cloudOk && (() => {
-                    const pt = dotAt(dpToCldP, (animPhase + 0.78) % 1);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="5.8" fill="#E0F7FF" stroke="#24C8FF" strokeWidth="2" filter="url(#glowBlue)" /> : null;
-                  })()}
-                  {playing && sessionActive && dmzOk && cloudOk && (() => {
-                    const pt = dotAt(efToCldP, (animPhase + 0.86) % 1);
-                    return pt ? <circle cx={pt.x} cy={pt.y} r="6.2" fill="#F5E8FF" stroke="#C864FF" strokeWidth="2" filter="url(#glowViolet)" /> : null;
-                  })()}
-
-                  {/* ================= LIVE MOVING PROTOCOL DATA FLOW BADGES ACROSS ALL 5 ZONES ================= */}
-                  {(() => {
-                    const renderFlowBadge = (
-                      key: string,
-                      pt: PortPoint | null,
-                      label: string,
-                      stroke: string,
-                      fill: string,
-                      textFill: string,
-                      dy = -26
-                    ) => {
-                      if (!pt) return null;
-                      const w = Math.max(122, Math.round(label.length * 7.6) + 22);
-                      const bx = Math.max(12, Math.min(1908 - w, pt.x - w / 2));
-                      const by = Math.max(44, Math.min(578, pt.y + dy));
-                      return (
-                        <g key={key} style={{ pointerEvents: 'none' }}>
-                          <rect x={bx} y={by} width={w} height="24" rx="12" fill={fill} fillOpacity="0.94" stroke={stroke} strokeWidth="1.8" />
-                          <text x={bx + w / 2} y={by + 15.8} textAnchor="middle" fill={textFill} fontSize="11.5" fontWeight="800" fontFamily="monospace">
-                            {label}
-                          </text>
-                        </g>
-                      );
-                    };
-
-                    return (
-                      <>
-                        {lanAUp && renderFlowBadge(
-                          'opc-b-z1a',
-                          dotAt(laPktRoutes[0], animPhase % 1),
-                          'IEC 61850 · PRP-A',
-                          '#38BDF8',
-                          '#05233A',
-                          '#E0F7FF',
-                          -28
-                        )}
-                        {lanBUp && renderFlowBadge(
-                          'opc-b-z1b',
-                          dotAt(lbPktRoutes[2], (animPhase + 0.45) % 1),
-                          'IEC 61850 · PRP-B',
-                          '#C864FF',
-                          '#23103D',
-                          '#F5E8FF',
-                          12
-                        )}
-                        {fieldLinkUp && aggSwitchUp && renderFlowBadge(
-                          'opc-b-z23',
-                          dotAt(z2To3A, animPhase % 1),
-                          'MMS · TCP/102',
-                          '#00E5FF',
-                          '#05263D',
-                          '#E0FAFF',
-                          -30
-                        )}
-                        {fieldLinkUp && aggSwitchUp && sessionActive && renderFlowBadge(
-                          'opc-b-z3opc',
-                          dotAt(z3OpcP, (animPhase + 0.62) % 1),
-                          'OPC UA · Client/Server',
-                          '#22D3EE',
-                          '#062B42',
-                          '#CFFAFE',
-                          14
-                        )}
-                        {sessionActive && aggServerOk && otFirewallOk && renderFlowBadge(
-                          'opc-b-z34',
-                          dotAt(z3ToFw, (animPhase + 0.1) % 1),
-                          'UA TCP/4840 · TLS',
-                          '#38F3FF',
-                          '#052B44',
-                          '#E6FAFF',
-                          -30
-                        )}
-                        {sessionActive && aggServerOk && historianOk && renderFlowBadge(
-                          'opc-b-z45',
-                          dotAt(aggToDpP, (animPhase + 0.66) % 1),
-                          bufferedSamples > 0 ? `Buffered · ${bufferedSamples}` : 'DataChange · Good',
-                          bufferedSamples > 0 ? '#FBBF24' : '#4ADE80',
-                          bufferedSamples > 0 ? '#332206' : '#052E1E',
-                          bufferedSamples > 0 ? '#FEF08A' : '#DCFCE7',
-                          -30
-                        )}
-                        {sessionActive && aggServerOk && dmzOk && cloudOk && renderFlowBadge(
-                          'opc-b-cld',
-                          dotAt(efToCldP, (animPhase + 0.86) % 1),
-                          'HTTPS/MQTT · Cloud',
-                          '#2AE8C8',
-                          '#05302B',
-                          '#CCFBF1',
-                          -30
-                        )}
-                      </>
-                    );
-                  })()}
+                  })}
                 </svg>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[#235B76] bg-[#071A2B] px-3 py-2"
+                  data-cycle={flow.cycle + 1} data-flow-step={step + 1}>
+                  <span className="font-bold text-[#84DCF6]">Cycle {flow.cycle + 1} · Hop {step + 1}/{stages.length}</span>
+                  <span className="font-semibold text-white">{badgeStatus}</span>
+                  {payload && <span className="text-[#B6D4EA]">{reading} · {payload.statusCode}</span>}
+                </div>
+                </>
               );
             })()}
           </div>
@@ -1281,7 +1484,7 @@ export const OpcUaLabPage: React.FC = () => {
                       <label className="text-[#C8E8F8] font-semibold block mb-1">Endpoint URL</label>
                       <input
                         value={endpointUrl}
-                        onChange={(e) => setEndpointUrl(e.target.value)}
+                        onChange={e => { setEndpointUrl(e.target.value); handleDisconnect(); }}
                         style={{
                           background: 'rgba(10, 42, 64, 0.76)',
                           borderColor: 'rgba(100, 224, 248, 0.52)',
@@ -1295,7 +1498,7 @@ export const OpcUaLabPage: React.FC = () => {
                         <label className="text-[#C8E8F8] font-semibold block mb-1">Security Policy</label>
                         <select
                           value={securityPolicy}
-                          onChange={(e) => setSecurityPolicy(e.target.value as 'Basic256Sha256' | 'Aes128_Sha256_RsaOaep' | 'None')}
+                          onChange={e => { setSecurityPolicy(e.target.value as typeof securityPolicy); handleDisconnect(); }}
                           style={{
                             background: 'rgba(10, 42, 64, 0.82)',
                             borderColor: 'rgba(100, 224, 248, 0.52)',
@@ -1311,23 +1514,31 @@ export const OpcUaLabPage: React.FC = () => {
                         <label className="text-[#C8E8F8] font-semibold block mb-1">Authentication</label>
                         <select
                           value={authMode}
-                          onChange={(e) => setAuthMode(e.target.value as 'Sign & Encrypt' | 'Sign' | 'Username / Password')}
+                          onChange={e => { setAuthMode(e.target.value as typeof authMode); handleDisconnect(); }}
                           style={{
                             background: 'rgba(10, 42, 64, 0.82)',
                             borderColor: 'rgba(100, 224, 248, 0.52)',
                           }}
                           className="w-full rounded-lg border px-1.5 py-1.5 font-mono text-[10px] text-white outline-none focus:border-[#3CF4FF]"
                         >
-                          <option value="Sign & Encrypt">Sign &amp; Encrypt</option>
-                          <option value="Sign">Sign</option>
+                          <option value="Anonymous">Anonymous</option>
                           <option value="Username / Password">User / Pass</option>
                         </select>
                       </div>
                     </div>
+                    <label className="block text-[#C8E8F8]">Message Security Mode
+                      <select value={securityMode} onChange={e => { setSecurityMode(e.target.value as typeof securityMode); handleDisconnect(); }}
+                        className="mt-1 w-full rounded-lg border px-2 py-1.5 font-mono text-white">
+                        <option value="Sign & Encrypt">Sign &amp; Encrypt</option>
+                        <option value="Sign">Sign</option>
+                        <option value="None">None</option>
+                      </select>
+                    </label>
+                    <p className="break-words text-[#C8E8F8]" role="status">{connectionFeedback}</p>
                     <div className="grid grid-cols-3 gap-1.5 pt-1">
                       <button
                         type="button"
-                        onClick={() => setClientConnected(true)}
+                        onClick={handleConnect}
                         style={{
                           background: 'linear-gradient(180deg, rgba(34, 197, 94, 0.46) 0%, rgba(12, 92, 52, 0.84) 100%)',
                           borderColor: '#4ADE80',
@@ -1339,7 +1550,7 @@ export const OpcUaLabPage: React.FC = () => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setClientConnected(false)}
+                        onClick={handleDisconnect}
                         style={{
                           background: 'linear-gradient(180deg, rgba(220, 56, 62, 0.52) 0%, rgba(128, 20, 28, 0.86) 100%)',
                           borderColor: '#F87171',
@@ -1435,7 +1646,7 @@ export const OpcUaLabPage: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {addressSpaceNodes.slice(0, 8).map((n) => {
+                        {monitoredNodes.map((n) => {
                           const isHi = highlightedNodeId === n.nodeId;
                           return (
                             <tr
@@ -1453,8 +1664,8 @@ export const OpcUaLabPage: React.FC = () => {
                             >
                               <td className="py-1.5 px-2 font-bold text-white truncate max-w-[110px]" title={n.nodeId}>{n.displayName}</td>
                               <td className="py-1.5 px-2 font-mono font-bold text-[#4ADE80]">{n.valueText}</td>
-                              <td className="py-1.5 px-2 font-bold" style={{ color: sessionActive && fieldLinkUp ? '#4ADE80' : '#FCA5A5' }}>
-                                {sessionActive && fieldLinkUp ? 'Good' : 'Bad'}
+                              <td className="py-1.5 px-2 font-bold" style={{ color: dataDeliveryActive && n.statusCode.startsWith('Good') ? '#4ADE80' : '#FCD34D' }}>
+                                {dataDeliveryActive ? n.statusCode : 'No fresh notification'}
                               </td>
                             </tr>
                           );
@@ -1510,372 +1721,118 @@ export const OpcUaLabPage: React.FC = () => {
             );
           })()}
 
-          {/* 5. GLASSMORPHISM SECTION BELOW THE 5 PANELS — EXACT REFERENCE THEME (image_d8a602.jpg) */}
-          <div
-            className="opcua-glass-panel relative rounded-2xl p-4 sm:p-5 space-y-3.5 overflow-hidden"
-            style={{
-              background:
-                'radial-gradient(ellipse 46% 32% at 50% 0%, rgba(72, 238, 255, 0.28) 0%, transparent 72%), ' +
-                'radial-gradient(ellipse 36% 24% at 16% 100%, rgba(0, 225, 255, 0.22) 0%, transparent 72%), ' +
-                'radial-gradient(ellipse 38% 24% at 78% 100%, rgba(0, 225, 255, 0.22) 0%, transparent 72%), ' +
-                'linear-gradient(180deg, rgba(24, 78, 108, 0.78) 0%, rgba(16, 56, 82, 0.84) 52%, rgba(12, 46, 68, 0.88) 100%)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              border: '1.5px solid rgba(86, 235, 255, 0.78)',
-              boxShadow:
-                '0 0 34px rgba(0, 224, 255, 0.34), 0 0 72px rgba(0, 190, 255, 0.16), ' +
-                'inset 0 1px 1px rgba(190, 252, 255, 0.72), inset 0 -1px 1px rgba(0, 232, 255, 0.55), inset 0 0 36px rgba(0, 220, 255, 0.15)',
-            }}
-          >
-            <style>{`
-              .opcua-glass-panel::before {
-                content: '';
-                position: absolute;
-                top: 0; left: 10%; right: 10%; height: 2px;
-                background: linear-gradient(90deg, transparent, rgba(160, 250, 255, 0.92), transparent);
-                pointer-events: none;
-              }
-              .opcua-glass-panel::after {
-                content: '';
-                position: absolute;
-                bottom: 0; left: 12%; right: 12%; height: 2px;
-                background: linear-gradient(90deg, transparent, rgba(0, 232, 255, 0.85), transparent);
-                pointer-events: none;
-              }
-              .opcua-glass-scroll::-webkit-scrollbar { width: 11px; height: 11px; }
-              .opcua-glass-scroll::-webkit-scrollbar-track {
-                background: rgba(10, 42, 64, 0.72);
-                border-left: 1px solid rgba(90, 215, 245, 0.28);
-              }
-              .opcua-glass-scroll::-webkit-scrollbar-thumb {
-                background: linear-gradient(180deg, #42F8FF 0%, #00D8F5 100%);
-                border-radius: 999px;
-                border: 2px solid rgba(10, 42, 64, 0.85);
-                box-shadow: 0 0 12px rgba(0, 240, 255, 0.9);
-              }
-              .opcua-glass-scroll::-webkit-scrollbar-button:single-button:vertical:decrement {
-                height: 14px;
-                background: rgba(10, 42, 64, 0.85) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 2L9 7H1z' fill='%232EE8FF'/%3E%3C/svg%3E") center/7px no-repeat;
-              }
-              .opcua-glass-scroll::-webkit-scrollbar-button:single-button:vertical:increment {
-                height: 14px;
-                background: rgba(10, 42, 64, 0.85) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 8L1 3h8z' fill='%232EE8FF'/%3E%3C/svg%3E") center/7px no-repeat;
-              }
-            `}</style>
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <svg
-                    viewBox="0 0 28 28"
-                    className="w-6 h-6 shrink-0"
-                    style={{ filter: 'drop-shadow(0 0 8px rgba(0, 232, 255, 0.85))' }}
-                    fill="none"
-                  >
-                    <path d="M14 2.5L24 8v12l-10 5.5L4 20V8l10-5.5z" stroke="#38F3FF" strokeWidth="1.7" />
-                    <path d="M4 8l10 5.5L24 8M14 13.5v12" stroke="#38F3FF" strokeWidth="1.5" strokeOpacity="0.85" />
-                    <path d="M8.5 11L14 14l5.5-3" stroke="#9BF8FF" strokeWidth="1.3" />
-                  </svg>
-                  <h3 className="text-[15px] sm:text-[17px] font-extrabold tracking-tight text-white drop-shadow-[0_1px_6px_rgba(0,229,255,0.28)]">
-                    OPC UA Test Simulation &amp; Fault Injection Lab (45 Interactive Tests)
-                  </h3>
-                  <span
-                    style={{
-                      background: 'linear-gradient(180deg, rgba(22, 163, 74, 0.45), rgba(10, 92, 46, 0.72))',
-                      borderColor: '#22C55E',
-                      boxShadow: '0 0 14px rgba(34, 197, 94, 0.50), inset 0 1px 0 rgba(187, 247, 208, 0.35)',
-                    }}
-                    className="rounded-full border px-3 py-0.5 font-sans text-[10px] font-extrabold tracking-wide text-[#4ADE80]"
-                  >
-                    SAFE SIMULATION ONLY
+          <section className="opcua-glass-panel min-w-0 space-y-3 rounded-xl border border-[#326985] bg-[#071A2B] p-4 sm:p-5"
+            aria-labelledby="opcua-scenario-title">
+            <h3 id="opcua-scenario-title" className="text-base font-bold text-white">Tests &amp; Fault Scenarios</h3>
+            <label className="block text-[#D7EEFD]">
+              <span className="mb-1 block font-bold">Select a test or fault</span>
+              <select className="w-full rounded-lg border border-[#326985] bg-[#0B253A] px-3 py-2 text-sm text-white sm:max-w-md"
+                value={selectedTestId} onChange={event => setSelectedTestId(event.target.value)}>
+                {coreScenarios.map(test => <option key={test.id} value={test.id}>{test.label}</option>)}
+              </select>
+            </label>
+            {selectedTestId === 'T27_PRP_LANA_FAIL' && (
+              <label className="block text-[#D7EEFD]">
+                <span className="mb-1 block font-bold">LAN to fail</span>
+                <select className="w-full rounded-lg border border-[#326985] bg-[#0B253A] px-3 py-2 text-sm text-white sm:max-w-40"
+                  value={singlePrpLan} onChange={event => setSinglePrpLan(event.target.value === 'B' ? 'B' : 'A')}>
+                  <option value="A">LAN A</option>
+                  <option value="B">LAN B</option>
+                </select>
+              </label>
+            )}
+            <p className="break-words text-[#D7EEFD]">{scenarioGuide.description}</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="min-w-0 rounded-lg border border-[#25445C] bg-[#061522] px-3 py-2">
+                <h4 className="font-bold text-[#84DCF6]">Expected result</h4>
+                <p className="mt-1 break-words leading-5">{selectedScenario.expectedResult}</p>
+              </div>
+              <div className="min-w-0 rounded-lg border border-[#25445C] bg-[#061522] px-3 py-2" aria-live="polite">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="font-bold text-[#84DCF6]">Observed simulated result</h4>
+                  <span className={`rounded border px-2 py-0.5 font-bold ${scenarioRecord.status === 'PASSED' ? 'border-[#30654D] text-[#86EFAC]'
+                    : scenarioRecord.status === 'FAILED' ? 'border-[#85424A] text-[#FECACA]' : 'border-[#40576C] text-[#B8CFE0]'}`}>
+                    {scenarioRecord.status === 'PASSED' ? 'PASS' : scenarioRecord.status === 'FAILED' ? 'FAIL'
+                      : scenarioRecord.status === 'IDLE' ? 'NOT RUN' : scenarioRecord.status}
                   </span>
                 </div>
-                <p className="text-[12px] text-[#D4EEF9] mt-1 font-normal">
-                  Toggle any test ON/OFF independently to verify PRP redundancy, SCADA failover, X.509 cert validation, DMZ firewall blocking, Historian buffering, and Cloud delivery.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleRunAllSafeTests}
-                  style={{
-                    background: 'linear-gradient(180deg, rgba(34, 197, 94, 0.46) 0%, rgba(12, 92, 52, 0.84) 100%)',
-                    borderColor: '#4ADE80',
-                    boxShadow: '0 0 18px rgba(34, 197, 94, 0.55), 0 4px 14px rgba(16, 185, 129, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.30)',
-                  }}
-                  className="rounded-[10px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-extrabold text-white hover:brightness-110 transition"
-                >
-                  ▶ Run All Safe Tests
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleStopAndResetAllFaults(true)}
-                  style={{
-                    background: 'linear-gradient(180deg, rgba(217, 138, 28, 0.50) 0%, rgba(112, 58, 12, 0.86) 100%)',
-                    borderColor: '#F59E0B',
-                    boxShadow: '0 0 16px rgba(245, 158, 11, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.25)',
-                  }}
-                  className="rounded-[10px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-extrabold text-white hover:brightness-110 transition"
-                >
-                  ■ Stop All Tests
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleStopAndResetAllFaults(false)}
-                  style={{
-                    background: 'linear-gradient(180deg, rgba(220, 56, 62, 0.54) 0%, rgba(128, 20, 28, 0.86) 100%)',
-                    borderColor: '#F87171',
-                    boxShadow: '0 0 16px rgba(239, 68, 68, 0.50), inset 0 1px 0 rgba(255, 255, 255, 0.25)',
-                  }}
-                  className="rounded-[10px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-extrabold text-white hover:brightness-110 transition"
-                >
-                  ↺ Reset All Faults
-                </button>
-                <button
-                  type="button"
-                  onClick={handleExportTestResults}
-                  style={{
-                    background: 'linear-gradient(180deg, rgba(28, 116, 164, 0.55) 0%, rgba(12, 60, 94, 0.84) 100%)',
-                    borderColor: 'rgba(96, 205, 250, 0.72)',
-                    boxShadow: '0 0 14px rgba(56, 189, 248, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.24)',
-                  }}
-                  className="flex items-center gap-1.5 rounded-[10px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-extrabold text-[#ECF8FF] hover:brightness-110 transition"
-                >
-                  <Download className="w-3.5 h-3.5 text-[#7DD3FC]" /> Export CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowHistory((h) => !h)}
-                  style={{
-                    background: 'linear-gradient(180deg, rgba(26, 70, 100, 0.62) 0%, rgba(12, 42, 66, 0.84) 100%)',
-                    borderColor: 'rgba(110, 200, 235, 0.52)',
-                    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.20)',
-                  }}
-                  className="flex items-center gap-1.5 rounded-[10px] border-[1.5px] px-3.5 py-1.5 text-[11.5px] font-extrabold text-[#E2F4FF] hover:border-[#38F3FF] transition"
-                >
-                  <History className="w-3.5 h-3.5 text-[#9BD8F4]" /> History ({testHistory.length})
-                </button>
+                <p className="mt-1 break-words leading-5">{scenarioRecord.actualResult}</p>
               </div>
             </div>
-
-            {/* Category Filter Tabs Row */}
-            <div className="flex flex-wrap items-center gap-2">
-              {(
-                [
-                  ['ALL', 'All 45 Tests'],
-                  ['A_CONNECTION', 'A. Connection (7)'],
-                  ['B_DATA', 'B. Data (11)'],
-                  ['C_SECURITY', 'C. Security (8)'],
-                  ['D_NETWORK', 'D. Network & Redundancy (11)'],
-                  ['E_CLOUD', 'E. Historian & Cloud (8)'],
-                ] as const
-              ).map(([cat, lbl]) => {
-                const isAct = testCatFilter === cat;
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setTestCatFilter(cat)}
-                    style={
-                      isAct
-                        ? {
-                            background: 'linear-gradient(180deg, #3CF4FF 0%, #00D2EC 100%)',
-                            borderColor: '#A8FDFF',
-                            color: '#031B2E',
-                            boxShadow: '0 0 20px rgba(0, 234, 255, 0.72), inset 0 1px 0 rgba(255, 255, 255, 0.60)',
-                          }
-                        : {
-                            background: 'linear-gradient(180deg, rgba(32, 82, 110, 0.52) 0%, rgba(18, 54, 78, 0.62) 100%)',
-                            borderColor: 'rgba(125, 215, 242, 0.48)',
-                            color: '#ECF8FF',
-                            boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.18)',
-                          }
-                    }
-                    className="rounded-[10px] border px-3.5 py-1.5 text-[12px] font-bold transition hover:border-[#3CF4FF]"
-                  >
-                    {lbl}
-                  </button>
-                );
-              })}
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={!!pendingScenario} onClick={() => runScenario(selectedScenario)}
+                className="rounded-lg border border-[#38BDF8] bg-[#083A51] px-3 py-2 font-bold text-white disabled:opacity-50">Run Selected</button>
+              <button type="button" disabled={!!pendingScenario} onClick={() => resetScenario(selectedScenario)}
+                className={scenarioButtonClass}>Reset Selected</button>
+              <button type="button" disabled={!!pendingScenario} onClick={() => handleStopAndResetAllFaults(false)}
+                className={scenarioButtonClass}>Reset All Faults</button>
             </div>
-
-            {/* Conflict Warning Banner */}
-            {conflictWarnings.length > 0 && (
-              <div className="rounded-xl border border-[#F59E0B] bg-[#2B1D06]/90 px-3 py-2 text-[11.5px] font-bold text-[#FDE047] flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>{conflictWarnings.join(' · ')}</span>
-              </div>
-            )}
-
-            {/* Frosted Glass Table Frame with Luminous Cyan Row Highlight & Glowing Scrollbar */}
-            <div
-              style={{
-                border: '1.5px solid rgba(100, 224, 248, 0.62)',
-                background: 'linear-gradient(180deg, rgba(26, 76, 104, 0.52) 0%, rgba(14, 52, 76, 0.64) 100%)',
-                boxShadow: 'inset 0 1px 0 rgba(190, 248, 255, 0.35), 0 0 18px rgba(0, 210, 255, 0.14)',
-              }}
-              className="opcua-glass-scroll overflow-x-auto max-h-[395px] overflow-y-auto rounded-xl"
-            >
-              <table className="w-full text-left border-collapse font-sans text-[12.5px]">
-                <thead
-                  style={{
-                    background: 'linear-gradient(180deg, rgba(64, 126, 158, 0.68) 0%, rgba(36, 86, 116, 0.76) 100%)',
-                    borderBottom: '1px solid rgba(120, 218, 245, 0.38)',
-                  }}
-                  className="sticky top-0 z-10 text-[#F0FAFF] font-bold"
-                >
-                  <tr>
-                    <th className="py-2.5 px-3.5 w-12 font-bold">#</th>
-                    <th className="py-2.5 px-3.5 font-bold">Test Name</th>
-                    <th className="py-2.5 px-3.5 text-center w-28 font-bold">Toggle</th>
-                    <th className="py-2.5 px-3.5 text-center w-28 font-bold">Status</th>
-                    <th className="py-2.5 px-3.5 font-bold">Expected Result</th>
-                    <th className="py-2.5 px-3.5 font-bold">Actual Result</th>
-                    <th className="py-2.5 px-3.5 text-right w-28 font-bold">Timestamp</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleTests.map((t) => {
-                    const r = testState[t.id];
-                    const isSel = selectedTestId === t.id;
-                    return (
-                      <tr
-                        key={t.id}
-                        onClick={() => setSelectedTestId(t.id)}
-                        style={
-                          isSel
-                            ? {
-                                background:
-                                  'linear-gradient(90deg, rgba(0, 216, 238, 0.42) 0%, rgba(0, 186, 216, 0.28) 50%, rgba(0, 210, 236, 0.36) 100%)',
-                                boxShadow:
-                                  'inset 0 0 0 1.5px rgba(82, 242, 255, 0.88), inset 0 0 18px rgba(0, 234, 255, 0.26)',
-                              }
-                            : r.enabled
-                            ? {
-                                background: t.isFault ? 'rgba(239, 68, 68, 0.16)' : 'rgba(16, 185, 129, 0.14)',
-                                borderTop: '1px solid rgba(130, 210, 238, 0.18)',
-                              }
-                            : {
-                                borderTop: '1px solid rgba(130, 210, 238, 0.18)',
-                              }
-                        }
-                        className="cursor-pointer transition-colors hover:bg-[#196488]/45"
-                      >
-                        <td className="py-2.5 px-3.5 text-[#C4E2F2] font-medium">{t.num}</td>
-                        <td className="py-2.5 px-3.5 font-bold text-white whitespace-nowrap">{t.name}</td>
-                        <td className="py-2.5 px-3.5 text-center">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedTestId(t.id);
-                              handleToggleTest(t);
-                            }}
-                            style={{
-                              background: r.enabled
-                                ? t.isFault
-                                  ? 'linear-gradient(90deg, #dc2626, #ef4444)'
-                                  : 'linear-gradient(90deg, #16a34a, #22c55e)'
-                                : 'rgba(14, 42, 62, 0.82)',
-                              borderColor: r.enabled
-                                ? t.isFault
-                                  ? '#fca5a5'
-                                  : '#86efac'
-                                : 'rgba(130, 215, 242, 0.58)',
-                              boxShadow: r.enabled
-                                ? t.isFault
-                                  ? '0 0 12px rgba(239, 68, 68, 0.55)'
-                                  : '0 0 12px rgba(34, 197, 94, 0.55)'
-                                : 'inset 0 2px 5px rgba(0, 0, 0, 0.55)',
-                            }}
-                            className="inline-flex items-center justify-between w-[54px] h-[24px] rounded-full border-[1.5px] px-1 transition-all"
-                          >
-                            {r.enabled ? (
-                              <>
-                                <span className="text-[9px] font-sans font-extrabold text-white pl-1.5">ON</span>
-                                <span
-                                  className="w-4 h-4 rounded-full bg-white"
-                                  style={{ boxShadow: '0 0 6px rgba(255,255,255,0.85), 0 1px 3px rgba(0,0,0,0.45)' }}
-                                />
-                              </>
-                            ) : (
-                              <>
-                                <span
-                                  className="w-4 h-4 rounded-full bg-white"
-                                  style={{ boxShadow: '0 0 6px rgba(255,255,255,0.85), 0 1px 3px rgba(0,0,0,0.45)' }}
-                                />
-                                <span className="text-[9px] font-sans font-bold text-[#CBE8F6] pr-1">OFF</span>
-                              </>
-                            )}
-                          </button>
-                        </td>
-                        <td className="py-2.5 px-3.5 text-center">
-                          <span
-                            style={
-                              r.status === 'PASSED'
-                                ? {
-                                    background: 'rgba(16, 185, 129, 0.28)',
-                                    borderColor: '#4ADE80',
-                                    color: '#DCFCE7',
-                                    boxShadow: '0 0 10px rgba(34, 197, 94, 0.42)',
-                                  }
-                                : r.status === 'FAILED'
-                                ? {
-                                    background: 'rgba(239, 68, 68, 0.28)',
-                                    borderColor: '#F87171',
-                                    color: '#FEE2E2',
-                                    boxShadow: '0 0 10px rgba(239, 68, 68, 0.42)',
-                                  }
-                                : {
-                                    background: 'rgba(18, 86, 118, 0.65)',
-                                    borderColor: 'rgba(90, 222, 248, 0.68)',
-                                    color: '#DCF8FF',
-                                    boxShadow: '0 0 10px rgba(0, 215, 255, 0.22)',
-                                  }
-                            }
-                            className="inline-block rounded-full border-[1.5px] px-3 py-0.5 font-sans text-[10px] font-extrabold tracking-wide"
-                          >
-                            {r.status}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3.5 text-[#E0F3FC]">{t.expectedResult}</td>
-                        <td className="py-2.5 px-3.5 text-[#D2ECF9]">{r.actualResult}</td>
-                        <td className="py-2.5 px-3.5 text-right text-[#B8D8EA] whitespace-nowrap">{r.timestamp}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="rounded-lg border border-[#25445C] bg-[#061522] px-3 py-2">
+              <h4 className="font-bold text-[#84DCF6]">Troubleshooting steps</h4>
+              <ol className="mt-1 list-decimal space-y-1 pl-5 leading-5">{scenarioGuide.steps.map(step =>
+                <li key={step} className="break-words">{step}</li>)}</ol>
             </div>
-
-            {/* Optional Test History Drawer */}
-            {showHistory && (
-              <div className="rounded-xl border border-[#1E5280] bg-[#04101E]/90 p-3 space-y-1.5">
-                <div className="font-extrabold text-[#7DD3FC] text-xs">Test Execution History</div>
-                {testHistory.length === 0 ? (
-                  <div className="text-slate-400 font-mono text-[10.5px]">No test actions recorded yet.</div>
-                ) : (
-                  <div className="max-h-[140px] overflow-y-auto font-mono text-[10px] space-y-1">
-                    {testHistory.map((h) => (
-                      <div key={h.id} className="flex justify-between gap-2 border-b border-[#122E49] pb-0.5">
-                        <span className="text-slate-400">{h.time}</span>
-                        <span className="text-white font-bold">{h.testName} ({h.action})</span>
-                        <span style={{ color: h.status === 'FAILED' ? '#F87171' : '#4ADE80' }}>{h.status}</span>
-                        <span className="text-[#9BC0DF] truncate max-w-[280px]">{h.detail}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+            {activeFaultNames.length > 0 && <p className="break-words text-[#FCD394]">Active faults: {activeFaultNames.join(', ')}</p>}
+            {conflictWarnings.length > 0 && <p className="break-words text-[#FCD394]">{conflictWarnings.join(' · ')}</p>}
+            <details className="rounded-lg border border-[#25445C] px-3 py-2">
+              <summary className="cursor-pointer font-bold text-[#84DCF6]">Test actions and history</summary>
+              <div className="my-2 flex flex-wrap gap-2">
+                <button type="button" onClick={handleRunAllSafeTests} disabled={!!pendingScenario} className={scenarioButtonClass}>Run All Safe Tests</button>
+                <button type="button" onClick={() => handleStopAndResetAllFaults(true)} disabled={!!pendingScenario} className={scenarioButtonClass}>Stop All and Reset</button>
+                <button type="button" onClick={handleExportTestResults} className={scenarioButtonClass}>Export CSV</button>
               </div>
-            )}
-          </div>
+              {testHistory.length ? <ul className="max-h-40 space-y-1 overflow-y-auto">
+                {testHistory.map(item => <li key={item.id} className="break-words text-[#D7EEFD]">
+                  {item.time} · {item.testName} · {item.status} · {item.detail}
+                </li>)}
+              </ul> : <p>No scenario history yet.</p>}
+            </details>
+          </section>
         </div>
       )}
 
       {/* SECONDARY TABS (Shared Simulation State) */}
       {activeTab !== 'TOPOLOGY_LIVE' && (
         <div style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }} className="rounded-xl border p-4 space-y-3">
+          {activeTab === 'WHY_NO_DATA' && (() => {
+            const stages: DiagnosticStage[] = [
+              { name: 'Field PRP paths', ok: fieldLinkUp, evidence: `LAN A ${lanAUp ? 'UP' : 'DOWN'} · LAN B ${lanBUp ? 'UP' : 'DOWN'}`,
+                check: 'Open Topology & Live Data and check the PRP fault scenario and both field LAN indicators.' },
+              { name: 'Station aggregation switch', ok: aggSwitchUp, evidence: aggSwitchUp ? 'Station uplinks available.' : 'Station switch unavailable.',
+                check: 'Check the station switch status and whether field traffic reaches the SCADA links.' },
+              { name: 'OPC UA Session', ok: sessionActive, evidence: sessionActive ? 'Session active.' : endpointError() || connectionFeedback,
+                check: 'Check Endpoint URL, Security Policy, Message Security Mode and Authentication in Server & Field Config.' },
+              { name: 'Subscription', ok: subscriptionActive, evidence: subscriptionActive ? 'Sub_01 active.' : 'Sub_01 inactive. Publish is stopped.',
+                check: 'Check Subscription Timeout and confirm Sub_01 resumes after reset. Use Read / Write to check local Read separately.' },
+              { name: 'Simulation playback', ok: playing, evidence: playing ? 'Simulated Publish and badge playback enabled.' : 'Lab paused. No new simulated Publish notifications.',
+                check: 'Select Resume. The topology animation continues from the current hop.' },
+              { name: 'OT Firewall', ok: otFirewallOk, evidence: otFirewallOk ? 'Lab firewall permits the station-to-DMZ path.' : 'Lab firewall blocks station-to-DMZ traffic.',
+                check: 'Check the OT Firewall indicator in DMZ & Gateway.' },
+              { name: 'DMZ switch', ok: dmzOk, evidence: dmzOk ? 'DMZ path available.' : 'DMZ path unavailable.',
+                check: 'Check the DMZ connection and collector uplinks in DMZ & Gateway.' },
+              { name: 'DMZ Aggregator', ok: aggServerOk, evidence: aggServerOk ? 'Aggregation server available.' : 'Aggregation server unavailable.',
+                check: 'Check the Aggregation Server indicator and the latest forwarding evidence.' },
+              { name: 'Cloud forwarding', ok: cloudOk, evidence: cloudOk ? 'Cloud path available in the simulator.' : 'Cloud uplink or forwarding unavailable.',
+                check: 'Compare the station and cloud indicators in Cloud Analytics and review the latest delivery log.' },
+            ];
+            const serviceError = readError();
+            const current: DiagnosticSnapshot = {
+              nodeId: selectedNode.nodeId,
+              captured: nowTimeMs(),
+              session: sessionActive ? 'ACTIVE' : 'DOWN',
+              subscription: subscriptionActive ? 'ACTIVE' : 'INACTIVE',
+              value: selectedNode.valueText,
+              quality: selectedNode.statusCode,
+              sourceTime: selectedNode.sourceTimestamp,
+              read: serviceError || (fieldAcquisitionUp ? 'Available' : 'Available · cached field value'),
+              firstIssue: stages.find(stage => !stage.ok)?.name ?? 'None',
+            };
+            return <OpcUaDataTroubleshooting stages={stages} current={current} captures={diagnosticSnapshots}
+              failover={prpFailover ? `PRP failover: LAN ${lanAUp ? 'B' : 'A'} down · LAN ${lanAUp ? 'A' : 'B'} carries field traffic.` : ''}
+              onCapture={slot => setDiagnosticSnapshots(previous => ({ ...previous, [slot]: { ...current, captured: nowTimeMs() } }))}
+              onClear={() => setDiagnosticSnapshots({})} />;
+          })()}
+
           {activeTab === 'ADDRESS_SPACE' && (
             <>
               <h3 className="text-sm font-extrabold text-white border-b border-[#163B5C] pb-2">
@@ -1915,7 +1872,10 @@ export const OpcUaLabPage: React.FC = () => {
                       <option key={n.nodeId} value={n.nodeId}>{n.nodeId} [{n.accessLevel.includes('CurrentWrite') ? 'RW' : 'RO'}]</option>
                     ))}
                   </select>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={handleOpcUaRead} className="rounded-lg border border-[#326985] px-3 py-1.5 font-bold text-[#BAE6FD]">
+                      Read Node
+                    </button>
                     <select value={writeDesired} onChange={(e) => setWriteDesired(e.target.value as 'OPEN' | 'CLOSED')} className="rounded border border-[#1E5280] bg-[#04101E] px-2.5 py-1.5 font-mono text-white">
                       <option value="OPEN">OPEN</option>
                       <option value="CLOSED">CLOSED</option>
@@ -1943,6 +1903,8 @@ export const OpcUaLabPage: React.FC = () => {
                   <div>Active SCADA: <b>{activeScadaServer}</b></div>
                   <div>PRP LAN A: <b style={{ color: lanAUp ? '#4ADE80' : '#F87171' }}>{lanAUp ? 'UP' : 'FAULT'}</b></div>
                   <div>PRP LAN B: <b style={{ color: lanBUp ? '#4ADE80' : '#F87171' }}>{lanBUp ? 'UP' : 'FAULT'}</b></div>
+                  <div>Session: <b>{sessionActive ? 'ACTIVE' : 'DOWN'}</b></div>
+                  <div>Subscription: <b>{subscriptionActive ? 'ACTIVE' : 'INACTIVE'}</b> · Field data: {fieldAcquisitionUp ? 'LIVE' : 'STALE'}</div>
                   <div>Sub_01 Publishes: <b className="text-[#4ADE80]">{pubCounter} ({pubIntervalMs} ms)</b></div>
                 </div>
                 <div className="rounded-lg border border-[#164463] bg-[#04101E] p-3 space-y-1">

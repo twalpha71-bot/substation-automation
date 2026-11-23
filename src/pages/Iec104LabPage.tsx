@@ -1,5 +1,6 @@
 import './ModbusTcpLabPage.css';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ProtocolTroubleshootingPanel } from '../components/ProtocolTroubleshootingPanel';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { buildIec104TelecontrolTable } from '../data/protocolRegistry';
 import {
@@ -218,7 +219,35 @@ const IEC104_TESTS: Iec104TestDef[] = [
   { num: 30, id: 'T30_WAN_LOSS', name: 'WAN Link Loss (ETH1 → RCC/SLDC Down)', cat: 'E_WAN', isFault: true, safeBatch: false, expectedResult: 'WAN cable faulted; IEC 61850 Station Bus stays live' },
   { num: 31, id: 'T31_HIGH_LATENCY', name: 'High WAN Latency (+450 ms RTT)', cat: 'E_WAN', isFault: true, safeBatch: false, expectedResult: 'Slow WAN delivery; T2 Ack timer warning flagged' },
   { num: 32, id: 'T32_FULL_RECOVERY', name: 'Full End-to-End IEC 61850 → 104 Recovery', cat: 'E_WAN', isFault: false, safeBatch: true, expectedResult: 'All faults cleared; MMS & IEC-104 links restored' },
+  { num: 33, id: 'T33_SINGLE_POINT', name: 'Single-point protection indication (M_SP_TB_1)', cat: 'C_CONV', isFault: false, safeBatch: false, expectedResult: 'Compare the sample single-point protection indication with the double-point breaker position.' },
 ];
+const CORE_TESTS = [
+  { name: 'TCP Connection', stage: 'WAN and TCP/2404',
+    recovery: 'Verify the TCP/2404 session is established, then confirm STARTDT and a new indication.',
+    variants: ['T01_TCP2404_CONN', 'T05_PORT2404_DOWN', 'T04_TESTFR'] },
+  { name: 'STARTDT / STOPDT', stage: 'STARTDT and APCI flow control',
+    recovery: 'Confirm STARTDT Act / Con after recovery and check that I-frames resume.',
+    variants: ['T02_STARTDT', 'T03_STOPDT', 'T06_STARTDT_T1_TO', 'T27_NS_NR_SYNC', 'T28_SFRAME_ACK', 'T29_K_WINDOW_FULL'] },
+  { name: 'General Interrogation', stage: 'GI termination',
+    recovery: 'Open General Interrogation and verify confirmation, the data burst and termination in order.',
+    variants: ['T20_GI_ACT', 'T21_GI_CON', 'T22_GI_TERM', 'T25_GI_TIMEOUT'] },
+  { name: 'Single / Double Point Indications', stage: 'Gateway conversion and IOA',
+    recovery: 'Compare the mapped point type and position bits with the source indication and RCC display.',
+    variants: ['T13_XCBR_M_DP_TB_1', 'T33_SINGLE_POINT', 'T08_BRCB_REPORT'] },
+  { name: 'IOA / COA Mapping', stage: 'Gateway conversion and IOA',
+    recovery: 'Compare COA, IOA and Type ID across both endpoints, then verify the correct RCC point updates.',
+    variants: ['T16_MISSING_IOA', 'T18_COA_MISMATCH', 'T14_MMXU_M_ME_TF_1'] },
+  { name: 'Remote Command & Interlocking', stage: 'Remote command interlock',
+    recovery: 'Repeat the authorized simulated command after confirming permissives, then verify independent breaker position feedback.',
+    variants: ['T23_SBO_CMD', 'T24_DIRECT_CMD', 'T26_INTERLOCK_BLK'] },
+  { name: 'Link Failure & Recovery', stage: 'WAN and TCP/2404',
+    recovery: 'Restore the affected link and verify fresh MMS reports, a valid IEC-104 session and an RCC update.',
+    variants: ['T32_FULL_RECOVERY', 'T07_MMS_ASSOC', 'T10_P2_OFFLINE', 'T11_SWITCH_DOWN', 'T12_MMS_LOST', 'T19_GTW_OVERLOAD', 'T30_WAN_LOSS', 'T31_HIGH_LATENCY'] },
+  { name: 'Data Quality & Timestamp', stage: 'Gateway conversion and IOA',
+    recovery: 'Compare the source quality and timestamp with the fresh RCC indication, including CP56Time2a where configured.',
+    variants: ['T15_CP56TIME2A', 'T17_BAD_QUALITY', 'T09_URCB_MEAS'] },
+] as const;
+
 
 function nowTimeStr(): string {
   const d = new Date();
@@ -279,6 +308,7 @@ function buildIec104TestSteps(t: Iec104TestDef, r: Iec104TestRuntime, ns: number
   const active = r.enabled;
   const isF = t.isFault;
   const frameHex =
+    t.id === 'T33_SINGLE_POINT' ? 'Example Type ID: 1E (30). Compare with 1F (31) in the double-point variation.' :
     t.id === 'T02_STARTDT' ? '68 04 07 00 00 00  →  68 04 0B 00 00 00 (STARTDT CON)' :
     t.id === 'T03_STOPDT' ? '68 04 13 00 00 00  →  68 04 23 00 00 00 (STOPDT CON)' :
     t.id === 'T04_TESTFR' ? '68 04 43 00 00 00  →  68 04 83 00 00 00 (TESTFR CON)' :
@@ -303,7 +333,7 @@ function buildIec104TestSteps(t: Iec104TestDef, r: Iec104TestRuntime, ns: number
         color: '#38F3FF',
         detail: active
           ? `Test #${t.num} (${t.name}) toggled ON at ${r.timestamp}. Simulation injected into live pipeline.`
-          : `Test #${t.num} (${t.name}) is currently IDLE. Toggle ON to execute live verification.`,
+          : `Test #${t.num} (${t.name}) is currently IDLE. Use Run Scenario to execute live verification.`,
       },
       {
         num: 2,
@@ -337,8 +367,8 @@ function buildIec104TestSteps(t: Iec104TestDef, r: Iec104TestRuntime, ns: number
         title: isF ? 'SCADA Impact & Recovery Action' : 'RCC / SLDC Verification Result',
         color: isF && active ? '#FCA5A5' : '#4ADE80',
         detail: active
-          ? `${t.expectedResult}${isF ? ' — Toggle OFF or enable Test #32 (Full Recovery) to restore healthy operation.' : ' — Verified PASS on live RCC/SLDC.'}`
-          : 'Awaiting test execution — click the Toggle switch ON to observe real-time topology & frame trace.',
+          ? `${t.expectedResult}${isF ? ' — Clear Scenario or run the Full Recovery variation to restore healthy operation.' : ' — Expected result in the simulator.'}`
+          : 'Use Run Scenario to view the simulated trace.',
       },
     ],
   };
@@ -397,8 +427,8 @@ export const Iec104LabPage: React.FC = () => {
   const [gatewayManuallyClosed, setGatewayManuallyClosed] = useState<boolean>(false);
 
   // 32-Test Simulation Lab State
-  const [testCatFilter, setTestCatFilter] = useState<TestCategory>('ALL');
-  const [selectedTestId, setSelectedTestId] = useState<string>('T02_STARTDT');
+  const [coreTestIndex, setCoreTestIndex] = useState(0);
+  const [selectedTestId, setSelectedTestId] = useState<string>(CORE_TESTS[0].variants[0]);
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [testHistory, setTestHistory] = useState<TestHistoryItem[]>([]);
   const [testState, setTestState] = useState<Record<string, Iec104TestRuntime>>(() => {
@@ -497,7 +527,7 @@ export const Iec104LabPage: React.FC = () => {
       ? { id: Date.now() + Math.random(), time: ts, frameType: 'MMS Report', direction: 'GTW-01 Engine', details: missingIoa ? `Unmapped LN ${d.lnRef} (No IOA)` : 'GTW-01 conversion buffer overload', result: 'Fault' }
       : !wanHealthy
       ? { id: Date.now() + Math.random(), time: ts, frameType: 'I-Frame', direction: 'GTW-01 → RCC/SLDC', details: `WAN / TCP 2404 paused — IOA:${d.ioa} buffered`, result: 'Fault' }
-      : { id: Date.now() + Math.random(), time: ts, frameType: 'I-Frame', direction: 'GTW-01 → RCC/SLDC', details: `N(S)=${nsSeq} N(R)=${nrSeq} · ${d.iec104Type} COA=${coaMismatch ? 99 : 132} IOA=${d.ioa} COT=3 Val=${d.baseValue} ${d.unit}`, result: 'Delivered' };
+      : { id: Date.now() + Math.random(), time: ts, frameType: 'I-Frame', direction: 'GTW-01 → RCC/SLDC', details: `N(S)=${nsSeq} N(R)=${nrSeq} · ${d.iec104Type} COA=${coaMismatch ? 99 : 132} IOA=${d.ioa} COT=3 Val=${d.baseValue} ${d.unit}${coaMismatch ? ' · RCC rejected Common Address' : ''}`, result: coaMismatch ? 'Fault' : 'Delivered' };
     setLogs((prev) => [entry, ...prev].slice(0, 40));
   }, [nsSeq]);
 
@@ -654,9 +684,15 @@ export const Iec104LabPage: React.FC = () => {
   };
 
   const handleTriggerGi = () => {
-    setGiCount((c) => c + 1);
+    const timeout = isOn('T25_GI_TIMEOUT');
+    const complete = wanHealthy && !coaMismatch && !timeout;
+    if (complete) setGiCount(count => count + 1);
+    const details = !wanHealthy ? 'GI could not start: IEC-104 data transfer unavailable.'
+      : coaMismatch ? 'GI failed: Common Address mismatch.'
+        : timeout ? 'GI confirmation and data burst shown; COT=10 termination timed out.'
+          : 'C_IC_NA_1 (QOI=20) COT=6 → COT=7 → COT=20 Burst → COT=10 Terminated';
     setLogs((prev) => [
-      { id: Date.now(), time: nowTimeStr(), frameType: 'I-Frame', direction: 'RCC/SLDC ↔ GTW-01', details: 'C_IC_NA_1 (QOI=20) COT=6 → COT=7 → COT=20 Burst → COT=10 Terminated', result: wanHealthy ? 'Delivered' : 'Fault' },
+      { id: Date.now(), time: nowTimeStr(), frameType: 'I-Frame', direction: 'RCC/SLDC ↔ GTW-01', details, result: complete ? 'Delivered' : 'Fault' },
       ...prev.slice(0, 39),
     ]);
   };
@@ -675,10 +711,67 @@ export const Iec104LabPage: React.FC = () => {
     ]);
   };
 
-  const visibleTests = useMemo(
-    () => (testCatFilter === 'ALL' ? IEC104_TESTS : IEC104_TESTS.filter((t) => t.cat === testCatFilter)),
-    [testCatFilter]
-  );
+  const troubleshootingStages = [
+    {
+      name: 'Southbound IEC 61850 MMS',
+      blocked: !mmsHealthy,
+      evidence: switchDown ? 'Station switch uplink is down.' : mmsLost ? 'The MMS association is lost.'
+        : iedOfflineNow ? `${activeIed.id} is offline.` : `${activeIed.rcbName} · ${activeIed.dataset}.`,
+      check: 'Check the IED and switch path, TCP/102 association, RptEna and DataSet before tracing a northbound indication.',
+    },
+    {
+      name: 'Gateway conversion and IOA',
+      blocked: missingIoa || gtwOverload,
+      warning: badQuality,
+      evidence: missingIoa ? 'The gateway has no IOA mapping.' : gtwOverload ? 'The simulated gateway queue is overloaded.'
+        : badQuality ? 'The simulated ASDU carries the Invalid bit.' : `Configured Type ID ${activeIed.typeIdNum} · IOA ${activeIed.ioa}.`,
+      check: 'Verify IOA, Type ID, quality and time-tag mapping. Trace invalid quality back to the MMS source point.',
+    },
+    {
+      name: 'WAN and TCP/2404',
+      blocked: wanLoss || port2404Down,
+      warning: highLatency,
+      evidence: wanLoss ? 'WAN link is down.' : port2404Down ? 'TCP/2404 is disconnected.'
+        : highLatency ? 'The high-latency test is active.' : 'The simulated TCP link is available.',
+      check: 'Verify the gateway and RCC addresses, WAN path and TCP/2404 before checking STARTDT.',
+    },
+    {
+      name: 'STARTDT and APCI flow control',
+      blocked: stopdtStandby || startdtTimeout || kWindowFull,
+      evidence: stopdtStandby ? 'STOPDT standby is active.' : startdtTimeout ? 'STARTDT confirmation timed out.'
+        : kWindowFull ? 'The send window is full.' : `Data transfer enabled · N(S) ${nsSeq} · N(R) ${nrSeq}.`,
+      check: 'Use APCI / ASDU Analyzer to check STARTDT confirmation and whether the peer acknowledges outstanding I-frames.',
+    },
+    {
+      name: 'RCC ASDU acceptance',
+      blocked: coaMismatch,
+      evidence: coaMismatch ? 'The injected Common Address differs from the RCC configuration.'
+        : `Configured COA 132 · IOA ${activeIed.ioa}.`,
+      check: 'Compare Common Address, IOA, Type ID and COT against the RCC point list.',
+    },
+  ];
+  const coreTest = CORE_TESTS[coreTestIndex];
+  const variations = coreTest.variants.map(id => IEC104_TESTS.find(test => test.id === id)!);
+  const selectedTest = variations.find(test => test.id === selectedTestId) ?? variations[0];
+  const selectedRuntime = testState[selectedTest.id];
+  const selectedFaultActive = selectedTest.isFault && selectedRuntime.enabled;
+  const affectedStages: Record<string, string> = {
+    T10_P2_OFFLINE: 'Southbound IEC 61850 MMS',
+    T11_SWITCH_DOWN: 'Southbound IEC 61850 MMS',
+    T12_MMS_LOST: 'Southbound IEC 61850 MMS',
+    T18_COA_MISMATCH: 'RCC ASDU acceptance',
+    T19_GTW_OVERLOAD: 'Gateway conversion and IOA',
+  };
+  const affectedStage = affectedStages[selectedTest.id] ?? coreTest.stage;
+  const firstIssue = troubleshootingStages.find(stage => stage.blocked)
+    ?? troubleshootingStages.find(stage => stage.warning);
+  const specialCheck = troubleshootingStages.find(stage => stage.name === affectedStage)?.check
+    ?? (selectedTest.id === 'T25_GI_TIMEOUT' ? 'Clear the timeout variation and check that the gateway produces the GI termination.'
+    : selectedTest.id === 'T26_INTERLOCK_BLK' ? 'Check authority, remote mode and interlock permissives. Clear the injected interlock fault before retrying.'
+    : 'Clear this fault variation, then repeat the selected test.');
+  const recoveryMessage = selectedFaultActive ? `Clear the selected fault. ${coreTest.recovery}`
+    : firstIssue ? `Resolve ${firstIssue.name} first, then recheck the simulated path.`
+    : `${selectedTest.isFault && selectedRuntime.actualResult === 'Cleared / Restored' ? 'Scenario cleared. ' : ''}${coreTest.recovery}`;
 
   const stagePillLabel =
     !mmsHealthy
@@ -741,7 +834,7 @@ export const Iec104LabPage: React.FC = () => {
               ['GI_SEQUENCE', 'General Interrogation (GI)'],
               ['REMOTE_COMMANDS', 'Remote Commands'],
               ['APCI_ANALYZER', 'APCI / ASDU Analyzer'],
-              ['LOGS_DIAGNOSTICS', 'Logs & Diagnostics'],
+              ['LOGS_DIAGNOSTICS', 'Troubleshooting & Logs'],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -810,6 +903,41 @@ export const Iec104LabPage: React.FC = () => {
       {/* 3. TOPOLOGY & LIVE DATA TAB */}
       {activeTab === 'TOPOLOGY_LIVE' && (
         <div className="space-y-3.5">
+          <section aria-label="Core tests and fault variations" className="rounded-xl border border-[#1E5280] bg-[#051628] p-3 text-xs">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
+              <label className="min-w-0 space-y-1">
+                <span className="block font-bold text-[#9ED8F6]">Test / Fault</span>
+                <select value={coreTestIndex} onChange={event => {
+                  const index = Number(event.target.value);
+                  setCoreTestIndex(index);
+                  setSelectedTestId(CORE_TESTS[index].variants[0]);
+                }} className="w-full rounded-lg border border-[#1E5280] bg-[#082038] px-2 py-2 text-white">
+                  {CORE_TESTS.map((test, index) => <option key={test.name} value={index}>{test.name}</option>)}
+                </select>
+              </label>
+              <label className="min-w-0 space-y-1">
+                <span className="block font-bold text-[#9ED8F6]">Scenario variation</span>
+                <select value={selectedTest.id} onChange={event => setSelectedTestId(event.target.value)}
+                  className="w-full rounded-lg border border-[#1E5280] bg-[#082038] px-2 py-2 text-white">
+                  {variations.map(test => <option key={test.id} value={test.id}>{test.name}{test.isFault ? ' · Fault' : ''}</option>)}
+                </select>
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => handleToggleTest(selectedTest)}
+                  className="rounded-lg border border-[#38F3FF] bg-[#083B5E] px-3 py-2 font-bold text-white">
+                  {selectedRuntime.enabled ? 'Clear Scenario' : 'Run Scenario'}
+                </button>
+                <button type="button" onClick={() => handleResetAll(false)}
+                  className="rounded-lg border border-[#1E5280] bg-[#071C2F] px-3 py-2 font-bold text-white">Reset All Faults</button>
+              </div>
+            </div>
+            <p className="mt-2 text-[#BAE6FD]" role="status">
+              {selectedRuntime.enabled ? selectedTest.isFault ? 'Fault active' : 'Scenario active'
+                : selectedRuntime.actualResult === 'Cleared / Restored' ? 'Scenario cleared' : 'Scenario idle'}
+              {' · '}{IEC104_TESTS.filter(test => test.isFault && isOn(test.id)).length} active faults
+            </p>
+          </section>
+
           {/* SYSTEM TOPOLOGY CARD */}
           <div
             className="rounded-2xl border p-3.5 relative overflow-x-auto"
@@ -1456,7 +1584,7 @@ export const Iec104LabPage: React.FC = () => {
             </div>
           </div>
 
-          {/* 4. COMPREHENSIVE 32-TEST INTERACTIVE SIMULATION LAB (FROSTED CYAN GLASSMORPHISM) */}
+          {/* Scenario troubleshooting and history */}
           <div
             className="i104-glass-panel relative rounded-2xl p-4 sm:p-5 space-y-3.5 overflow-hidden"
             style={{
@@ -1486,14 +1614,14 @@ export const Iec104LabPage: React.FC = () => {
                     <path d="M4 8l10 5.5L24 8M14 13.5v12" stroke="#38F3FF" strokeWidth="1.5" strokeOpacity="0.85" />
                   </svg>
                   <h2 className="text-[15px] sm:text-[17px] font-extrabold text-white">
-                    IEC 61850 → IEC-104 Test Simulation &amp; Fault Injection Lab (32 Interactive Tests)
+                    Test Troubleshooting
                   </h2>
                   <span className="rounded-full border border-[#22C55E] bg-[#0A5C2E]/70 px-3 py-0.5 text-[10px] font-extrabold text-[#4ADE80]">
                     SAFE SIMULATION ONLY
                   </span>
                 </div>
                 <p className="text-[12px] text-[#D4EEF9] mt-1">
-                  Toggle any test ON/OFF independently to verify STARTDT/STOPDT/TESTFR, MMS BRCB/URCB reports, CP56Time2a quality conversion, GI (QOI=20), SBO commands, and WAN resilience.
+                  Review the selected variation and verify recovery after clearing the fault.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -1505,120 +1633,30 @@ export const Iec104LabPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {(
-                [
-                  ['ALL', 'All 32 Tests'],
-                  ['A_UFRAME', 'A. Link & U-Frames (6)'],
-                  ['B_MMS', 'B. IEC 61850 MMS (6)'],
-                  ['C_CONV', 'C. 61850→104 Conversion (7)'],
-                  ['D_CMD', 'D. GI & Commands (7)'],
-                  ['E_WAN', 'E. APCI & WAN (6)'],
-                ] as const
-              ).map(([cat, lbl]) => {
-                const isAct = testCatFilter === cat;
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setTestCatFilter(cat)}
-                    style={
-                      isAct
-                        ? { background: 'linear-gradient(180deg, #3CF4FF 0%, #00D2EC 100%)', borderColor: '#A8FDFF', color: '#031B2E', boxShadow: '0 0 18px rgba(0,234,255,0.72)' }
-                        : { background: 'linear-gradient(180deg, rgba(32,82,110,0.52), rgba(18,54,78,0.62))', borderColor: 'rgba(125,215,242,0.48)', color: '#ECF8FF' }
-                    }
-                    className="rounded-[10px] border px-3.5 py-1.5 text-[12px] font-bold transition hover:border-[#3CF4FF]"
-                  >
-                    {lbl}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* 2-COLUMN SPLIT: LEFT = 32-TEST TABLE | RIGHT = STEP-BY-STEP EXECUTION INSPECTOR */}
-            <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-3.5 items-start">
-              {/* LEFT SIDE: 32-TEST SIMULATION TABLE */}
-            <div
-              style={{ border: '1.5px solid rgba(100, 224, 248, 0.62)', background: 'linear-gradient(180deg, rgba(26, 76, 104, 0.52) 0%, rgba(14, 52, 76, 0.64) 100%)' }}
-              className="i104-glass-scroll overflow-x-auto max-h-[385px] overflow-y-auto rounded-xl"
-            >
-              <table className="w-full text-left border-collapse font-sans text-[12.5px]">
-                <thead style={{ background: 'linear-gradient(180deg, #0C2854 0%, #081D3F 100%)', borderBottom: '1px solid #1E4E8C' }} className="sticky top-0 z-10 text-[#F0FAFF] font-bold">
-                  <tr>
-                    <th className="py-2.5 px-3.5 w-12">#</th>
-                    <th className="py-2.5 px-3.5">Test Name</th>
-                    <th className="py-2.5 px-3.5 text-center w-28">Toggle</th>
-                    <th className="py-2.5 px-3.5 text-center w-28">Status</th>
-                    <th className="py-2.5 px-3.5">Expected Result</th>
-                    <th className="py-2.5 px-3.5">Actual Result</th>
-                    <th className="py-2.5 px-3.5 text-right w-28">Timestamp</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleTests.map((t) => {
-                    const r = testState[t.id];
-                    const isSel = selectedTestId === t.id;
-                    return (
-                      <tr
-                        key={t.id}
-                        onClick={() => setSelectedTestId(t.id)}
-                        style={
-                          isSel
-                            ? { background: 'linear-gradient(90deg, rgba(0,216,238,0.42), rgba(0,186,216,0.28), rgba(0,210,236,0.36))', boxShadow: 'inset 0 0 0 1.5px rgba(82,242,255,0.88)' }
-                            : r.enabled
-                            ? { background: t.isFault ? 'rgba(239,68,68,0.16)' : 'rgba(16,185,129,0.14)', borderTop: '1px solid rgba(130,210,238,0.18)' }
-                            : { borderTop: '1px solid rgba(130,210,238,0.18)' }
-                        }
-                        className="cursor-pointer transition-colors hover:bg-[#196488]/45"
-                      >
-                        <td className="py-2.5 px-3.5 text-[#C4E2F2] font-medium">{t.num}</td>
-                        <td className="py-2.5 px-3.5 font-bold text-white whitespace-nowrap">{t.name}</td>
-                        <td className="py-2.5 px-3.5 text-center">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedTestId(t.id);
-                              handleToggleTest(t);
-                            }}
-                            style={{
-                              background: r.enabled ? (t.isFault ? 'linear-gradient(90deg,#dc2626,#ef4444)' : 'linear-gradient(90deg,#16a34a,#22c55e)') : 'rgba(14,42,62,0.82)',
-                              borderColor: r.enabled ? (t.isFault ? '#fca5a5' : '#86efac') : 'rgba(130,215,242,0.58)',
-                            }}
-                            className="inline-flex items-center justify-between w-[54px] h-[24px] rounded-full border-[1.5px] px-1 transition-all"
-                          >
-                            {r.enabled ? (<><span className="text-[9px] font-extrabold text-white pl-1.5">ON</span><span className="w-4 h-4 rounded-full bg-white shadow" /></>) : (<><span className="w-4 h-4 rounded-full bg-white shadow" /><span className="text-[9px] font-bold text-[#CBE8F6] pr-1">OFF</span></>)}
-                          </button>
-                        </td>
-                        <td className="py-2.5 px-3.5 text-center">
-                          <span
-                            style={
-                              r.status === 'PASSED'
-                                ? { background: 'rgba(16,185,129,0.28)', borderColor: '#4ADE80', color: '#DCFCE7' }
-                                : r.status === 'FAILED'
-                                ? { background: 'rgba(239,68,68,0.28)', borderColor: '#F87171', color: '#FEE2E2' }
-                                : { background: 'rgba(18,86,118,0.65)', borderColor: 'rgba(90,222,248,0.68)', color: '#DCF8FF' }
-                            }
-                            className="inline-block rounded-full border-[1.5px] px-3 py-0.5 text-[10px] font-extrabold"
-                          >
-                            {r.status}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3.5 text-[#E0F3FC]">{t.expectedResult}</td>
-                        <td className="py-2.5 px-3.5 text-[#D2ECF9]">{r.actualResult}</td>
-                        <td className="py-2.5 px-3.5 text-right text-[#B8D8EA] whitespace-nowrap">{r.timestamp}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-
-              {/* RIGHT SIDE: LIVE STEP-BY-STEP TEST EXECUTION DETAILS BOX */}
+            <dl className="grid grid-cols-1 gap-2 text-xs md:grid-cols-2">
+              {[
+                ['First Failed Stage', firstIssue?.name ?? (selectedFaultActive ? affectedStage : 'No blocked stage detected')],
+                ['Root Cause', firstIssue?.evidence ?? (selectedFaultActive ? selectedTest.expectedResult : 'No active fault detected on the simulated path.')],
+                ['Corrective Action', firstIssue?.check ?? (selectedFaultActive ? specialCheck : 'Run a fault variation and inspect where the simulated path first changes.')],
+                ['Recovery Verification', recoveryMessage],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0 space-y-1 rounded-lg border border-[#1E4E8C] bg-[#061630]/90 p-3">
+                  <dt className="font-bold text-[#9BD3EC]">{label}</dt>
+                  <dd className="break-words text-[#E0F7FF]">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            {selectedTest.id === 'T33_SINGLE_POINT' && (
+              <p className="rounded-lg border border-[#1E4E8C] bg-[#061630]/90 p-3 text-xs text-[#E0F7FF]">
+                Training example · A protection indication uses one state bit (M_SP_TB_1, Type 30).
+                Breaker position uses two state bits (M_DP_TB_1, Type 31).
+              </p>
+            )}
+            <details className="rounded-xl border border-[#56EBFF]/30 bg-[#061630]/90 p-2.5">
+              <summary className="cursor-pointer text-xs font-bold text-white">Scenario trace (simulated)</summary>
               {(() => {
-                const selTest = IEC104_TESTS.find((x) => x.id === selectedTestId) || IEC104_TESTS[0];
-                const selRt = testState[selTest.id];
+                const selTest = selectedTest;
+                const selRt = selectedRuntime;
                 const info = buildIec104TestSteps(selTest, selRt, nsSeq, nrSeq);
                 return (
                   <div
@@ -1688,7 +1726,7 @@ export const Iec104LabPage: React.FC = () => {
                   </div>
                 );
               })()}
-            </div>
+            </details>
 
             {showHistory && (
               <div className="rounded-xl border border-[#38F3FF]/45 bg-[#04182B]/90 p-3 space-y-1.5">
@@ -1729,8 +1767,8 @@ export const Iec104LabPage: React.FC = () => {
                         <td className="py-1.5 px-2.5 text-[#38F3FF] font-bold">{row.ioa}</td>
                         <td className="py-1.5 px-2.5 text-[#D8B4FE]">{row.typeId}</td>
                         <td className="py-1.5 px-2.5 text-[#FDE047]">{row.cot}</td>
-                        <td className="py-1.5 px-2.5 text-white font-sans font-semibold">{row.description}</td>
-                        <td className="py-1.5 px-2.5 text-[#7DD3FC]">{row.sourceRef}</td>
+                        <td className="py-1.5 px-2.5 text-white font-sans font-semibold">{row.signalDescription}</td>
+                        <td className="py-1.5 px-2.5 text-[#7DD3FC]">{row.sourceReference}</td>
                         <td className="py-1.5 px-2.5 text-[#4ADE80] font-bold">{row.valueText}</td>
                       </tr>
                     ))}
@@ -1796,6 +1834,22 @@ export const Iec104LabPage: React.FC = () => {
 
           {activeTab === 'LOGS_DIAGNOSTICS' && (
             <div className="space-y-2">
+              <ProtocolTroubleshootingPanel
+                title="IEC-104 Troubleshooting"
+                target={`Simulated indication · ${activeIed.iedName} · ${activeIed.lnRef} · COA 132 · IOA ${activeIed.ioa}`}
+                activeFaults={IEC104_TESTS.filter(test => test.isFault && isOn(test.id)).map(test => test.name)}
+                stages={troubleshootingStages}
+              />
+              <div className="grid gap-2 text-xs sm:grid-cols-2">
+                <div className="min-w-0 rounded-lg border border-[#1E5280] bg-[#03101F] p-3">
+                  <h4 className="font-bold text-white">GI troubleshooting</h4>
+                  <p className="mt-1 text-sky-100">In General Interrogation, check activation, confirmation, the data burst and termination in order.{isOn('T25_GI_TIMEOUT') ? ' GI timeout scenario is active.' : ''}</p>
+                </div>
+                <div className="min-w-0 rounded-lg border border-[#1E5280] bg-[#03101F] p-3">
+                  <h4 className="font-bold text-white">Remote command troubleshooting</h4>
+                  <p className="mt-1 text-sky-100">Compare the select/execute response, authority and interlock, then verify independent position feedback.{interlockBlocked ? ' Simulated CILO interlock is blocking the command.' : ''}</p>
+                </div>
+              </div>
               <h3 className="text-sm font-extrabold text-white flex items-center gap-2"><Terminal className="w-4 h-4 text-[#38F3FF]" /> Live IEC 61850 MMS &amp; IEC-104 APCI/ASDU Stream</h3>
               <div className="max-h-[380px] overflow-y-auto space-y-1 font-mono text-[11px]">
                 {logs.map((l) => (

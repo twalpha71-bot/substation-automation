@@ -892,6 +892,78 @@ body,
   outline: none !important;
 }
 
+/* Match form dropdowns to the workspace palette while keeping the header menus independent. */
+#root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *)) {
+  color-scheme: dark;
+  background: #0c263a !important;
+  color: #edf8ff !important;
+}
+#root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *)) option {
+  background-color: #0a1d2e;
+  color: #e7f5ff;
+}
+#root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *)) optgroup {
+  background-color: #0a1d2e;
+  color: #84dcf6;
+}
+#root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *)) option:checked {
+  background-color: #123a50;
+  color: #e8fbff;
+}
+#root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *)) :is(option, optgroup):disabled {
+  color: #9db5c7;
+}
+#root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *)):disabled {
+  color: #9db5c7 !important;
+}
+.sas-landing .sas-landing-results {
+  background: #0a1d2e;
+  border-color: #36647d;
+  color: #e7f5ff;
+}
+.sas-landing .sas-landing-results button:is(:hover, :focus-visible) {
+  background: #123a50;
+  color: #e8fbff;
+}
+
+@supports (appearance: base-select) and selector(select::picker(select)) {
+  @media (forced-colors: none) {
+    #root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *, [multiple], [size]:not([size="1"]))),
+    #root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *, [multiple], [size]:not([size="1"])))::picker(select) {
+      appearance: base-select;
+    }
+    #root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *))::picker(select) {
+      margin-block-start: 4px;
+      max-block-size: min(26rem, 60dvh);
+      padding: 4px;
+      overflow: auto;
+      border: 1px solid #36647d;
+      border-radius: 9px;
+      background: #0a1d2e;
+      color: #e7f5ff;
+      box-shadow: 0 12px 28px #020a13c9;
+    }
+    #root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *))::picker-icon {
+      flex-shrink: 0;
+      margin-inline-start: auto;
+      color: #84dcf6;
+    }
+    #root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *, [multiple], [size]:not([size="1"]))) option {
+      min-block-size: 2rem;
+      padding: 4px 8px;
+      border-radius: 5px;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    #root select:not(:where(.sas-app-header *, .sas-landing-brand *, .sas-landing-account *, [multiple], [size]:not([size="1"]))) option:not(:disabled):is(:hover, :focus-visible) {
+      outline: 1px solid #4aa2be;
+      outline-offset: -1px;
+      background: #123a50;
+      color: #e8fbff;
+    }
+  }
+}
+
 /* 11. Unify Dark SVG Diagram Backdrops Across SLD, SCADA, Labs & Signal Chain (107 fills) */
 .sas-workspace-main svg rect[fill="#002239"],
 .sas-workspace-main svg rect[fill="#030A12"],

@@ -47,6 +47,7 @@ import { UI_TRANSLATIONS, translateOfflineText, setOnlineLanguage, SUPPORTED_LAN
 
 const BayConfigurationManager = React.lazy(() => import('./pages/BayConfigurationManager').then(module => ({ default: module.BayConfigurationManager })));
 const AlarmsEventsPage = React.lazy(() => import('./pages/AlarmsEventsPage').then(module => ({ default: module.AlarmsEventsPage })));
+const SchemePage = React.lazy(() => import('./pages/SchemePage'));
 const WiresharkAnalyzerPage = React.lazy(() => import('./pages/WiresharkAnalyzerPage').then(module => ({ default: module.WiresharkAnalyzerPage })));
 const OsiModelPage = React.lazy(() => import('./pages/OsiModelPage').then(module => ({ default: module.OsiModelPage })));
 const SldWorkspacePage = React.lazy(() => import('./pages/SldWorkspacePage').then(module => ({ default: module.SldWorkspacePage })));
@@ -111,13 +112,25 @@ export default function App() {
 
   const [testingGuidanceOpen, setTestingGuidanceOpen] = useState(() => window.location.hash === '#/workspace/TESTING_GUIDANCE');
   const [showLanding, setShowLanding] = useState(false);
-  const [specialPage, setSpecialPage] = useState<'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | null>(null);
-  const openSpecialPage = (page: 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER') => { clearScadaVisitOnExit(); setSpecialPage(page); setTestingGuidanceOpen(false); setShowLanding(false); setTopMenuOpen(null); window.history.pushState(null, '', `#/workspace/${page}`); window.scrollTo(0, 0); };
+  const [specialPage, setSpecialPage] = useState<'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME' | null>(null);
+  const openSpecialPage = (page: 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME') => {
+    clearScadaVisitOnExit();
+    setSpecialPage(page);
+    setTestingGuidanceOpen(false);
+    setShowLanding(false);
+    setTopMenuOpen(null);
+    if (page === 'SCHEME') {
+      setMobileNavOpen(false);
+      setNavSearch('');
+    }
+    window.history.pushState(null, '', `#/workspace/${page}`);
+    window.scrollTo(0, 0);
+  };
   // Deep-link the active workspace: refreshing /workspace/GOOSE stays in GOOSE Lab.
   useLayoutEffect(() => {
     const restoreLocation = () => {
-      const special = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK|BAY_MANAGER)$/);
-      if (special) { setSpecialPage(special[1] as 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER'); setTestingGuidanceOpen(false); setShowLanding(false); return; }
+      const special = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK|BAY_MANAGER|SCHEME)$/);
+      if (special) { setSpecialPage(special[1] as 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME'); setTestingGuidanceOpen(false); setShowLanding(false); return; }
       setSpecialPage(null);
       if (window.location.hash === '#/workspace/TESTING_GUIDANCE') {
         setTestingGuidanceOpen(true);
@@ -402,6 +415,7 @@ export default function App() {
   const activeBreadcrumbLabel = () => {
     if (specialPage === 'ALARMS_EVENTS') return 'Alarms / Events';
     if (specialPage === 'WIRESHARK') return 'Wireshark';
+    if (specialPage === 'SCHEME') return 'Scheme';
     if (specialPage === 'BAY_MANAGER') return 'Bay Configuration Manager';
     if (testingGuidanceOpen) return 'Testing Guidance';
     if (activeTab === 'HERO') return t('Substation Workspace');
@@ -487,6 +501,15 @@ export default function App() {
                 <Home className="h-4 w-4" aria-hidden="true" />
                 <span>{t('Home')}</span>
               </button>
+              <button
+                type="button"
+                className={`sas-top-group-trigger ${specialPage === 'SCHEME' ? 'is-active' : ''}`}
+                aria-current={specialPage === 'SCHEME' ? 'page' : undefined}
+                onClick={() => openSpecialPage('SCHEME')}
+              >
+                <FileCode2 className="h-4 w-4" aria-hidden="true" />
+                <span>Scheme</span>
+              </button>
               {topNavGroups.map(group => {
                 const Icon = group.icon;
                 const active = group.ids.includes(testingGuidanceOpen ? 'TESTING_GUIDANCE' : activeTab);
@@ -523,12 +546,13 @@ export default function App() {
               <kbd>Ctrl + K</kbd>
               {navSearch.trim() && <div className="sas-top-search-results" role="menu">
                 {navSearch.toLowerCase().includes('alarm') && <button type="button" onClick={() => { openSpecialPage('ALARMS_EVENTS'); setNavSearch(''); }}><Bell className="w-4 h-4"/> Alarms / Events</button>}
+                {'scheme'.includes(navSearch.trim().toLowerCase()) && <button role="menuitem" type="button" onClick={() => openSpecialPage('SCHEME')}><FileCode2 className="w-4 h-4" /> Scheme</button>}
                 {'wireshark'.includes(navSearch.toLowerCase()) && <button type="button" onClick={() => { openSpecialPage('WIRESHARK'); setNavSearch(''); }}><Network className="w-4 h-4"/> Wireshark</button>}
                 {filteredNavItems.length ? filteredNavItems.map(item =>
                   <button key={item.id} role="menuitem" type="button" onClick={() => navigate(item.id)}>
                     {item.icon}<span>{item.label}</span>
                   </button>
-                ) : <span className="sas-top-no-results">No matching modules</span>}
+                ) : !'scheme'.includes(navSearch.trim().toLowerCase()) && <span className="sas-top-no-results">No matching modules</span>}
               </div>}
             </div>
           </nav>
@@ -784,7 +808,7 @@ export default function App() {
         {/* Main Workspace Container */}
         <main className="sas-workspace-main flex-1 p-2.5 sm:p-5 xl:p-6 w-full min-w-0">
           <React.Suspense fallback={<div role="status" className="rounded-xl border border-cyan-900 bg-[#061829] p-5 text-sm text-[#9bdcf3]">{t('Loading workspace…')}</div>}>
-          {specialPage === 'BAY_MANAGER' ? <BayConfigurationManager /> : specialPage === 'ALARMS_EVENTS' ? <AlarmsEventsPage /> : specialPage === 'WIRESHARK' ? <WiresharkAnalyzerPage /> : testingGuidanceOpen ? <TestingGuidancePage /> : <>
+          {specialPage === 'SCHEME' ? <SchemePage onNavigate={navigate} /> : specialPage === 'BAY_MANAGER' ? <BayConfigurationManager /> : specialPage === 'ALARMS_EVENTS' ? <AlarmsEventsPage /> : specialPage === 'WIRESHARK' ? <WiresharkAnalyzerPage /> : testingGuidanceOpen ? <TestingGuidancePage /> : <>
           {activeTab === 'HERO' && <HeroDashboardPage />}
           {activeTab === 'OSI_MODEL' && <OsiModelPage />}
           {activeTab === 'IEC61850_ACADEMY' && <Iec61850AcademyPage />}

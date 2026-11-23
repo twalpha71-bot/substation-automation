@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ProtocolTroubleshootingPanel } from '../components/ProtocolTroubleshootingPanel';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { buildModbusRegistersForBay } from '../data/protocolRegistry';
 import './ModbusTcpLabPage.css';
@@ -223,6 +224,33 @@ const MODBUS_TESTS: ModbusTestDef[] = [
   { num: 31, id: 'T31_PORT2404_BLOCKED', name: 'IEC-104 Port 2404 Firewall Blocked', cat: 'E_WAN', isFault: true, safeBatch: false, expectedResult: 'TCP/2404 dropped; GTW-01 buffers ASDUs locally' },
   { num: 32, id: 'T32_FULL_RECOVERY', name: 'Full End-to-End Pipeline Recovery', cat: 'E_WAN', isFault: false, safeBatch: true, expectedResult: 'All Modbus, Gateway & IEC-104 faults cleared and healthy' },
 ];
+const CORE_TESTS = [
+  { name: 'TCP Connection', stage: 'Station bus and TCP/502',
+    recovery: 'Confirm the switch path and TCP/502 are available, then check a fresh poll response.',
+    variants: ['T01_TCP_HANDSHAKE', 'T03_PORT502_CLOSED', 'T04_SWITCH_DOWN'] },
+  { name: 'Unit ID', stage: 'Modbus request and reply',
+    recovery: 'Compare the request and reply Unit ID with the active IED, then verify a valid reply to a new poll.',
+    variants: ['T18_UNIT_ID_MISMATCH'] },
+  { name: 'Register Read', stage: 'Modbus request and reply',
+    recovery: 'Repeat the matching read function and compare the returned words with the expected register and quantity.',
+    variants: ['T08_FC04_INPUT', 'T07_FC03_HOLDING', 'T02_ROUND_ROBIN', 'T09_FC02_DISCRETE', 'T10_FC06_WRITE_SINGLE', 'T11_FC16_WRITE_MULTI', 'T17_TID_MISMATCH'] },
+  { name: 'Register Mapping', stage: 'Value decoding and quality',
+    recovery: 'Compare the decoded engineering value and scale with the source registers, then verify the mapped IOA.',
+    variants: ['T15_FLOAT_ABCD', 'T16_WORD_SWAP_FAULT', 'T23_SCALING_DEADBAND', 'T24_MISSING_IOA'] },
+  { name: 'Exception Response', stage: 'Modbus request and reply',
+    recovery: 'Retry with a supported function, valid register range and valid value. Confirm a normal response.',
+    variants: ['T12_EX01_ILLEGAL_FC', 'T13_EX02_ILLEGAL_ADDR', 'T14_EX03_ILLEGAL_VAL'] },
+  { name: 'Timeout & Recovery', stage: 'Modbus request and reply',
+    recovery: 'After restoring the device or link, verify a fresh reply before the timeout and confirm cyclic polling resumes.',
+    variants: ['T06_AUTO_RECONNECT', 'T05_P2_OFFLINE', 'T19_HIGH_LATENCY', 'T20_RESP_TIMEOUT', 'T32_FULL_RECOVERY'] },
+  { name: 'Data Quality', stage: 'Value decoding and quality',
+    recovery: 'Compare source data with gateway quality and confirm the RCC point returns to valid on a fresh update.',
+    variants: ['T25_BAD_QDS'] },
+  { name: 'Gateway → SCADA Delivery', stage: 'IEC-104 WAN and RCC',
+    recovery: 'Verify the gateway sends the expected CA, IOA, Type ID and value, then confirm the RCC point updates.',
+    variants: ['T28_104_COT3_SPONT', 'T21_CONV_M_ME_NC_1', 'T22_CONV_M_SP_TB_1', 'T26_GTW_OVERLOAD', 'T27_104_STARTDT', 'T29_104_GI_COT20', 'T30_WAN_LINK_LOSS', 'T31_PORT2404_BLOCKED'] },
+] as const;
+
 
 function nowTimeStr(): string {
   const d = new Date();
@@ -311,11 +339,11 @@ function buildModbusTestSteps(t: ModbusTestDef, r: ModbusTestRuntime, tidHex: st
       'GTW-01 (ETH1 · 10.132.20.200) ↔ WAN TCP/2404 ↔ RCC/SCADA (10.132.20.201)',
     frameHex,
     steps: [
-      { num: 1, title: 'Test Trigger & Precondition', color: '#38F3FF', detail: active ? `Test #${t.num} (${t.name}) toggled ON at ${r.timestamp}. Live state injected.` : `Test #${t.num} (${t.name}) is IDLE. Toggle ON to run live trace.` },
+      { num: 1, title: 'Test Trigger & Precondition', color: '#38F3FF', detail: active ? `Test #${t.num} (${t.name}) toggled ON at ${r.timestamp}. Live state injected.` : `Test #${t.num} (${t.name}) is IDLE. Use Run Scenario to run live trace.` },
       { num: 2, title: 'Station Bus Modbus TCP Polling (TCP/502)', color: '#7DD3FC', detail: (t.cat === 'A_CONN' || t.cat === 'B_FC') && isF && active ? `Modbus fault active: ${t.expectedResult}` : 'GTW-01 polls ION7650, P3F30, RET615 & 7SJ85 via Hirschmann RSP35.' },
       { num: 3, title: `Byte Order & Framing Decode (${order})`, color: '#D8B4FE', detail: t.cat === 'C_FRAME' && isF && active ? `Framing/Word-order anomaly: ${t.expectedResult}` : `MBAP TID (${tidHex}) verified; 2×16-bit words decoded as valid IEEE-754 FLOAT32.` },
       { num: 4, title: 'Gateway GTW-01 → IEC-104 IOA Conversion', color: '#FDE047', detail: t.cat === 'D_CONV' && isF && active ? `Conversion fault: ${t.expectedResult}` : 'Scaled value mapped to CA:132 / IOA (2101–2107) and encoded as M_ME_NC_1 (COT=3).' },
-      { num: 5, title: isF ? 'RCC/SCADA Impact & Recovery' : 'RCC/SCADA Delivery Verification', color: isF && active ? '#FCA5A5' : '#4ADE80', detail: active ? `${t.expectedResult}${isF ? ' — Toggle OFF or enable Test #32 (Full Recovery) to restore.' : ' — Verified PASS on RCC/SCADA.'}` : 'Toggle ON to observe live end-to-end topology & packet verification.' },
+      { num: 5, title: isF ? 'RCC/SCADA Impact & Recovery' : 'RCC/SCADA Delivery Verification', color: isF && active ? '#FCA5A5' : '#4ADE80', detail: active ? `${t.expectedResult}${isF ? ' — Clear Scenario or run the Full Recovery variation to restore.' : ' — Expected result in the simulator.'}` : 'Use Run Scenario to observe live end-to-end topology & packet verification.' },
     ],
   };
 }
@@ -372,8 +400,8 @@ export const ModbusTcpLabPage: React.FC = () => {
   const [gatewayManuallyClosed, setGatewayManuallyClosed] = useState<boolean>(false);
 
   // Test Simulation & Fault Injection Lab (32 Interactive Tests with ON/OFF Switches)
-  const [testCatFilter, setTestCatFilter] = useState<TestCategory>('ALL');
-  const [selectedTestId, setSelectedTestId] = useState<string>('T02_ROUND_ROBIN');
+  const [coreTestIndex, setCoreTestIndex] = useState(0);
+  const [selectedTestId, setSelectedTestId] = useState<string>(CORE_TESTS[0].variants[0]);
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [testHistory, setTestHistory] = useState<TestHistoryItem[]>([]);
   const [testState, setTestState] = useState<Record<string, ModbusTestRuntime>>(() => {
@@ -671,10 +699,64 @@ export const ModbusTcpLabPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  const visibleTests = useMemo(
-    () => (testCatFilter === 'ALL' ? MODBUS_TESTS : MODBUS_TESTS.filter((t) => t.cat === testCatFilter)),
-    [testCatFilter]
-  );
+  const troubleshootingStages = [
+    {
+      name: 'Station bus and TCP/502',
+      blocked: !stationBusOk || iedOfflineNow,
+      evidence: switchDown ? 'RSP35 uplink is down.' : port502Closed ? 'TCP/502 is closed.'
+        : iedOfflineNow ? `${activeIed.id} is offline.` : 'The active IED and station path are available.',
+      check: 'Verify device IP, switch port and TCP/502 before checking the Modbus request.',
+    },
+    {
+      name: 'Modbus request and reply',
+      blocked: !modbusHealthy,
+      warning: highLatency,
+      evidence: respTimeout ? 'No response before the simulated timeout.' : unitIdMismatch ? 'Unit ID does not match the request.'
+        : tidMismatch ? 'Transaction ID does not match the pending request.'
+          : ex01 ? 'Exception 01 · Illegal Function.' : ex02 ? 'Exception 02 · Illegal Data Address.'
+            : ex03 ? 'Exception 03 · Illegal Data Value.' : highLatency ? 'The latency test is active.'
+              : `Polling FC${selectedFc}; sample register ${activeIed.sampleReg}.`,
+      check: 'Compare the transaction and unit IDs, function, register offset and count in Packet Analyzer and Register Browser.',
+    },
+    {
+      name: 'Value decoding and quality',
+      warning: wordSwapFault || badQds,
+      evidence: wordSwapFault ? `Word-swap scenario active · simulated value ${liveValue} ${activeIed.sampleUnit}.`
+        : badQds ? 'The simulated output carries invalid quality.' : `Configured decode order: ${effectiveOrder}.`,
+      check: 'Compare the two raw words, configured byte/word order, engineering scale and quality in Protocol Conversion.',
+    },
+    {
+      name: 'Gateway mapping',
+      blocked: missingIoa || gtwOverload,
+      evidence: missingIoa ? 'No IOA is mapped for the converted point.' : gtwOverload ? 'The simulated gateway is overloaded.'
+        : `${activeIed.iecType} · CA 132 · IOA ${activeIed.ioa}.`,
+      check: 'Verify the register-to-IOA mapping, type and Common Address. For overload, inspect the polling and conversion load.',
+    },
+    {
+      name: 'IEC-104 WAN and RCC',
+      blocked: !wanHealthy,
+      evidence: wanLinkLoss ? 'The WAN link is down.' : port2404Blocked ? 'TCP/2404 is blocked.' : 'The simulated RCC link is available.',
+      check: 'Check TCP/2404, then compare the gateway ASDU with the RCC point and quality in the logs.',
+    },
+  ];
+  const coreTest = CORE_TESTS[coreTestIndex];
+  const variations = coreTest.variants.map(id => MODBUS_TESTS.find(test => test.id === id)!);
+  const selectedTest = variations.find(test => test.id === selectedTestId) ?? variations[0];
+  const selectedRuntime = testState[selectedTest.id];
+  const selectedFaultActive = selectedTest.isFault && selectedRuntime.enabled;
+  const affectedStages: Record<string, string> = {
+    T05_P2_OFFLINE: 'Station bus and TCP/502',
+    T24_MISSING_IOA: 'Gateway mapping',
+    T26_GTW_OVERLOAD: 'Gateway mapping',
+  };
+  const affectedStage = affectedStages[selectedTest.id] ?? coreTest.stage;
+  const firstIssue = troubleshootingStages.find(stage => stage.blocked)
+    ?? troubleshootingStages.find(stage => stage.warning);
+  const specialCheck = troubleshootingStages.find(stage => stage.name === affectedStage)?.check
+    ?? ('Clear this fault variation, then repeat the selected test.');
+  const recoveryMessage = selectedFaultActive ? `Clear the selected fault. ${coreTest.recovery}`
+    : firstIssue ? `Resolve ${firstIssue.name} first, then recheck the simulated path.`
+    : `${selectedTest.isFault && selectedRuntime.actualResult === 'Cleared / Restored' ? 'Scenario cleared. ' : ''}${coreTest.recovery}`;
 
   const stagePillLabel =
     !stationBusOk || iedOfflineNow
@@ -743,7 +825,7 @@ export const ModbusTcpLabPage: React.FC = () => {
               ['REGISTER_MAPPING', 'Register Mapping'],
               ['PROTOCOL_CONVERSION', 'Protocol Conversion'],
               ['PACKET_ANALYZER', 'Packet Analyzer'],
-              ['LOGS_DIAGNOSTICS', 'Logs & Diagnostics'],
+              ['LOGS_DIAGNOSTICS', 'Troubleshooting & Logs'],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -805,6 +887,41 @@ export const ModbusTcpLabPage: React.FC = () => {
       {/* 3. TOPOLOGY & LIVE DATA TAB */}
       {activeTab === 'TOPOLOGY_LIVE' && (
         <div className="space-y-3.5">
+          <section aria-label="Core tests and fault variations" className="rounded-xl border border-[#1E5280] bg-[#051628] p-3 text-xs">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
+              <label className="min-w-0 space-y-1">
+                <span className="block font-bold text-[#9ED8F6]">Test / Fault</span>
+                <select value={coreTestIndex} onChange={event => {
+                  const index = Number(event.target.value);
+                  setCoreTestIndex(index);
+                  setSelectedTestId(CORE_TESTS[index].variants[0]);
+                }} className="w-full rounded-lg border border-[#1E5280] bg-[#082038] px-2 py-2 text-white">
+                  {CORE_TESTS.map((test, index) => <option key={test.name} value={index}>{test.name}</option>)}
+                </select>
+              </label>
+              <label className="min-w-0 space-y-1">
+                <span className="block font-bold text-[#9ED8F6]">Scenario variation</span>
+                <select value={selectedTest.id} onChange={event => setSelectedTestId(event.target.value)}
+                  className="w-full rounded-lg border border-[#1E5280] bg-[#082038] px-2 py-2 text-white">
+                  {variations.map(test => <option key={test.id} value={test.id}>{test.name}{test.isFault ? ' · Fault' : ''}</option>)}
+                </select>
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => handleToggleTest(selectedTest)}
+                  className="rounded-lg border border-[#38F3FF] bg-[#083B5E] px-3 py-2 font-bold text-white">
+                  {selectedRuntime.enabled ? 'Clear Scenario' : 'Run Scenario'}
+                </button>
+                <button type="button" onClick={() => handleResetAllTests(false)}
+                  className="rounded-lg border border-[#1E5280] bg-[#071C2F] px-3 py-2 font-bold text-white">Reset All Faults</button>
+              </div>
+            </div>
+            <p className="mt-2 text-[#BAE6FD]" role="status">
+              {selectedRuntime.enabled ? selectedTest.isFault ? 'Fault active' : 'Scenario active'
+                : selectedRuntime.actualResult === 'Cleared / Restored' ? 'Scenario cleared' : 'Scenario idle'}
+              {' · '}{MODBUS_TESTS.filter(test => test.isFault && isTestOn(test.id)).length} active faults
+            </p>
+          </section>
+
           {/* SYSTEM TOPOLOGY CARD */}
           <div
             className="rounded-2xl border p-3.5 relative overflow-x-auto"
@@ -1570,7 +1687,7 @@ export const ModbusTcpLabPage: React.FC = () => {
             </div>
           </div>
 
-          {/* 4. COMPREHENSIVE 32-TEST INTERACTIVE SIMULATION & FAULT INJECTION LAB (FROSTED CYAN GLASSMORPHISM) */}
+          {/* Scenario troubleshooting and history */}
           <div
             className="mb-glass-panel relative rounded-2xl p-4 sm:p-5 space-y-3.5 overflow-hidden"
             style={{
@@ -1600,14 +1717,14 @@ export const ModbusTcpLabPage: React.FC = () => {
                     <path d="M4 8l10 5.5L24 8M14 13.5v12" stroke="#38F3FF" strokeWidth="1.5" strokeOpacity="0.85" />
                   </svg>
                   <h2 className="text-[15px] sm:text-[17px] font-extrabold text-white">
-                    Modbus TCP &amp; IEC-104 Test Simulation Lab (32 Interactive Tests)
+                    Test Troubleshooting
                   </h2>
                   <span className="rounded-full border border-[#22C55E] bg-[#0A5C2E]/70 px-3 py-0.5 text-[10px] font-extrabold text-[#4ADE80] shadow-[0_0_12px_rgba(34,197,94,0.45)]">
                     SAFE SIMULATION ONLY
                   </span>
                 </div>
                 <p className="text-[12px] text-[#D4EEF9] mt-1">
-                  Toggle any test ON/OFF independently to verify TCP/502 polling, Exception codes (0x01–0x03), IEEE-754 ABCD/CDAB byte order, GTW-01 IOA mapping, and IEC-104 WAN delivery.
+                  Review the selected variation and verify recovery after clearing the fault.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -1654,146 +1771,24 @@ export const ModbusTcpLabPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Category Filter Tabs */}
-            <div className="flex flex-wrap items-center gap-2">
-              {(
-                [
-                  ['ALL', 'All 32 Tests'],
-                  ['A_CONN', 'A. Connection & Polling (6)'],
-                  ['B_FC', 'B. Function Codes & Exceptions (8)'],
-                  ['C_FRAME', 'C. Byte Order & Framing (6)'],
-                  ['D_CONV', 'D. Gateway & IOA Mapping (6)'],
-                  ['E_WAN', 'E. WAN & IEC-104 SCADA (6)'],
-                ] as const
-              ).map(([cat, lbl]) => {
-                const isAct = testCatFilter === cat;
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setTestCatFilter(cat)}
-                    style={
-                      isAct
-                        ? { background: 'linear-gradient(180deg, #3CF4FF 0%, #00D2EC 100%)', borderColor: '#A8FDFF', color: '#031B2E', boxShadow: '0 0 18px rgba(0,234,255,0.72)' }
-                        : { background: 'linear-gradient(180deg, rgba(32,82,110,0.52), rgba(18,54,78,0.62))', borderColor: 'rgba(125,215,242,0.48)', color: '#ECF8FF' }
-                    }
-                    className="rounded-[10px] border px-3.5 py-1.5 text-[12px] font-bold transition hover:border-[#3CF4FF]"
-                  >
-                    {lbl}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* 2-COLUMN DARK-BLUE SPLIT: LEFT = 32-TEST TABLE | RIGHT = STEP-BY-STEP INSPECTOR */}
-            <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-3.5 items-start">
-            {/* Glass Table */}
-            <div
-              style={{
-                border: '1.5px solid rgba(100, 224, 248, 0.62)',
-                background: 'linear-gradient(180deg, rgba(26, 76, 104, 0.52) 0%, rgba(14, 52, 76, 0.64) 100%)',
-              }}
-              className="mb-glass-scroll overflow-x-auto max-h-[385px] overflow-y-auto rounded-xl"
-            >
-              <table className="w-full text-left border-collapse font-sans text-[12.5px]">
-                <thead
-                  style={{
-                    background: 'linear-gradient(180deg, #0C2854 0%, #081D3F 100%)',
-                    borderBottom: '1px solid #1E4E8C',
-                  }}
-                  className="sticky top-0 z-10 text-[#F0FAFF] font-bold"
-                >
-                  <tr>
-                    <th className="py-2.5 px-3.5 w-12">#</th>
-                    <th className="py-2.5 px-3.5">Test Name</th>
-                    <th className="py-2.5 px-3.5 text-center w-28">Toggle</th>
-                    <th className="py-2.5 px-3.5 text-center w-28">Status</th>
-                    <th className="py-2.5 px-3.5">Expected Result</th>
-                    <th className="py-2.5 px-3.5">Actual Result</th>
-                    <th className="py-2.5 px-3.5 text-right w-28">Timestamp</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleTests.map((t) => {
-                    const r = testState[t.id];
-                    const isSel = selectedTestId === t.id;
-                    return (
-                      <tr
-                        key={t.id}
-                        onClick={() => setSelectedTestId(t.id)}
-                        style={
-                          isSel
-                            ? {
-                                background: 'linear-gradient(90deg, rgba(0,216,238,0.42), rgba(0,186,216,0.28), rgba(0,210,236,0.36))',
-                                boxShadow: 'inset 0 0 0 1.5px rgba(82,242,255,0.88)',
-                              }
-                            : r.enabled
-                            ? { background: t.isFault ? 'rgba(239,68,68,0.16)' : 'rgba(16,185,129,0.14)', borderTop: '1px solid rgba(130,210,238,0.18)' }
-                            : { borderTop: '1px solid rgba(130,210,238,0.18)' }
-                        }
-                        className="cursor-pointer transition-colors hover:bg-[#196488]/45"
-                      >
-                        <td className="py-2.5 px-3.5 text-[#C4E2F2] font-medium">{t.num}</td>
-                        <td className="py-2.5 px-3.5 font-bold text-white whitespace-nowrap">{t.name}</td>
-                        <td className="py-2.5 px-3.5 text-center">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedTestId(t.id);
-                              handleToggleTest(t);
-                            }}
-                            style={{
-                              background: r.enabled
-                                ? t.isFault
-                                  ? 'linear-gradient(90deg, #dc2626, #ef4444)'
-                                  : 'linear-gradient(90deg, #16a34a, #22c55e)'
-                                : 'rgba(14, 42, 62, 0.82)',
-                              borderColor: r.enabled ? (t.isFault ? '#fca5a5' : '#86efac') : 'rgba(130, 215, 242, 0.58)',
-                            }}
-                            className="inline-flex items-center justify-between w-[54px] h-[24px] rounded-full border-[1.5px] px-1 transition-all"
-                          >
-                            {r.enabled ? (
-                              <>
-                                <span className="text-[9px] font-extrabold text-white pl-1.5">ON</span>
-                                <span className="w-4 h-4 rounded-full bg-white shadow" />
-                              </>
-                            ) : (
-                              <>
-                                <span className="w-4 h-4 rounded-full bg-white shadow" />
-                                <span className="text-[9px] font-bold text-[#CBE8F6] pr-1">OFF</span>
-                              </>
-                            )}
-                          </button>
-                        </td>
-                        <td className="py-2.5 px-3.5 text-center">
-                          <span
-                            style={
-                              r.status === 'PASSED'
-                                ? { background: 'rgba(16,185,129,0.28)', borderColor: '#4ADE80', color: '#DCFCE7' }
-                                : r.status === 'FAILED'
-                                ? { background: 'rgba(239,68,68,0.28)', borderColor: '#F87171', color: '#FEE2E2' }
-                                : { background: 'rgba(18,86,118,0.65)', borderColor: 'rgba(90,222,248,0.68)', color: '#DCF8FF' }
-                            }
-                            className="inline-block rounded-full border-[1.5px] px-3 py-0.5 text-[10px] font-extrabold"
-                          >
-                            {r.status}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3.5 text-[#E0F3FC]">{t.expectedResult}</td>
-                        <td className="py-2.5 px-3.5 text-[#D2ECF9]">{r.actualResult}</td>
-                        <td className="py-2.5 px-3.5 text-right text-[#B8D8EA] whitespace-nowrap">{r.timestamp}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-
+            <dl className="grid grid-cols-1 gap-2 text-xs md:grid-cols-2">
+              {[
+                ['First Failed Stage', firstIssue?.name ?? (selectedFaultActive ? affectedStage : 'No blocked stage detected')],
+                ['Root Cause', firstIssue?.evidence ?? (selectedFaultActive ? selectedTest.expectedResult : 'No active fault detected on the simulated path.')],
+                ['Corrective Action', firstIssue?.check ?? (selectedFaultActive ? specialCheck : 'Run a fault variation and inspect where the simulated path first changes.')],
+                ['Recovery Verification', recoveryMessage],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0 space-y-1 rounded-lg border border-[#1E4E8C] bg-[#061630]/90 p-3">
+                  <dt className="font-bold text-[#9BD3EC]">{label}</dt>
+                  <dd className="break-words text-[#E0F7FF]">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <details className="rounded-xl border border-[#56EBFF]/30 bg-[#061630]/90 p-2.5">
+              <summary className="cursor-pointer text-xs font-bold text-white">Scenario trace (simulated)</summary>
               {(() => {
-                const selTest = MODBUS_TESTS.find((x) => x.id === selectedTestId) || MODBUS_TESTS[0];
-                const selRt = testState[selTest.id];
+                const selTest = selectedTest;
+                const selRt = selectedRuntime;
                 const info = buildModbusTestSteps(selTest, selRt, tidHex, effectiveOrder);
                 return (
                   <div
@@ -1844,7 +1839,7 @@ export const ModbusTcpLabPage: React.FC = () => {
                   </div>
                 );
               })()}
-            </div>
+            </details>
 
             {showHistory && (
               <div className="rounded-xl border border-[#38F3FF]/45 bg-[#04182B]/90 p-3 space-y-1.5">
@@ -1890,12 +1885,12 @@ export const ModbusTcpLabPage: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-[#133252]">
                     {bayRegisters.map((reg) => (
-                      <tr key={reg.address} className="hover:bg-[#0B2A46]/60">
-                        <td className="py-1.5 px-2.5 text-[#38F3FF] font-bold">{reg.address}</td>
+                      <tr key={reg.registerAddress} className="hover:bg-[#0B2A46]/60">
+                        <td className="py-1.5 px-2.5 text-[#38F3FF] font-bold">{reg.registerAddress}</td>
                         <td className="py-1.5 px-2.5 text-[#FDE047]">{reg.functionCode}</td>
-                        <td className="py-1.5 px-2.5 text-white font-sans font-semibold">{reg.name}</td>
+                        <td className="py-1.5 px-2.5 text-white font-sans font-semibold">{reg.parameterName}</td>
                         <td className="py-1.5 px-2.5 text-[#D8B4FE]">{reg.dataType}</td>
-                        <td className="py-1.5 px-2.5 text-[#4ADE80] font-bold">{String(reg.value)}</td>
+                        <td className="py-1.5 px-2.5 text-[#4ADE80] font-bold">{reg.scaledEngineeringValue}</td>
                         <td className="py-1.5 px-2.5 text-[#9BC0DF]">{reg.unit}</td>
                       </tr>
                     ))}
@@ -1995,6 +1990,12 @@ export const ModbusTcpLabPage: React.FC = () => {
 
           {activeTab === 'LOGS_DIAGNOSTICS' && (
             <div className="space-y-2">
+              <ProtocolTroubleshootingPanel
+                title="Modbus TCP Troubleshooting"
+                target={`Simulated poll · ${activeIed.id} ${activeIed.shortName} · ${activeIed.ip}:502 · Unit ID ${activeIed.unitId} · TID ${tidHex}`}
+                activeFaults={MODBUS_TESTS.filter(test => test.isFault && isTestOn(test.id)).map(test => test.name)}
+                stages={troubleshootingStages}
+              />
               <h3 className="text-sm font-extrabold text-white flex items-center gap-2"><Terminal className="w-4 h-4 text-[#38F3FF]" /> Live Modbus TCP / Gateway / IEC-104 Logs</h3>
               <div className="max-h-[380px] overflow-y-auto space-y-1 font-mono text-[11px]">
                 {logs.map((l) => (

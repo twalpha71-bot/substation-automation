@@ -380,7 +380,7 @@ export function Test11Iec104Visualization({
                 <g transform="translate(726, 8)">
                   <rect x="0" y="0" width="186" height="168" rx="7" fill="#041423" stroke={linkHealthy ? '#00DFFF' : '#FF3344'} />
                   <text x="93" y="17" textAnchor="middle" fill="#F1F7FF" fontSize="9.5" fontWeight="800">RCC / Control Centre</text>
-                  <image href="/assets/devices/scada-workstation.png" x="14" y="24" width="158" height="72" preserveAspectRatio="xMidYMid slice" />
+                  <image href="/assets/devices/scada-workstation.png" x="14" y="24" width="158" height="72" preserveAspectRatio="xMidYMid meet" />
                   <text x="16" y="112" fill="#00FF70" fontSize="8">✔ IEC 60870-5-104 Client</text>
                   <text x="16" y="126" fill={q1Closed ? '#00FF70' : '#FF3344'} fontSize="8.5" fontWeight="800">
                     Q1 Status: {q1Closed ? 'CLOSED (1)' : 'OPEN (0)'}

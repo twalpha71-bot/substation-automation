@@ -240,9 +240,9 @@ export function Test15FatSatVisualization({
                 <g transform="translate(228, 8)">
                   <rect x="0" y="0" width="430" height="158" rx="7" fill="#041423" stroke="#00DFFF" />
                   <text x="215" y="16" textAnchor="middle" fill="#00DFFF" fontSize="9.5" fontWeight="800">Substation Automation System (SAS)</text>
-                  <image href="/assets/devices/engineering-workstation.jpg" x="20" y="24" width="175" height="62" preserveAspectRatio="xMidYMid slice" />
+                  <image href="/assets/devices/engineering-workstation.png" x="20" y="24" width="175" height="62" preserveAspectRatio="xMidYMid meet" />
                   <text x="107" y="98" textAnchor="middle" fill="#F1F7FF" fontSize="8">SAS Engineering Workstation</text>
-                  <image href="/assets/devices/scada-workstation.png" x="235" y="24" width="175" height="62" preserveAspectRatio="xMidYMid slice" />
+                  <image href="/assets/devices/scada-workstation.png" x="235" y="24" width="175" height="62" preserveAspectRatio="xMidYMid meet" />
                   <text x="322" y="98" textAnchor="middle" fill="#F1F7FF" fontSize="8">SCADA / HMI Operator Station</text>
 
                   <image href="/assets/devices/industrial-ethernet-switch.png" x="45" y="106" width="125" height="34" preserveAspectRatio="xMidYMid meet" />

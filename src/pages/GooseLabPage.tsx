@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
-import { GooseControlBlock } from '../types/substation';
+import type { BayEquipment, GooseControlBlock, IedDataset, NetworkLink } from '../types/substation';
 import { getIedImageByModel } from '../data/iedImageRegistry';
 import {
   Activity,
@@ -22,11 +22,16 @@ import {
 } from 'lucide-react';
 
 type GooseLabTab =
+  | 'FAT_SAT'
+  | 'PRP_DIAGNOSTICS'
+  | 'TRIP_CIRCUIT'
+  | 'SCL_EDITOR'
   | 'ENGINEERING'
   | 'NETWORK_TOPOLOGY'
   | 'LIVE_SIMULATION'
   | 'PACKET_ANALYZER'
   | 'DIAGNOSTICS'
+  | 'TROUBLESHOOTING'
   | 'EVENT_TIMELINE';
 
 interface SubscriberNodeConfig {
@@ -85,14 +90,697 @@ function nowTimeMs(): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
 }
 
+type Lan = 'A' | 'B';
+type PayloadValue = boolean | string;
+type ExtRef = GooseControlBlock['extRefs'][number];
+
+function compactSwitchLayout(originalX: number) {
+  const scale = 0.8;
+  const width = 168 * scale;
+  const height = 92 * scale;
+  const x = originalX + (168 - width) / 2;
+  const y = 56 + (92 - height) / 2;
+  return {
+    image: { x, y, width, height },
+    ports: [54, 69, 91, 109, 141].map(offset => ({ x: x + offset * scale, y: y + 72 * scale })),
+  };
+}
+
+const switchA = compactSwitchLayout(196);
+const switchB = compactSwitchLayout(420);
+
+function datasetMember(dataset: IedDataset | undefined, publisherName: string, ref: ExtRef) {
+  const [device, signal, extra] = ref.srcRef.split('/');
+  if (!signal || extra !== undefined || !ref.intAddr.trim()) return undefined;
+  return dataset?.fcdas.find(member => {
+    const base = `${member.lnClass}${member.lnInst}.${member.doName}`;
+    return device === publisherName + member.ldInst && (member.daName
+      ? signal === `${base}.${member.daName}`
+      : signal === base || (member.fc === 'ST' && (
+        /^(Pos|Loc|EnaCls)$/.test(member.doName) && signal === `${base}.stVal` ||
+        /^(Str|Op|OpEx|Tr)$/.test(member.doName) && signal === `${base}.general`
+      )));
+  });
+}
+
+function memberKey(member: IedDataset['fcdas'][number]) {
+  return `${member.lnClass}${member.lnInst}.${member.doName}`;
+}
+
+function isTripBinding({ key, ref }: { key: string; ref: ExtRef }) {
+  return /^(PTRC\d+\.Tr|RBRF\d+\.OpEx|PDIF\d+\.Op)$/.test(key)
+    && /PTRC\d+\./.test(ref.intAddr);
+}
+
+function nextCounter(value: number) {
+  return value >= 0xffffffff ? 1 : value + 1;
+}
+
+interface LabFrame {
+  appId: string;
+  vlan: number;
+  confRev: number;
+  dataSet: string;
+  ndsCom: boolean;
+  simulation: boolean;
+  entries: number;
+  stNum: number;
+  sqNum: number;
+  t: string;
+  tal: number;
+  serial: number;
+  prpSequence: number;
+  payload: Record<string, PayloadValue>;
+  context: string;
+  decisions: Record<string, string>;
+  txLans: Lan[];
+  ingress: Lan[];
+  arrivals: Record<string, Lan[]>;
+}
+
+interface LabReceiver {
+  rxCount: number;
+  acceptedCount: number;
+  duplicates: number;
+  lanCopies?: Record<Lan, number>;
+  lanDuplicates?: Record<Lan, number>;
+  first?: Lan;
+  duplicate?: Lan;
+  status: string;
+  deadline?: number;
+  lastAccepted?: LabFrame;
+  circuitDue?: number;
+  tripStage?: number;
+  circuitFailure?: string;
+  breakerOpen?: boolean;
+  mappedTrip?: boolean;
+  alarm?: boolean;
+  tripFrame?: LabFrame;
+  seen?: { source: string; sequence: number; serial: number };
+}
+
+interface LabRuntime {
+  clockOrigin: number;
+  soe: LabSoeEntry[];
+  now: number;
+  due: number;
+  interval: number;
+  stNum: number;
+  prevStNum: number;
+  sqNum: number;
+  stateChangedAt: string;
+  visualEvent?: LabFrame;
+  sentCurrentState: boolean;
+  payload: Record<string, PayloadValue>;
+  serial: number;
+  frame?: LabFrame;
+  capture: LabFrame[];
+  lanTx: Record<Lan, number>;
+  lanIngress: Record<Lan, number>;
+  receivers: Record<string, LabReceiver>;
+  transportKey?: string;
+}
+
+interface TroubleshootingStep {
+  title: string;
+  status: 'PASS' | 'FAIL' | 'WAIT';
+  evidence: string;
+  action: string;
+}
+
+function receptionChecks(
+  block: GooseControlBlock,
+  frame: LabFrame | undefined,
+  subscriber: { iedId: string; subscribed: boolean; accepted: boolean; rx?: LabReceiver },
+  publisherStop?: string,
+): TroubleshootingStep[] {
+  const steps: TroubleshootingStep[] = [];
+  const add = (title: string, status: TroubleshootingStep['status'], evidence: string, action: string) => {
+    if (steps.some(step => step.status !== 'PASS')) {
+      steps.push({ title, status: 'WAIT', evidence: 'Resolve the earlier step first.', action: '' });
+      return;
+    }
+    steps.push({ title, status, evidence, action });
+  };
+  const copies = frame?.arrivals[subscriber.iedId] ?? [];
+  const decision = frame?.decisions[subscriber.iedId];
+  const rejectionAdvice: Record<string, string> = {
+    'APPID Mismatch': 'Compare the transmitted APPID with the subscriber’s configured APPID.',
+    'confRev Mismatch': 'Compare confRev and confirm the publisher and subscriber use the same engineering revision.',
+    'DataSet Mismatch': 'Compare the DataSet reference and entry count with the configured publisher dataset.',
+    'Needs Commissioning': 'Review the GoCB commissioning state and ndsCom indication.',
+    'Simulated Frame Blocked': 'Check the frame simulation indicator and the subscriber’s configured acceptance policy.',
+  };
+  const frameRejected = !!decision && decision in rejectionAdvice;
+  add('Check publisher transmission', publisherStop ? 'FAIL' : frame ? 'PASS' : 'WAIT',
+    publisherStop ?? (frame ? `Latest publication: stNum ${frame.stNum}, sqNum ${frame.sqNum}.` : 'Waiting for a frame under the current scenario.'),
+    'Confirm GoEna is ON and publishing is active. Look for sqNum advancement in Packet Analyzer. If paused, resume in Network Topology.');
+  add('Check PRP links and switch ingress', frame?.ingress.length ? 'PASS' : 'FAIL',
+    frame?.ingress.length ? `Switch ingress received VLAN ${frame.vlan} on ${frame.ingress.map(lan => `LAN ${lan}`).join(' and ')}.`
+      : frame?.txLans.length ? `Switch rejected VLAN ${frame.vlan}; configured GOOSE VLAN is ${block.vlanId}.`
+        : 'No active publisher LAN path carried the frame.',
+    'Check the publisher ports and LAN A/B link states. If links are up, compare the VLAN tag against switch ingress membership.');
+  add('Check arrival at the subscriber', copies.length ? 'PASS' : 'FAIL',
+    copies.length ? `LAN ${copies[0]} arrived first.${copies[1] ? ` LAN ${copies[1]} duplicate discarded.` : ' One PRP copy received.'}`
+      : 'The frame reached a switch but did not arrive at this subscriber.',
+    'In Diagnostics, trace the switch port to this IED. Check link state and VLAN membership end to end.');
+  add('Check the GOOSE subscription and frame filter', !subscriber.subscribed || frameRejected ? 'FAIL'
+    : !decision || decision === 'Ignored' ? 'WAIT' : 'PASS',
+    !subscriber.subscribed ? 'Subscription is disabled for this IED.'
+      : `${frameRejected ? decision + '. ' : ''}APPID ${frame?.appId} (expected ${block.appId}); confRev ${frame?.confRev} (expected ${block.confRev}); DataSet ${frame?.dataSet} (${frame?.entries ?? 0} entries).`,
+    !subscriber.subscribed ? 'Enable this subscriber in Network Topology if it is an intended receiver.'
+      : frameRejected ? rejectionAdvice[decision!] : 'Use Packet Analyzer to compare the received fields with the GoCB configuration.');
+  add('Check the ExtRef input mapping', decision === 'Accepted' ? 'PASS' : 'FAIL',
+    decision === 'Accepted' ? 'The subscriber accepted the frame and matched a bound DataSet member.'
+      : 'No valid ExtRef binding matched a member of this GoCB DataSet.',
+    'In Diagnostics, verify that the ExtRef is bound and its source belongs to this GoCB DataSet.');
+  add('Confirm recovery and supervision', subscriber.accepted ? 'PASS' : 'FAIL',
+    subscriber.accepted ? `Subscriber data is valid. Accepted frames refresh TAL (${frame?.tal ?? block.timeAllowedToLiveMs} ms).`
+      : 'The subscriber has no currently valid GOOSE data.',
+    'After correcting the issue, confirm new frames are accepted and the data remains valid across retransmissions.');
+  return steps;
+}
+
+function freshRuntime(block: GooseControlBlock, dataset: IedDataset | undefined, bay?: BayEquipment): LabRuntime {
+  const values: Record<string, PayloadValue> = {
+    'XCBR1.Pos': bay?.breakerState ?? 'UNKNOWN',
+    'XSWI1.Pos': bay?.busDisconnectorState ?? 'UNKNOWN',
+    'XSWI2.Pos': bay?.lineDisconnectorState ?? 'UNKNOWN',
+    'CSWI1.Loc': bay?.localRemote ?? 'UNKNOWN',
+    'CILO1.EnaCls': !!bay?.interlockPermissive,
+    'PTRC1.Tr': !!bay?.protectionTripActive,
+    'PTOC1.Str': false,
+    'PTOC1.Op': false,
+    'RBRF1.OpEx': false,
+  };
+  const stNum = Math.max(1, block.stNum);
+  return {
+    clockOrigin: Date.now(), soe: [], now: 0, due: 0, interval: block.minTimeMs, serial: 0,
+    stNum, prevStNum: stNum, sqNum: 0, stateChangedAt: new Date().toISOString(), sentCurrentState: false,
+    payload: Object.fromEntries((dataset?.fcdas ?? []).map(member => {
+      const key = memberKey(member);
+      return [key, values[key] ?? 'UNKNOWN'];
+    })),
+    capture: [], lanTx: { A: 0, B: 0 }, lanIngress: { A: 0, B: 0 }, receivers: {},
+  };
+}
+
+function makeFrame(runtime: LabRuntime, block: GooseControlBlock, fault: GooseControlBlock['mismatchFault'],
+  dataset: IedDataset | undefined, publisher: Partial<Record<Lan, NetworkLink>>, nodes: SubscriberNodeConfig[],
+  linkFor: (id: string, lan: Lan) => NetworkLink | undefined, context: string): LabFrame {
+  const wrongDataset = fault === 'DATASET_MISSING';
+  const vlan = fault === 'VLAN_MISMATCH' ? 999 : block.vlanId;
+  const order: Lan[] = runtime.serial % 2 === 0 ? ['A', 'B'] : ['B', 'A'];
+  const txLans = order.filter(lan => publisher[lan] && publisher[lan]?.status !== 'DOWN');
+  const ingress = txLans.filter(lan => publisher[lan]?.vlanList.includes(vlan));
+  const arrivals = Object.fromEntries(nodes.map(node => [node.iedId, ingress.filter(lan => {
+    const link = linkFor(node.iedId, lan);
+    return link && link.status !== 'DOWN' && link.vlanList.includes(vlan) && link.targetId === publisher[lan]?.targetId;
+  })]));
+  return {
+    appId: fault === 'APPID_MISMATCH' ? (block.appId.toLowerCase() === '0x3ffe' ? '0x3FFD' : '0x3FFE') : block.appId,
+    vlan, confRev: fault === 'CONFREV_MISMATCH' ? nextCounter(block.confRev) : block.confRev,
+    dataSet: wrongDataset ? block.datSet.replace(/[^$]+$/, 'dsMissing') : block.datSet,
+    ndsCom: block.ndsCom, simulation: block.testMode, entries: wrongDataset ? 0 : dataset?.fcdas.length ?? 0,
+    stNum: runtime.stNum, sqNum: runtime.sqNum, t: runtime.stateChangedAt,
+    tal: block.timeAllowedToLiveMs, serial: runtime.serial, prpSequence: runtime.serial & 0xffff,
+    payload: wrongDataset ? {} : runtime.payload, txLans, ingress, arrivals, context, decisions: {},
+  };
+}
+
+const panelClass = 'space-y-3 rounded-xl border border-[#235B76] bg-[#071A2B] p-4';
+const fieldClass = 'w-full min-w-0 rounded-md border border-[#326985] bg-[#0B253A] px-2 py-1.5 text-sm text-white';
+const actionClass = 'rounded-md border border-[#326985] bg-[#0B253A] px-3 py-1.5 font-bold text-white hover:border-[#38BDF8] disabled:opacity-50';
+
+function saveLabFile(name: string, text: string, mime: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const sampleGooseScl = `<?xml version="1.0" encoding="UTF-8"?>
+<SCL xmlns="http://www.iec.ch/61850/2003/SCL">
+  <IED name="Publisher"><AccessPoint name="AP1"><Server><LDevice inst="PROT">
+    <LN0 lnClass="LLN0" inst="" lnType="ExampleLLN0">
+      <DataSet name="Trip"><FCDA ldInst="PROT" lnClass="PTRC" lnInst="1" doName="Tr" daName="general" fc="ST"/></DataSet>
+      <GSEControl name="TripGoose" datSet="Trip" confRev="1"/>
+    </LN0>
+  </LDevice></Server></AccessPoint></IED>
+  <IED name="Subscriber"><AccessPoint name="AP1"><Server><LDevice inst="PROT">
+    <LN0 lnClass="LLN0" inst="" lnType="ExampleLLN0"><Inputs>
+      <ExtRef intAddr="TripInput" serviceType="GOOSE" iedName="Publisher" ldInst="PROT" lnClass="PTRC"
+        lnInst="1" doName="Tr" daName="general" srcLDInst="PROT" srcLNClass="LLN0" srcCBName="TripGoose"/>
+    </Inputs></LN0>
+  </LDevice></Server></AccessPoint></IED>
+</SCL>`;
+
+const signalAttrs = ['ldInst', 'prefix', 'lnClass', 'lnInst', 'doName', 'daName'] as const;
+const gseSourceAttrs = ['srcLDInst', 'srcPrefix', 'srcLNClass', 'srcLNInst', 'srcCBName'] as const;
+const xmlAttr = (node: Element | null | undefined, name: string) => node?.getAttribute(name) ?? '';
+const xmlElements = (node: Document | Element, name: string) => Array.from(node.getElementsByTagNameNS('*', name));
+const xmlParent = (node: Element, name: string) => {
+  let parent = node.parentElement;
+  while (parent && parent.localName !== name) parent = parent.parentElement;
+  return parent;
+};
+const sclSignal = (node: Element) => `${xmlAttr(node, 'ldInst')}/${xmlAttr(node, 'prefix')}${xmlAttr(node, 'lnClass')}${xmlAttr(node, 'lnInst')}.${xmlAttr(node, 'doName')}${xmlAttr(node, 'daName') ? '.' + xmlAttr(node, 'daName') : ''}`;
+
+function inspectGooseScl(xml: string) {
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) return { error: 'DTD and entity declarations are unsupported.' };
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  if (doc.documentElement?.localName !== 'SCL' || xmlElements(doc, 'parsererror').length) {
+    return { error: 'Enter well-formed SCL XML with an SCL root element.' };
+  }
+  const controls = xmlElements(doc, 'GSEControl').filter(control => xmlAttr(control, 'type') !== 'GSSE').map(control => {
+    const ln = control.parentElement;
+    const ld = xmlParent(control, 'LDevice');
+    const ied = xmlAttr(xmlParent(control, 'IED'), 'name');
+    const dataSet = Array.from(ln?.children ?? []).find(child =>
+      child.localName === 'DataSet' && xmlAttr(child, 'name') === xmlAttr(control, 'datSet'));
+    const source = [xmlAttr(ld, 'inst'), xmlAttr(ln, 'prefix'), xmlAttr(ln, 'lnClass') || (ln?.localName === 'LN0' ? 'LLN0' : ''), xmlAttr(ln, 'inst'), xmlAttr(control, 'name')];
+    return { ied, source, label: `${ied}/${source[0]}/${source[4]}`, dataset: xmlAttr(control, 'datSet'),
+      rev: xmlAttr(control, 'confRev'), members: dataSet ? xmlElements(dataSet, 'FCDA') : [] };
+  });
+  const refs = xmlElements(doc, 'ExtRef').filter(ref =>
+    !xmlAttr(ref, 'serviceType') || xmlAttr(ref, 'serviceType') === 'GOOSE');
+  const issues = controls.filter(control => !control.members.length).map(control =>
+    `${control.label}: DataSet "${control.dataset}" is missing or empty.`);
+  const mappings = refs.map(ref => {
+    const ied = xmlAttr(xmlParent(ref, 'IED'), 'name');
+    const candidates = controls.filter(control => control.ied && control.ied === xmlAttr(ref, 'iedName') &&
+      gseSourceAttrs.every((key, index) => !xmlAttr(ref, key) || xmlAttr(ref, key) === control.source[index]) &&
+      control.members.some(member => signalAttrs.every(key =>
+        key === 'daName' && !xmlAttr(member, key) || xmlAttr(member, key) === xmlAttr(ref, key))));
+    const status = !xmlAttr(ref, 'iedName') ? 'Unbound'
+      : !xmlAttr(ref, 'doName') || !xmlAttr(ref, 'ldInst') || !xmlAttr(ref, 'lnClass') ? 'Incomplete source'
+        : candidates.length > 1 ? 'Ambiguous source' : candidates.length === 1 ? 'Validated' : 'Source not found in document';
+    return { ref, ied, status, label: `${ied}/${xmlAttr(xmlParent(ref, 'LDevice'), 'inst')}/${xmlAttr(ref, 'intAddr') || 'ExtRef'}` };
+  });
+  return { doc, controls, mappings, issues };
+}
+
+function SclEngineeringEditor() {
+  const [xml, setXml] = useState(sampleGooseScl);
+  const [fileName, setFileName] = useState('goose-training.scd');
+  const [source, setSource] = useState('0');
+  const [member, setMember] = useState('0');
+  const [target, setTarget] = useState('0');
+  const [notice, setNotice] = useState('');
+  const loading = useRef(0);
+  const model = useMemo(() => inspectGooseScl(xml), [xml]);
+  const publisher = model.controls?.[Number(source)];
+  const item = publisher?.members[Number(member)];
+  const subscriber = model.mappings?.[Number(target)];
+  const canBind = !!(item && subscriber && publisher?.ied && publisher.ied !== subscriber.ied);
+  const editXml = (value: string) => {
+    loading.current += 1;
+    setXml(value);
+    setNotice('');
+  };
+  return (
+    <section className={panelClass}>
+      <h3 className="text-base font-bold text-white">SCL Engineering Editor</h3>
+      <p className="text-[#B6D4EA]">Inspect ICD, CID or SCD XML and bind a GOOSE DataSet member to an existing ExtRef. Checks cover the loaded document. Export the edited file as a lab draft.</p>
+      <label className="block text-white">Import ICD, CID or SCD
+        <input className={fieldClass} type="file" accept=".icd,.cid,.scd,.xml" onChange={async event => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          if (!file) return;
+          const request = ++loading.current;
+          if (file.size > 5_000_000) {
+            setNotice('Choose an XML file up to 5 MB.');
+            return;
+          }
+          try {
+            const content = await file.text();
+            if (request !== loading.current) return;
+            editXml(content);
+            setFileName(file.name);
+            setSource('0'); setMember('0'); setTarget('0');
+          } catch {
+            if (request === loading.current) setNotice('The selected file could not be read.');
+          }
+        }} />
+      </label>
+      <label className="block text-white">SCL XML
+        <textarea className={`${fieldClass} mt-1 font-mono`} rows={10} spellCheck={false} value={xml}
+          onChange={event => editXml(event.target.value)} />
+      </label>
+      {model.error && <p role="alert" className="text-[#FECACA]">{model.error}</p>}
+      {model.doc && <>
+        <div className="grid gap-2 md:grid-cols-3">
+          <label>Publisher GoCB<select className={fieldClass} value={source} onChange={event => { setSource(event.target.value); setMember('0'); }}>
+            {model.controls.map((control, index) => <option key={index} value={index}>{control.label} · {control.dataset} · rev {control.rev || '—'}</option>)}
+          </select></label>
+          <label>DataSet member<select className={fieldClass} value={member} onChange={event => setMember(event.target.value)}>
+            {publisher?.members.map((fcda, index) => <option key={index} value={index}>{sclSignal(fcda)}</option>)}
+          </select></label>
+          <label>Subscriber ExtRef<select className={fieldClass} value={target} onChange={event => setTarget(event.target.value)}>
+            {model.mappings.map((mapping, index) => <option key={index} value={index}>{mapping.label} · {mapping.status}</option>)}
+          </select></label>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={actionClass} disabled={!canBind} onClick={() => {
+            if (!item || !subscriber || !publisher || !canBind) return;
+            for (const key of signalAttrs) subscriber.ref.setAttribute(key, xmlAttr(item, key));
+            gseSourceAttrs.forEach((key, index) => subscriber.ref.setAttribute(key, publisher.source[index]));
+            subscriber.ref.setAttribute('serviceType', 'GOOSE');
+            subscriber.ref.setAttribute('iedName', publisher.ied);
+            editXml(new XMLSerializer().serializeToString(model.doc));
+            setNotice('ExtRef binding written to the draft. Review the validation result below.');
+          }}>Bind ExtRef</button>
+          <button type="button" className={actionClass} onClick={() => saveLabFile(fileName, xml, 'application/xml')}>Export SCL draft</button>
+        </div>
+        <ul className="space-y-1 break-words">
+          {model.issues.map((issue, index) => <li key={index} className="text-[#FECACA]">{issue}</li>)}
+          {model.mappings.map((mapping, index) => <li key={index} className={mapping.status === 'Validated' ? 'text-[#86EFAC]' : 'text-[#FCD394]'}>
+            {mapping.label} → {xmlAttr(mapping.ref, 'iedName') || '—'} · {sclSignal(mapping.ref)} · {mapping.status}
+          </li>)}
+        </ul>
+        {!model.controls.length && <p className="text-[#FCD394]">No GOOSE control blocks in this document.</p>}
+        {!model.mappings.length && <p className="text-[#FCD394]">No eligible subscriber ExtRef in this document.</p>}
+      </>}
+      <button type="button" className={actionClass} onClick={() => {
+        editXml(sampleGooseScl); setFileName('goose-training.scd'); setSource('0'); setMember('0'); setTarget('0');
+      }}>Load training example</button>
+      {notice && <p role="status" className="text-[#B6D4EA]">{notice}</p>}
+    </section>
+  );
+}
+
+function PacketComparison({ history, block, sourceMac, goId, subscribers }: {
+  history: LabFrame[];
+  block: GooseControlBlock;
+  sourceMac?: string;
+  goId: string;
+  subscribers: SubscriberNodeConfig[];
+}) {
+  const [selection, setSelection] = useState<LabFrame>();
+  const [baseline, setBaseline] = useState<LabFrame>();
+  const selected = selection ?? history[0];
+  if (!selected) return null;
+  const fields = (packet: LabFrame): [string, string | number][] => [
+    ['Source MAC', sourceMac ?? 'Unknown'],
+    ['Multicast destination', block.multicastMac],
+    ['EtherType', '0x88B8'],
+    ['VLAN ID / PCP', `${packet.vlan} / ${block.vlanPriority}`],
+    ['APPID', packet.appId],
+    ['GoCB reference', block.gocbRef],
+    ['GoID', goId],
+    ['DataSet', packet.dataSet],
+    ['confRev', packet.confRev],
+    ['stNum', packet.stNum],
+    ['sqNum', packet.sqNum],
+    ['State timestamp', packet.t],
+    ['TAL (ms)', packet.tal],
+    ['ndsCom', String(packet.ndsCom)],
+    ['Simulation', String(packet.simulation)],
+    ['DataSet count', packet.entries],
+    ['DataSet values', JSON.stringify(packet.payload)],
+    ['PRP sequence', packet.prpSequence],
+    ['Publisher / ingress LAN', `${packet.txLans.join(', ') || 'None'} / ${packet.ingress.join(', ') || 'None'}`],
+  ];
+  const baselineFields = baseline && new Map(fields(baseline));
+  return (
+    <section className={panelClass}>
+      <h3 className="text-base font-bold text-white">Wireshark-style Frame Decode &amp; Compare</h3>
+      <p className="text-[#B6D4EA]">Simulated frame history. Pin a reference, then select another frame or follow the latest packet.</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="min-w-0 max-w-full">Inspection frame
+          <select className={fieldClass} value={selection?.serial ?? ''} onChange={event =>
+            setSelection(history.find(packet => packet.serial === Number(event.target.value)))}>
+            <option value="">Follow latest</option>
+            {selection && !history.some(packet => packet.serial === selection.serial) &&
+              <option value={selection.serial}>Pinned inspection #{selection.serial}</option>}
+            {history.map(packet => <option key={packet.serial} value={packet.serial}>#{packet.serial} · stNum {packet.stNum} / sqNum {packet.sqNum}</option>)}
+          </select>
+        </label>
+        <button type="button" className={actionClass} onClick={() => setBaseline(selected)}>Pin comparison frame</button>
+        {baseline && <button type="button" className={actionClass} onClick={() => setBaseline(undefined)}>Clear comparison</button>}
+      </div>
+      <p className="text-[#A9C8DD]">Inspecting #{selected.serial}{baseline ? ` · reference #${baseline.serial}` : ''}</p>
+      <dl className="divide-y divide-[#25445C]">
+        {fields(selected).map(([label, value]) => {
+          const previous = baselineFields?.get(label);
+          const differs = baselineFields && previous !== value;
+          return <div key={label} className="grid gap-1 py-1.5 sm:grid-cols-[9rem_minmax(0,1fr)]">
+            <dt className="text-[#B6D4EA]">{label}</dt>
+            <dd className={`m-0 font-mono [overflow-wrap:anywhere] ${differs ? 'text-[#FCD394]' : 'text-white'}`}>
+              {value}{differs && <span className="block text-[#B6D4EA]">Reference: {previous}</span>}
+            </dd>
+          </div>;
+        })}
+      </dl>
+      <h4 className="font-bold text-white">Subscriber decisions</h4>
+      <ul className="space-y-1">
+        {subscribers.map(node => <li key={node.iedId} className="break-words text-[#D7EEFD]">
+          <strong>{node.iedName}</strong> · {selected.decisions[node.iedId] ?? 'No decision'}
+          {selected.decisions[node.iedId] === 'APPID Mismatch' && ` · expected ${block.appId}, received ${selected.appId}`}
+          {selected.decisions[node.iedId] === 'confRev Mismatch' && ` · expected ${block.confRev}, received ${selected.confRev}`}
+          {selected.decisions[node.iedId] === 'DataSet Mismatch' && ` · expected ${block.datSet}, received ${selected.dataSet}`}
+          {selected.decisions[node.iedId] === 'ExtRef Unbound' && ' · DataSet source did not match a bound subscriber input'}
+          {selected.decisions[node.iedId] === 'VLAN Drop' && ` · no ingress admitted VLAN ${selected.vlan}`}
+        </li>)}
+      </ul>
+    </section>
+  );
+}
+
+const circuitFaults = [
+  { value: 'NONE', label: 'Healthy trip circuit' },
+  { value: 'OUTPUT_BLOCK', label: 'Trip output inhibited by simulated logic' },
+  { value: 'DC_LOSS', label: 'Trip circuit DC unavailable' },
+  { value: 'COIL_OPEN', label: 'Trip coil open circuit' },
+  { value: 'MECHANISM', label: 'Breaker mechanism did not open' },
+  { value: 'FEEDBACK', label: '52a/52b feedback unavailable' },
+] as const;
+type CircuitFault = typeof circuitFaults[number]['value'];
+
+const tripStages = ['GOOSE accepted', 'Trip input asserted', 'Output relay picked up', 'Trip coil energized', 'Breaker open', '52a/52b feedback', 'SCADA alarm'] as const;
+
+function tripStageFault(stage: number, fault: CircuitFault): string | undefined {
+  if (stage === 2 && fault === 'OUTPUT_BLOCK') return 'Protection logic: trip output inhibited';
+  if (stage === 3 && fault === 'DC_LOSS') return 'Output relay picked up, but trip circuit DC is unavailable';
+  if (stage === 3 && fault === 'COIL_OPEN') return 'Output relay picked up, but the trip coil circuit is open';
+  if (stage === 4 && fault === 'MECHANISM') return 'Trip coil energized, but the breaker remains closed';
+  if (stage === 5 && fault === 'FEEDBACK') return 'Breaker opened, but 52a/52b feedback is unavailable';
+  return undefined;
+}
+
+const LAN_NAMES = ['A', 'B'] as const;
+
+function duplicateCopy(seen: LabReceiver['seen'], source: string, frame: LabFrame) {
+  return seen?.source === source && seen.sequence === frame.prpSequence && seen.serial === frame.serial;
+}
+
+function PrpDiagnostics({ runtime, lanAUp, lanBUp, nodes }: {
+  runtime?: LabRuntime;
+  lanAUp: boolean;
+  lanBUp: boolean;
+  nodes: SubscriberNodeConfig[];
+}) {
+  const signature = (packet: LabFrame) => [...packet.ingress].sort().join(' + ') || 'None';
+  const captures = runtime?.capture ?? [];
+  const transitions = captures.slice(0, -1).filter((packet, index) => signature(packet) !== signature(captures[index + 1]));
+  return (
+    <section className={panelClass}>
+      <h3 className="text-base font-bold text-white">PRP LAN Diagnostics</h3>
+      <p className="text-[#B6D4EA]">Counters are cumulative for the selected GoCB. Use Fault Scenario or the LAN buttons to exercise failover.</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {LAN_NAMES.map(lan => <div key={lan} className="rounded-md border border-[#25445C] bg-[#061522] p-3">
+          <h4 className="font-bold text-white">LAN {lan} · {(lan === 'A' ? lanAUp : lanBUp) ? 'UP' : 'DOWN'}</h4>
+          <p className="text-[#B6D4EA]">Sent {runtime?.lanTx[lan] ?? 0} · Ingress admitted {runtime?.lanIngress[lan] ?? 0}</p>
+        </div>)}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[32rem] text-left">
+          <thead><tr>{['Subscriber', 'LAN A copies', 'LAN B copies', 'A/B duplicates', 'Unique Rx', 'Accepted', 'Latest first copy'].map(heading =>
+            <th className="px-2 py-1" key={heading}>{heading}</th>)}</tr></thead>
+          <tbody>{nodes.map(node => {
+            const rx = runtime?.receivers[node.iedId];
+            return <tr key={node.iedId} className="border-b border-[#25445C]">
+              {[node.iedName, rx?.lanCopies?.A ?? 0, rx?.lanCopies?.B ?? 0,
+                `${rx?.lanDuplicates?.A ?? 0} / ${rx?.lanDuplicates?.B ?? 0}`, rx?.rxCount ?? 0,
+                rx?.acceptedCount ?? 0, rx?.first ?? '—'].map((value, index) =>
+                <td key={index} className="px-2 py-1">{value}</td>)}
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
+      <h4 className="font-bold text-white">Recent switch ingress changes</h4>
+      {transitions.length ? <ul className="space-y-1">{transitions.map(packet => <li key={packet.serial}>
+        Frame #{packet.serial} · PRP sequence {packet.prpSequence} · paths {signature(packet)}
+      </li>)}</ul> : <p className="text-[#B6D4EA]">No ingress change in the retained frame history.</p>}
+    </section>
+  );
+}
+
+function subscriberDecision(packet: LabFrame, block: GooseControlBlock, subscribed: boolean, hasBinding: boolean) {
+  if (!subscribed) return 'Ignored';
+  if (packet.appId !== block.appId) return 'APPID Mismatch';
+  if (packet.confRev !== block.confRev) return 'confRev Mismatch';
+  if (packet.ndsCom) return 'Needs Commissioning';
+  if (packet.simulation) return 'Simulated Frame Blocked';
+  if (packet.dataSet !== block.datSet || !packet.entries) return 'DataSet Mismatch';
+  return hasBinding ? 'Accepted' : 'ExtRef Unbound';
+}
+
+const isPublishing = (goEna: boolean, fault: GooseControlBlock['mismatchFault']) => goEna && fault !== 'TIMEOUT';
+const talExpired = (deadline: number | undefined, now: number) => deadline !== undefined && now >= deadline;
+
+interface FatSatCase {
+  name: string;
+  setup: string;
+  expected: string;
+  observe: () => string;
+}
+
+function buildFatSatCases(config: GooseControlBlock, dataset: IedDataset | undefined): FatSatCase[] {
+  if (!dataset?.fcdas.length) return [];
+  const block = { ...config, testMode: false, ndsCom: false };
+  const runtime = freshRuntime(block, dataset);
+  const node = { iedId: 'TestSubscriber', iedName: 'Test Subscriber', shortModel: '', vendorModel: '', imgSrc: '' };
+  const link = (lan: Lan): NetworkLink => ({
+    id: lan, sourceId: node.iedId, sourceName: node.iedName, sourcePort: lan,
+    targetId: lan, targetName: lan, targetPort: '1', lanPlane: lan === 'A' ? 'LAN_A' : 'LAN_B',
+    speedMbps: 100, mediaType: '100BASE-FX Multimode LC', vlanList: [block.vlanId], status: 'UP',
+    trafficKbps: 0, gooseFramesPerSec: 0, mmsFramesPerSec: 0,
+  });
+  const send = (fault: GooseControlBlock['mismatchFault'] = 'NONE', a = true, b = true) =>
+    makeFrame(runtime, block, fault, dataset, { A: a ? link('A') : undefined, B: b ? link('B') : undefined }, [node], (_, lan) => link(lan), 'FAT/SAT fixture');
+  const paths = (packet: LabFrame) => packet.arrivals[node.iedId].join('+') || 'None';
+  const inspect = (packet: LabFrame, subscribed = true, bound = true) => subscriberDecision(packet, block, subscribed, bound);
+  const circuit = (fault: CircuitFault) => {
+    for (let stage = 2; stage < tripStages.length; stage += 1) {
+      const failure = tripStageFault(stage, fault);
+      if (failure) return `Stopped before ${tripStages[stage]}`;
+    }
+    return 'Breaker open → 52a/52b feedback → SCADA alarm';
+  };
+  return [
+    { name: 'Healthy receive', setup: 'Inject one valid frame with both paths healthy and a bound input.', expected: 'Accepted', observe: () => inspect(send()) },
+    { name: 'VLAN ingress drop', setup: 'Inject a frame with a VLAN outside both switch ingress memberships.', expected: 'None', observe: () => paths(send('VLAN_MISMATCH')) },
+    { name: 'APPID rejection', setup: 'Send a frame with an unexpected APPID.', expected: 'APPID Mismatch', observe: () => inspect(send('APPID_MISMATCH')) },
+    { name: 'Revision rejection', setup: 'Send a frame with a different confRev.', expected: 'confRev Mismatch', observe: () => inspect(send('CONFREV_MISMATCH')) },
+    { name: 'DataSet rejection', setup: 'Send a missing DataSet reference and empty member list.', expected: 'DataSet Mismatch', observe: () => inspect(send('DATASET_MISSING')) },
+    { name: 'Unbound ExtRef', setup: 'Run the receive filter with no matching subscriber binding.', expected: 'ExtRef Unbound', observe: () => inspect(send(), true, false) },
+    { name: 'Disabled subscriber', setup: 'Deliver a valid frame to a subscriber with the subscription disabled.', expected: 'Ignored', observe: () => inspect(send(), false) },
+    { name: 'TAL expiry', setup: 'Advance the fixture clock to a received frame’s TAL deadline.', expected: 'Expired', observe: () => {
+      const tal = send().tal;
+      return talExpired(tal, tal) && !talExpired(tal, tal - 1) ? 'Expired' : 'Invalid timing';
+    } },
+    { name: 'GoEna OFF', setup: 'Disable the publisher independently of the LAN state.', expected: 'No new publication', observe: () => isPublishing(false, 'NONE') ? 'Publishing' : 'No new publication' },
+    { name: 'LAN A failure', setup: 'Remove LAN A and send the next fixture frame.', expected: 'B', observe: () => paths(send('NONE', false, true)) },
+    { name: 'LAN B failure', setup: 'Remove LAN B and send the next fixture frame.', expected: 'A', observe: () => paths(send('NONE', true, false)) },
+    { name: 'Dual LAN outage and recovery', setup: 'Disable both LANs, then restore both and compare arrivals.', expected: 'None → A+B', observe: () => `${paths(send('NONE', false, false))} → ${paths(send())}` },
+    { name: 'PRP duplicate suppression', setup: 'Compare two PRP copies from the same source and sequence in one publication.', expected: 'One unique delivery', observe: () => {
+      const packet = send();
+      let seen: LabReceiver['seen'];
+      let unique = 0;
+      for (const _ of packet.arrivals[node.iedId]) {
+        if (!duplicateCopy(seen, block.publisherIedId, packet)) unique += 1;
+        seen = { source: block.publisherIedId, sequence: packet.prpSequence, serial: packet.serial };
+      }
+      return unique === 1 && packet.arrivals[node.iedId].length === 2 ? 'One unique delivery' : `${unique} unique deliveries`;
+    } },
+    { name: 'Healthy breaker feedback', setup: 'Assert the fixture trip input and execute the normal circuit stage sequence.', expected: 'Breaker open → 52a/52b feedback → SCADA alarm', observe: () => circuit('NONE') },
+    { name: 'Trip output inhibited', setup: 'Assert the input with the output inhibit active.', expected: 'Stopped before Output relay picked up', observe: () => circuit('OUTPUT_BLOCK') },
+    { name: 'Missing trip circuit DC', setup: 'Run output relay pickup with trip circuit DC unavailable.', expected: 'Stopped before Trip coil energized', observe: () => circuit('DC_LOSS') },
+    { name: 'Unsuccessful breaker operation', setup: 'Energize the simulated coil with a stuck breaker mechanism.', expected: 'Stopped before Breaker open', observe: () => circuit('MECHANISM') },
+    { name: 'Missing auxiliary feedback', setup: 'Open the simulated breaker with its auxiliary feedback unavailable.', expected: 'Stopped before 52a/52b feedback', observe: () => circuit('FEEDBACK') },
+  ];
+}
+
+function GooseFatSat({ block, dataset }: { block: GooseControlBlock; dataset?: IedDataset }) {
+  const cases = useMemo(() => buildFatSatCases(block, dataset), [block, dataset]);
+  const [selected, setSelected] = useState('0');
+  const [evidence, setEvidence] = useState<Record<string, { name: string; expected: string; observed: string; result: string; recordedAt: string }>>({});
+  const run = (tests: FatSatCase[]) => {
+    const results = Object.fromEntries(tests.map(test => {
+      const observed = test.observe();
+      return [test.name, { name: test.name, expected: test.expected, observed,
+        result: observed === test.expected ? 'PASS' : 'FAIL', recordedAt: new Date().toISOString() }];
+    }));
+    setEvidence(previous => ({ ...previous, ...results }));
+  };
+  const test = cases[Number(selected)];
+  return (
+    <section className={panelClass}>
+      <h3 className="text-base font-bold text-white">GOOSE FAT/SAT Test Bench</h3>
+      <p className="text-[#B6D4EA]">Repeatable simulator tests using an isolated fixture built from the selected GoCB and DataSet.</p>
+      {test ? <>
+        <label className="block">Test case<select className={fieldClass} value={selected} onChange={event => setSelected(event.target.value)}>
+          {cases.map((item, index) => <option key={item.name} value={index}>{index + 1}. {item.name}</option>)}
+        </select></label>
+        <p className="text-[#D7EEFD]">{test.setup}</p>
+        <p>Expected: {test.expected}</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={actionClass} onClick={() => run([test])}>Run selected test</button>
+          <button type="button" className={actionClass} onClick={() => run(cases)}>Run all {cases.length} tests</button>
+          <button type="button" className={actionClass} disabled={!Object.keys(evidence).length} onClick={() =>
+            saveLabFile('goose-fat-sat-evidence.json', JSON.stringify({ goCB: block.id, environment: 'simulation', results: Object.values(evidence) }, null, 2), 'application/json')
+          }>Download evidence</button>
+        </div>
+        <div className="overflow-x-auto"><table className="w-full min-w-[28rem] text-left">
+          <thead><tr>{['Test', 'Expected', 'Observed', 'Result'].map(label => <th key={label} className="p-2">{label}</th>)}</tr></thead>
+          <tbody>{cases.map(item => {
+            const entry = evidence[item.name];
+            return <tr key={item.name} className="border-b border-[#25445C]">
+              <td className="p-2">{item.name}</td><td className="p-2">{item.expected}</td><td className="p-2">{entry?.observed ?? '—'}</td>
+              <td className={`p-2 font-bold ${entry?.result === 'PASS' ? 'text-[#86EFAC]' : entry?.result === 'FAIL' ? 'text-[#FECACA]' : 'text-[#B6D4EA]'}`}>{entry?.result ?? 'Not run'}</td>
+            </tr>;
+          })}</tbody>
+        </table></div>
+      </> : <p>Select a GoCB with a DataSet in Network Topology.</p>}
+    </section>
+  );
+}
+
+interface LabSoeEntry {
+  at: number;
+  stage: string;
+  detail: string;
+  stNum?: number;
+}
+
+function recordSoe(runtime: LabRuntime, stage: string, detail: string, stNum?: number) {
+  runtime.soe = [...runtime.soe.slice(-149), { at: runtime.now, stage, detail, stNum }];
+}
+
+function TripSequence({ runtime }: { runtime?: LabRuntime }) {
+  const entries = runtime?.soe ?? [];
+  const absolute = (milliseconds: number) => new Date((runtime?.clockOrigin ?? 0) + milliseconds).toISOString();
+  return (
+    <section className={panelClass}>
+      <h3 className="text-base font-bold text-white">Sequence of Events &amp; Trip Timeline</h3>
+      <p className="text-[#B6D4EA]">Timestamps use the simulated clock for the selected GoCB. Pausing the lab pauses this clock.</p>
+      {!!entries.length && <button type="button" className={actionClass} onClick={() =>
+        saveLabFile('goose-sequence-of-events.json', JSON.stringify(entries.map(entry => ({
+          ...entry, simulatedTimestamp: absolute(entry.at),
+        })), null, 2), 'application/json')}>Download sequence</button>}
+      {entries.length ? <div className="max-h-[32rem] overflow-auto"><table className="w-full min-w-[36rem] text-left">
+        <thead><tr>{['Simulated UTC', 'Elapsed / Δ ms', 'stNum', 'Stage', 'Evidence'].map(label => <th className="p-2" key={label}>{label}</th>)}</tr></thead>
+        <tbody>{entries.map((entry, index) => <tr key={`${entry.at}:${index}`} className="border-b border-[#25445C]">
+          <td className="whitespace-nowrap p-2 font-mono text-[#A5E6FF]">{absolute(entry.at)}</td>
+          <td className="whitespace-nowrap p-2 font-mono">{entry.at.toFixed(1)} / {(index ? entry.at - entries[index - 1].at : 0).toFixed(1)}</td>
+          <td className="p-2">{entry.stNum ?? '—'}</td>
+          <td className="whitespace-nowrap p-2 font-bold">{entry.stage}</td>
+          <td className="p-2">{entry.detail}</td>
+        </tr>)}</tbody>
+      </table></div> : <p className="text-[#B6D4EA]">Waiting for events from this GoCB.</p>}
+    </section>
+  );
+}
+
 export const GooseLabPage: React.FC = () => {
   const {
     gooseControlBlocks,
     ieds,
     bays,
     networkLinks,
-    triggerGooseStateChangeBurst,
-    setGooseMismatchFault,
   } = useSubstationStore();
 
   const [selectedGocbId, setSelectedGocbId] = useState<string>(
@@ -106,95 +794,58 @@ export const GooseLabPage: React.FC = () => {
   const publisherBay = bays.find(bay => bay.iedId === gocb?.publisherIedId);
   const isStatusDataset = gocb?.datSet.endsWith('$dsStatus') ?? false;
   const topologyNodes = useMemo<SubscriberNodeConfig[]>(() => {
-    if (gocb?.id === 'GOCB-132-L1-TRIP') return DEFAULT_TOPOLOGY_NODES;
-    return (gocb?.subscriberIedIds ?? []).flatMap(id => {
+    const ids = gocb?.id === 'GOCB-132-L1-TRIP'
+      ? [...new Set([...gocb.subscriberIedIds, ...DEFAULT_TOPOLOGY_NODES.map(node => node.iedId)])]
+      : gocb?.subscriberIedIds ?? [];
+    return ids.flatMap(id => {
       const ied = ieds.find(entry => entry.id === id);
       if (!ied) return [];
+      const defaultImage = DEFAULT_TOPOLOGY_NODES.find(node => node.iedId === id && ied.model.includes(node.shortModel));
       return [{
         iedId: id,
         iedName: ied.name,
         shortModel: ied.model,
         vendorModel: `${ied.vendor} ${ied.model}`,
-        imgSrc: getIedImageByModel(ied.vendor, ied.model),
+        imgSrc: defaultImage?.imgSrc ?? getIedImageByModel(ied.vendor, ied.model),
 
       }];
     });
   }, [gocb?.id, gocb?.subscriberIedIds, ieds]);
 
   const [activeTab, setActiveTab] = useState<GooseLabTab>('NETWORK_TOPOLOGY');
+  const [circuitFault, setCircuitFault] = useState<CircuitFault>('NONE');
   const [playing, setPlaying] = useState<boolean>(true);
   const [speed, setSpeed] = useState<0.1 | 0.25 | 0.5 | 1 | 2 | 4>(0.1);
-  const [goEna, setGoEna] = useState<boolean>(true);
+  const [disabledPublishers, setDisabledPublishers] = useState<Record<string, boolean>>({});
+  const goEna = !!gocb && !disabledPublishers[gocb.id];
   const [lanAUp, setLanAUp] = useState<boolean>(true);
   const [lanBUp, setLanBUp] = useState<boolean>(true);
-  const [payloadActive, setPayloadActive] = useState(!isStatusDataset || publisherBay?.breakerState === 'CLOSED');
   const [testModeSub, setTestModeSub] = useState<boolean>(false);
   const [inspectedDeviceId, setInspectedDeviceId] = useState<string | null>(null);
+  const [diagnosticIedId, setDiagnosticIedId] = useState<string | null>(null);
 
   // Overrides are scoped to one control block, even when publishers share an IED.
   const [subscriptions, setSubscriptions] = useState<Record<string, Record<string, boolean>>>({});
   const subEnabledMap = gocb ? subscriptions[gocb.id] : undefined;
 
-  useEffect(() => {
-    setPayloadActive(!isStatusDataset || publisherBay?.breakerState === 'CLOSED');
-  }, [gocb?.id, isStatusDataset, publisherBay?.breakerState]);
-
-  // Shared simulation clock for stNum/sqNum progression & per-IED frame counters
-  const [simSqNum, setSimSqNum] = useState<number>(12);
-  const [prevStNum, setPrevStNum] = useState<number>(Math.max(1, (gocb?.stNum || 5) - 1));
-  const [rxCounts, setRxCounts] = useState<Record<string, number>>({
-    'IED-132-BC': 1245,
-    'IED-132-T1': 1245,
-    'IED-33-F03': 1245,
-    'IED-132-L2': 1245,
-  });
+  const [faults, setFaults] = useState<Record<string, GooseControlBlock['mismatchFault']>>({});
   const [events, setEvents] = useState<GooseEventEntry[]>(() => [
-    { time: nowTimeMs(), detail: 'GOOSE Lab V2 initialized — PRP LAN A & LAN B redundant', severity: 'INFO' },
-    ...(gocb ? [{ time: nowTimeMs(), detail: `${gocb.publisherIedId} publishing ${gocb.gocbName} (APPID ${gocb.appId}, VLAN ${gocb.vlanId})`, severity: 'INFO' as const }] : []),
+    { time: nowTimeMs(), detail: 'GOOSE Lab initialized — isolated PRP and protection simulation', severity: 'INFO' },
   ]);
-
+  const [revision, refresh] = useState(0);
+  const [snapshot, setSnapshot] = useState<{ id: string; runtime: LabRuntime }>();
+  const runtimes = useRef(new Map<string, LabRuntime>());
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   const anyLanUp = lanAUp || lanBUp;
-  const prpDegraded = (lanAUp && !lanBUp) || (!lanAUp && lanBUp);
-  const faultMode = gocb?.mismatchFault || 'NONE';
+  const prpDegraded = anyLanUp && !(lanAUp && lanBUp);
+  const faultMode = gocb ? faults[gocb.id] ?? gocb.mismatchFault : 'NONE';
   const isFaultFree = faultMode === 'NONE';
-  const publishingActive = goEna && anyLanUp && faultMode !== 'TIMEOUT';
-
-  // Control SVG SMIL animations on Pause/Resume
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    try {
-      if (playing) svg.unpauseAnimations?.();
-      else svg.pauseAnimations?.();
-    } catch {
-      // Non-DOM safe
-    }
-  }, [playing]);
-
-  // Shared simulation timer advancing sqNum & per-IED received packet counts
-  useEffect(() => {
-    if (!playing || !publishingActive) return;
-    const intervalMs = Math.max(250, Math.round(1000 / speed));
-    const timer = window.setInterval(() => {
-      setSimSqNum((q) => (q >= 999 ? 1 : q + 1));
-      setRxCounts((prev) => {
-        const next = { ...prev };
-        topologyNodes.forEach((n) => {
-          // VLAN mismatch drops frames at switch ingress before reaching IEDs
-          if (faultMode !== 'VLAN_MISMATCH') {
-            next[n.iedId] = (next[n.iedId] || 1200) + 1;
-          }
-        });
-        return next;
-      });
-    }, intervalMs);
-    return () => window.clearInterval(timer);
-  }, [playing, speed, publishingActive, faultMode, topologyNodes]);
+  const publishingActive = isPublishing(goEna, faultMode);
+  const transportKey = `${gocb?.id}:${goEna}:${faultMode}:${lanAUp}:${lanBUp}`;
 
   const publisherIed = useMemo(
-    () => ieds.find((x) => x.id === gocb?.publisherIedId) || ieds[0],
+    () => ieds.find((x) => x.id === gocb?.publisherIedId),
     [ieds, gocb?.publisherIedId]
   );
 
@@ -224,31 +875,198 @@ export const GooseLabPage: React.FC = () => {
     setEvents((prev) => [{ time: nowTimeMs(), detail, severity }, ...prev].slice(0, 18));
   };
 
+  const dataset = publisherIed?.datasets.find(item => item.name === gocb?.datSet.split('$').pop());
+  const current = snapshot?.id === gocb?.id ? snapshot?.runtime : undefined;
+  const frame = current?.frame;
+  const membersFor = (iedId: string) => (gocb?.extRefs ?? []).flatMap(ref => {
+    if (ref.subscriberIedId !== iedId || !ref.bound) return [];
+    const member = datasetMember(dataset, publisherIed?.name ?? '', ref);
+    return member ? [{ ref, key: memberKey(member) }] : [];
+  });
+  const stimulusKey = isStatusDataset ? 'XCBR1.Pos'
+    : gocb?.id === 'GOCB-132-L1-TRIP' ? 'RBRF1.OpEx'
+      : gocb?.id === 'GOCB-11-FASTBUS' ? 'PTOC1.Str' : 'PTRC1.Tr';
+
+  // The protocol clock follows Pause, but is independent of the diagram's speed.
+  useEffect(() => {
+    if (!gocb || !playing) return;
+    const block = gocb;
+    const runtime = runtimes.current.get(block.id) ?? freshRuntime(block, dataset, publisherBay);
+    runtimes.current.set(block.id, runtime);
+    const started = performance.now() - runtime.now;
+    let timer: number;
+    const linkFor = (id: string, lan: Lan) => networkLinks.find(link => link.sourceId === id && link.lanPlane === `LAN_${lan}`);
+    const pubLinks = {
+      A: lanAUp ? linkFor(block.publisherIedId, 'A') : undefined,
+      B: lanBUp ? linkFor(block.publisherIedId, 'B') : undefined,
+    };
+    if (runtime.transportKey !== transportKey) {
+      runtime.due = runtime.now;
+      recordSoe(runtime, 'Transport condition', `GoEna ${goEna ? 'ON' : 'OFF'} · LAN A ${lanAUp ? 'UP' : 'DOWN'} · LAN B ${lanBUp ? 'UP' : 'DOWN'} · ${faultMode}`);
+    }
+    runtime.transportKey = transportKey;
+
+    function tick() {
+      runtime.now = performance.now() - started;
+      const receivers = { ...runtime.receivers };
+      let changed = false;
+      for (const node of topologyNodes) {
+        const previous = receivers[node.iedId];
+        if (!previous) continue;
+        const rx = { ...previous };
+        if (talExpired(rx.deadline, runtime.now)) {
+          rx.deadline = undefined;
+          recordSoe(runtime, 'TAL expired', `${node.iedName}: subscriber data invalid`, rx.lastAccepted?.stNum);
+          logEvent(`${node.iedName}: TAL expired — subscriber data invalid`, 'WARN');
+          changed = true;
+        }
+        if (rx.circuitDue !== undefined && runtime.now >= rx.circuitDue) {
+          const nextStage = (rx.tripStage ?? 1) + 1;
+          rx.circuitFailure = tripStageFault(nextStage, circuitFault);
+          rx.circuitDue = undefined;
+          if (rx.circuitFailure) {
+            recordSoe(runtime, 'Trip circuit blocked', `${node.iedName}: ${rx.circuitFailure}`, rx.tripFrame?.stNum);
+            logEvent(`${node.iedName}: ${rx.circuitFailure}`, 'ERR');
+          } else {
+            rx.tripStage = nextStage;
+            if (nextStage === 4) rx.breakerOpen = true;
+            if (nextStage === 6) rx.alarm = true;
+            else rx.circuitDue = runtime.now + [0, 0, 10, 30, 5, 25][nextStage];
+            recordSoe(runtime, tripStages[nextStage], nextStage === 5 ? `${node.iedName} · 52a=0 / 52b=1` : node.iedName, rx.tripFrame?.stNum);
+            logEvent(`${node.iedName}: ${tripStages[nextStage]}${nextStage === 5 ? ' · 52a=0 / 52b=1' : ''}`, 'WARN');
+          }
+          changed = true;
+        }
+        receivers[node.iedId] = rx;
+      }
+      if (publishingActive && runtime.now >= runtime.due) {
+        const firstForState = !runtime.sentCurrentState;
+        runtime.sqNum = firstForState ? 0 : nextCounter(runtime.sqNum);
+        runtime.serial += 1;
+        const packet = makeFrame(runtime, block, faultMode, dataset, pubLinks, topologyNodes, linkFor, transportKey);
+        runtime.frame = packet;
+        runtime.lanTx = { ...runtime.lanTx };
+        runtime.lanIngress = { ...runtime.lanIngress };
+        for (const lan of packet.txLans) runtime.lanTx[lan] += 1;
+        for (const lan of packet.ingress) runtime.lanIngress[lan] += 1;
+        if (firstForState || runtime.capture[0]?.context !== packet.context) {
+          recordSoe(runtime, 'GOOSE published',
+            `sqNum ${packet.sqNum} · PRP sequence ${packet.prpSequence} · LAN ${packet.txLans.join('/') || 'none'}`, packet.stNum);
+        }
+        if (firstForState) runtime.visualEvent = packet;
+        runtime.sentCurrentState = true;
+        const max = Math.max(1, block.maxTimeMs);
+        const min = Math.min(max, Math.max(1, block.minTimeMs));
+        runtime.interval = firstForState ? min : Math.min(max, runtime.interval * 2);
+        runtime.due = runtime.now + runtime.interval;
+        changed = true;
+
+        for (const node of topologyNodes) {
+          const rx: LabReceiver = {
+            rxCount: 0, acceptedCount: 0, duplicates: 0, ...receivers[node.iedId],
+            first: undefined, duplicate: undefined,
+          };
+          const pathCopies = rx.lanCopies = { A: 0, B: 0, ...rx.lanCopies };
+          const pathDuplicates = rx.lanDuplicates = { A: 0, B: 0, ...rx.lanDuplicates };
+          const subscribed = subEnabledMap?.[node.iedId] ?? block.subscriberIedIds.includes(node.iedId);
+          const bindings = membersFor(node.iedId);
+          rx.status = !subscribed ? 'Ignored'
+            : packet.txLans.length && !packet.ingress.length ? 'VLAN Drop' : 'No path';
+          // Model ordered LAN arrivals for one source MAC and one RCT sequence.
+          // The second copy never enters the GOOSE filter or refreshes the TAL.
+          const source = publisherIed?.macAddress ?? block.publisherIedId;
+          for (const lan of packet.arrivals[node.iedId] ?? []) {
+            pathCopies[lan] += 1;
+            if (duplicateCopy(rx.seen, source, packet)) {
+              pathDuplicates[lan] += 1;
+              rx.duplicates += 1;
+              rx.duplicate = lan;
+              continue;
+            }
+            rx.seen = { source, sequence: packet.prpSequence, serial: runtime.serial };
+            rx.first = lan;
+            rx.rxCount += 1;
+            rx.status = subscriberDecision(packet, block, subscribed, bindings.length > 0);
+            if (firstForState || runtime.capture[0]?.context !== packet.context ||
+              receivers[node.iedId]?.status !== rx.status || (rx.status === 'Accepted' && rx.deadline === undefined)) {
+              recordSoe(runtime, 'Subscriber decision', `${node.iedName} · LAN ${lan} · ${rx.status}`, packet.stNum);
+            }
+            if (rx.status !== 'Accepted') continue;
+            rx.acceptedCount += 1;
+            rx.lastAccepted = packet;
+            rx.deadline = runtime.now + packet.tal;
+            rx.mappedTrip = bindings.some(binding =>
+              isTripBinding(binding) && packet.payload[binding.key] === true);
+            if (rx.mappedTrip && !testModeSub && !rx.tripFrame) {
+              rx.tripFrame = packet;
+              rx.tripStage = 1;
+              rx.circuitDue = runtime.now + 10;
+              runtime.visualEvent = packet;
+              recordSoe(runtime, 'Trip input asserted', node.iedName, packet.stNum);
+              logEvent(`${node.iedName}: mapped trip asserted`, 'WARN');
+            }
+          }
+          packet.decisions[node.iedId] = rx.status;
+          receivers[node.iedId] = rx;
+        }
+      }
+      if (runtime.frame && runtime.capture[0] !== runtime.frame) {
+        runtime.capture = [runtime.frame, ...runtime.capture].slice(0, 80);
+      }
+      runtime.receivers = receivers;
+      if (changed) setSnapshot({ id: block.id, runtime: { ...runtime } });
+      const deadline = Math.min(...Object.values(receivers).flatMap(rx =>
+        [rx.deadline ?? Infinity, rx.circuitDue ?? Infinity]));
+      const next = Math.min(publishingActive ? runtime.due : Infinity, deadline);
+      if (Number.isFinite(next)) timer = window.setTimeout(tick, Math.max(1, next - runtime.now));
+    }
+    setSnapshot({ id: block.id, runtime: { ...runtime } });
+    tick();
+    return () => {
+      runtime.now = performance.now() - started;
+      window.clearTimeout(timer);
+    };
+  }, [circuitFault, gocb?.id, gocb?.confRev, gocb?.ndsCom, gocb?.testMode, gocb?.appId, gocb?.vlanId,
+    gocb?.datSet, gocb?.minTimeMs, gocb?.maxTimeMs, gocb?.timeAllowedToLiveMs,
+    playing, goEna, publishingActive, faultMode, lanAUp, lanBUp, networkLinks, transportKey,
+    topologyNodes, subEnabledMap, testModeSub, dataset, publisherIed?.name, publisherIed?.macAddress, revision]);
+
   const handlePublishState = () => {
-    if (!gocb) return;
-    setPrevStNum(gocb.stNum);
-    triggerGooseStateChangeBurst(gocb.id);
-    setSimSqNum(0);
-    setPayloadActive(value => isStatusDataset ? !value : true);
-    logEvent(
-      `${isStatusDataset ? 'Simulated breaker status' : 'Trip'} state change published by ${gocb.publisherIedId}: stNum=${gocb.stNum + 1}, sqNum=0 (MinTime ${gocb.minTimeMs} ms burst)`,
-      'WARN'
-    );
+    if (!gocb || !dataset?.fcdas.some(member => memberKey(member) === stimulusKey)) return;
+    const runtime = runtimes.current.get(gocb.id) ?? freshRuntime(gocb, dataset, publisherBay);
+    const next = isStatusDataset ? (runtime.payload[stimulusKey] === 'CLOSED' ? 'OPEN' : 'CLOSED')
+      : runtime.payload[stimulusKey] !== true;
+    runtime.payload = { ...runtime.payload, [stimulusKey]: next };
+    runtime.prevStNum = runtime.stNum;
+    runtime.stNum = nextCounter(runtime.stNum);
+    runtime.sqNum = 0;
+    runtime.stateChangedAt = new Date().toISOString();
+    runtime.sentCurrentState = false;
+    runtime.due = runtime.now;
+    recordSoe(runtime, 'Publisher input changed', `${stimulusKey} → ${next}`, runtime.stNum);
+    runtimes.current.set(gocb.id, runtime);
+    setSnapshot({ id: gocb.id, runtime: { ...runtime } });
+    refresh(value => value + 1);
+    logEvent(`${stimulusKey} → ${next}; stNum=${runtime.stNum}, next publication sqNum=0`, 'WARN');
   };
 
   const handleReset = () => {
     setPlaying(true);
     setSpeed(0.1);
-    setGoEna(true);
+    setDisabledPublishers({});
     setLanAUp(true);
     setLanBUp(true);
     setTestModeSub(false);
-    setPayloadActive(!isStatusDataset || publisherBay?.breakerState === 'CLOSED');
-    setSimSqNum(12);
-    if (gocb && gocb.mismatchFault !== 'NONE') {
-      setGooseMismatchFault(gocb.id, 'NONE');
-    }
-    logEvent('GOOSE Lab V2 simulation reset to healthy PRP redundant baseline', 'INFO');
+    setCircuitFault('NONE');
+    setSubscriptions({});
+    setFaults(gocb ? { [gocb.id]: 'NONE' } : {});
+    runtimes.current.clear();
+    visual.current = { progress: 0 };
+    visualEventSeen.current = undefined;
+    setAnimation(visual.current);
+    setSnapshot(undefined);
+    refresh(value => value + 1);
+    logEvent('GOOSE Lab simulation reset', 'INFO');
   };
 
   const toggleSubscriber = (node: SubscriberNodeConfig) => {
@@ -258,80 +1076,97 @@ export const GooseLabPage: React.FC = () => {
       ...previous,
       [gocb.id]: { ...previous[gocb.id], [node.iedId]: nextVal },
     }));
-    logEvent(
-      `Subscriber ${node.iedName} (${node.shortModel}) subscription ${nextVal ? 'ENABLED (Accept)' : 'DISABLED (Ignore)'}`,
-      nextVal ? 'INFO' : 'WARN'
-    );
+    if (!nextVal) {
+      const runtime = runtimes.current.get(gocb.id);
+      const rx = runtime?.receivers[node.iedId];
+      if (runtime && rx) runtime.receivers = {
+        ...runtime.receivers, [node.iedId]: { ...rx, deadline: undefined, lastAccepted: undefined },
+      };
+    }
+    logEvent(`${node.iedName}: subscription ${nextVal ? 'enabled' : 'disabled'}`);
   };
 
-  // Evaluate each IED's exact frame delivery, subscription match, acceptance, and application input state
-  const evaluatedNodes = useMemo(() => {
-    return topologyNodes.map((node) => {
-      const subscribed = subEnabledMap?.[node.iedId] ?? gocb?.subscriberIedIds.includes(node.iedId) ?? false;
-      const frameDelivered = publishingActive && faultMode !== 'VLAN_MISMATCH';
-      const extRefBound =
-        subscribed && faultMode !== 'DATASET_MISSING' && faultMode !== 'APPID_MISMATCH' && faultMode !== 'CONFREV_MISMATCH';
-      const accepted = frameDelivered && subscribed && extRefBound && !testModeSub;
-      const inputActive = accepted && payloadActive;
+  const evaluatedNodes = topologyNodes.map(node => {
+    const subscribed = subEnabledMap?.[node.iedId] ?? gocb?.subscriberIedIds.includes(node.iedId) ?? false;
+    const rx = current?.receivers[node.iedId];
+    const valid = subscribed && rx?.deadline !== undefined;
+    const bindings = membersFor(node.iedId);
+    const inputs = valid ? bindings.map(({ key }) => `${key}=${rx?.lastAccepted?.payload[key] ?? '—'}`) : [];
+    const statusLabel = !subscribed ? 'Ignored'
+      : valid ? (rx?.status === 'Accepted' && publishingActive && anyLanUp ? 'Accepted' : 'Valid · awaiting refresh')
+        : rx?.lastAccepted ? 'TAL Timeout'
+          : !bindings.length ? 'ExtRef Unbound'
+            : !publishingActive ? 'No Tx' : !anyLanUp ? 'Link Down' : rx?.status ?? 'Waiting';
+    return {
+      ...node, rx, subscribed, accepted: valid, inputs, statusLabel,
+      hasTripBinding: bindings.some(isTripBinding),
+      rxCount: rx?.rxCount ?? 0,
+      portA: resolvePort(node.iedId, 'LAN_A'),
+      portB: resolvePort(node.iedId, 'LAN_B'),
+    };
+  });
 
-      let statusLabel = 'Ignored';
-      if (!frameDelivered) {
-        statusLabel = faultMode === 'VLAN_MISMATCH' ? 'VLAN Drop' : !anyLanUp ? 'Link Down' : 'No Tx';
-      } else if (!subscribed) {
-        statusLabel = 'Ignored';
-      } else if (testModeSub) {
-        statusLabel = 'Test Blocked';
-      } else if (!extRefBound) {
-        statusLabel = faultMode.replace('_', ' ');
-      } else {
-        statusLabel = 'Accepted';
-      }
+  const diagnosticNode = evaluatedNodes.find(node => node.iedId === diagnosticIedId)
+    ?? evaluatedNodes.find(node => node.subscribed) ?? evaluatedNodes[0];
+  const publisherStop = !goEna ? 'GoEna is OFF for this publisher.'
+    : faultMode === 'TIMEOUT' ? 'Publishing is suppressed by the TAL timeout scenario.' : undefined;
+  const rxChecks = activeTab === 'TROUBLESHOOTING' && gocb && diagnosticNode
+    ? receptionChecks(gocb, frame?.context === transportKey ? frame : undefined, diagnosticNode, publisherStop) : [];
+  const circuitNode = diagnosticIedId ? diagnosticNode : evaluatedNodes.find(node => node.hasTripBinding) ?? diagnosticNode;
+  const blockingStep = rxChecks.find(step => step.status !== 'PASS');
 
-      return {
-        ...node,
-        subscribed,
-        frameDelivered,
-        accepted,
-        inputActive,
-        statusLabel,
-        rxCount: rxCounts[node.iedId] || 0,
-        portA: resolvePort(node.iedId, 'LAN_A'),
-        portB: resolvePort(node.iedId, 'LAN_B'),
-      };
-    });
-  }, [subEnabledMap, publishingActive, faultMode, testModeSub, payloadActive, anyLanUp, rxCounts, networkLinks, topologyNodes, gocb?.subscriberIedIds]);
-
-  const dur = (sec: number) => `${(sec / speed).toFixed(2)}s`;
-  const currentStNum = gocb?.stNum ?? 5;
-  const datasetEntries = publisherIed?.datasets.find(dataset => dataset.name === gocb?.datSet.split('$').pop())?.fcdas.length;
+  const currentStNum = current?.stNum ?? gocb?.stNum ?? 1;
+  const prevStNum = current?.prevStNum ?? currentStNum;
+  const simSqNum = current?.sqNum ?? 0;
   const goIdStr = gocb?.gocbName === 'gcbLine1ProtTrip' ? 'Line1_Trip' : gocb?.gocbName || 'Line1_Trip';
 
-  const faultOptions: { value: GooseControlBlock['mismatchFault']; label: string }[] = [
-    { value: 'NONE', label: 'Healthy — No Protocol Fault' },
-    { value: 'VLAN_MISMATCH', label: 'VLAN ID Mismatch (Switch Ingress Drop)' },
-    { value: 'APPID_MISMATCH', label: 'APPID Mismatch (Subscriber Filter Reject)' },
-    { value: 'CONFREV_MISMATCH', label: 'confRev Mismatch (ndsCom=TRUE)' },
-    { value: 'DATASET_MISSING', label: 'Missing DataSet FCDA / Invalid ExtRef' },
-    { value: 'TIMEOUT', label: 'GOOSE TAL Timeout (2000 ms Expired)' },
+  const protocolScenarios: { value: GooseControlBlock['mismatchFault']; label: string; effect: string }[] = [
+    { value: 'NONE', label: 'Healthy', effect: 'Both PRP paths are enabled and protocol fault injection is cleared.' },
+    { value: 'VLAN_MISMATCH', label: 'VLAN ID mismatch', effect: 'The switch drops the frame at ingress.' },
+    { value: 'APPID_MISMATCH', label: 'APPID mismatch', effect: 'The subscriber rejects the unexpected APPID.' },
+    { value: 'CONFREV_MISMATCH', label: 'confRev mismatch', effect: 'The subscriber rejects the unexpected configuration revision.' },
+    { value: 'DATASET_MISSING', label: 'Missing DataSet', effect: 'The subscriber rejects the invalid dataset.' },
+    { value: 'TIMEOUT', label: 'GOOSE TAL timeout', effect: 'Publishing stops. Previously accepted data becomes invalid when its TAL expires.' },
   ];
+
+  const manualConditions = [
+    [!lanAUp && !lanBUp, 'BOTH_LANS_DOWN'],
+    [!lanAUp && lanBUp, 'LAN_A_DOWN'],
+    [lanAUp && !lanBUp, 'LAN_B_DOWN'],
+    [!goEna, 'PUBLISHER_OFF'],
+    [testModeSub, 'TRIP_BLOCKED'],
+    [!isFaultFree, faultMode],
+  ] as const;
+  const activeConditions = manualConditions.filter(([active]) => active);
+  const activeScenario = activeConditions.length > 1 ? 'CUSTOM' : activeConditions[0]?.[1] ?? 'NONE';
+  const additionalScenarios = [
+    { value: 'LAN_A_DOWN', label: 'PRP LAN A failure', effect: 'LAN B continues carrying GOOSE traffic.' },
+    { value: 'LAN_B_DOWN', label: 'PRP LAN B failure', effect: 'LAN A continues carrying GOOSE traffic.' },
+    { value: 'BOTH_LANS_DOWN', label: 'Both PRP LANs down', effect: 'Neither path delivers frames. Previously accepted data expires at TAL.' },
+    { value: 'PUBLISHER_OFF', label: 'Publisher GoEna OFF', effect: 'The selected publisher stops transmitting.' },
+    { value: 'TRIP_BLOCKED', label: 'Subscriber test mode', effect: 'Valid GOOSE frames can still be received while the lab trip output is blocked.' },
+  ];
+  const activeEffect = [...protocolScenarios, ...additionalScenarios].find(option => option.value === activeScenario)?.effect
+    ?? 'Multiple conditions are active. Select a scenario to apply it on its own.';
+
+  const applyFaultScenario = (value: string) => {
+    if (!gocb || value === 'CUSTOM') return;
+    const protocolFault = protocolScenarios.find(option => option.value === value);
+    const scenario = protocolFault ?? additionalScenarios.find(option => option.value === value);
+    if (!scenario) return;
+    setFaults(previous => ({ ...previous, [gocb.id]: protocolFault?.value ?? 'NONE' }));
+    setDisabledPublishers(previous => ({ ...previous, [gocb.id]: value === 'PUBLISHER_OFF' }));
+    setLanAUp(value !== 'LAN_A_DOWN' && value !== 'BOTH_LANS_DOWN');
+    setLanBUp(value !== 'LAN_B_DOWN' && value !== 'BOTH_LANS_DOWN');
+    setTestModeSub(value === 'TRIP_BLOCKED');
+    logEvent(`GOOSE scenario: ${scenario.label}`, value === 'NONE' ? 'INFO' : 'WARN');
+  };
 
   // Exact port-seated SVG coordinates anchored directly inside Hirschmann RSP35 RJ45/SFP cages & Rear IED Port Insets
   const PUB_A = { x: 116, y: 178 };
   const PUB_B = { x: 130, y: 178 };
-  const SWA_PORTS = [
-    { x: 250, y: 128 }, // RJ45 Port 1 (from Pub LAN A)
-    { x: 265, y: 128 }, // RJ45 Port 2 (to IED_132_BC)
-    { x: 287, y: 128 }, // RJ45 Port 3 (to IED_132_T1)
-    { x: 305, y: 128 }, // RJ45 Port 4 (to IED_33_F03)
-    { x: 337, y: 128 }, // SFP Port 1  (to IED_132_L2)
-  ];
-  const SWB_PORTS = [
-    { x: 474, y: 128 }, // RJ45 Port 1 (from Pub LAN B)
-    { x: 489, y: 128 }, // RJ45 Port 2 (to IED_132_BC)
-    { x: 511, y: 128 }, // RJ45 Port 3 (to IED_132_T1)
-    { x: 529, y: 128 }, // RJ45 Port 4 (to IED_33_F03)
-    { x: 561, y: 128 }, // SFP Port 1  (to IED_132_L2)
-  ];
+  const SWA_PORTS = switchA.ports;
+  const SWB_PORTS = switchB.ports;
   const SUB_ANCHORS = [
     { xA: 172, xB: 202, y: 266 }, // IED_132_BC Rear Port Inset
     { xA: 314, xB: 344, y: 266 }, // IED_132_T1 Rear Port Inset
@@ -341,6 +1176,74 @@ export const GooseLabPage: React.FC = () => {
 
   const pathPubA = `M ${PUB_A.x} ${PUB_A.y} L ${PUB_A.x} 200 Q ${PUB_A.x} 208 ${PUB_A.x + 8} 208 L ${SWA_PORTS[0].x - 8} 208 Q ${SWA_PORTS[0].x} 208 ${SWA_PORTS[0].x} 200 L ${SWA_PORTS[0].x} ${SWA_PORTS[0].y}`;
   const pathPubB = `M ${PUB_B.x} ${PUB_B.y} L ${PUB_B.x} 214 Q ${PUB_B.x} 222 ${PUB_B.x + 8} 222 L ${SWB_PORTS[0].x - 8} 222 Q ${SWB_PORTS[0].x} 222 ${SWB_PORTS[0].x} 214 L ${SWB_PORTS[0].x} ${SWB_PORTS[0].y}`;
+
+  const [animation, setAnimation] = useState<{ progress: number; frame?: LabFrame }>({ progress: 0 });
+  const visual = useRef(animation);
+  const visualEventSeen = useRef<LabFrame>();
+  useEffect(() => {
+    visual.current = { progress: 0 };
+    visualEventSeen.current = undefined;
+    setAnimation(visual.current);
+  }, [transportKey]);
+
+  useEffect(() => {
+    if (!playing || !publishingActive || !gocb || !['NETWORK_TOPOLOGY', 'LIVE_SIMULATION'].includes(activeTab)) return;
+    const blockId = gocb.id;
+    let request: number;
+    let previous: number | undefined;
+    let lastPaint = 0;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const advance = (time: number) => {
+      request = window.requestAnimationFrame(advance);
+      if (time - lastPaint < 30 && !reducedMotion) return;
+      lastPaint = time;
+      const runtime = runtimes.current.get(blockId);
+      const event = runtime?.visualEvent;
+      const state = visual.current;
+      if (!state.frame || state.progress >= 1) {
+        // The sampled animation can lag behind a protocol burst. Prefer its state-change frame once.
+        const sample = runtime?.frame;
+        const nextFrame = event?.context === transportKey && event !== visualEventSeen.current
+          ? event : sample?.context === transportKey ? sample : undefined;
+        if (nextFrame && nextFrame !== state.frame) {
+          if (nextFrame === event) visualEventSeen.current = event;
+          visual.current = { frame: nextFrame, progress: reducedMotion ? 1 : 0 };
+        }
+      } else {
+        const elapsed = previous === undefined ? 0 : time - previous;
+        visual.current = { ...state, progress: Math.min(1, state.progress + elapsed * speed / 1250) };
+      }
+      if (visual.current !== state) setAnimation(visual.current);
+      previous = time;
+    };
+    request = window.requestAnimationFrame(advance);
+    return () => window.cancelAnimationFrame(request);
+  }, [playing, publishingActive, gocb?.id, speed, activeTab, transportKey]);
+
+  const visualFrame = publishingActive && animation.frame?.context === transportKey ? animation.frame : undefined;
+  const progress = animation.progress;
+  const drawPacket = (pathId: string, progressAlongPath: number, lan: Lan, label?: string) => {
+    const path = svgRef.current?.querySelector<SVGPathElement>(`#${pathId}`);
+    if (!path || progressAlongPath < 0 || progressAlongPath >= 1) return null;
+    const point = path.getPointAtLength(path.getTotalLength() * progressAlongPath);
+    const blue = lan === 'A';
+    const color = blue ? '#38BDF8' : '#C084FC';
+    const badgeY = blue ? -21 : 7;
+    return (
+      <g transform={`translate(${point.x} ${point.y})`} pointerEvents="none">
+        <circle r="4" fill={color} stroke="#FFFFFF" filter="url(#gGlow)" />
+        {label && <>
+          <rect x="-36" y={badgeY} width="72" height="14" rx="7" fill="#061827" stroke={color} />
+          <text x="0" y={badgeY + 10} textAnchor="middle" fill="#F0FAFF" fontSize="7" fontWeight="800" fontFamily="monospace">{label}</text>
+        </>}
+      </g>
+    );
+  };
+  const arrivalProgress = (lan: Lan, idx: number, iedId: string) => {
+    const order = visualFrame?.arrivals[iedId]?.indexOf(lan) ?? -1;
+    if (order < 0) return null;
+    return drawPacket(`gl-${lan.toLowerCase()}-${idx}`, (progress - 0.27) / (0.23 + order * 0.07), lan);
+  };
 
   return (
     <div style={{ backgroundColor: '#020B16', color: '#E2F1FC' }} className="space-y-2.5 pb-4 text-xs select-none">
@@ -372,7 +1275,7 @@ export const GooseLabPage: React.FC = () => {
             }}
           >
             <span className={`w-2 h-2 rounded-full ${playing && isFaultFree ? 'bg-[#22C55E] animate-pulse' : 'bg-[#EF4444]'}`} />
-            Simulation: {playing ? (isFaultFree && goEna ? 'RUNNING' : 'FAULT') : 'PAUSED'}
+            Simulation: {playing ? (!goEna ? 'DISABLED' : isFaultFree ? 'RUNNING' : 'FAULT') : 'PAUSED'}
           </span>
 
           <span
@@ -426,15 +1329,42 @@ export const GooseLabPage: React.FC = () => {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-[#235B76] bg-[#071A2B] px-4 py-2">
+        <label className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <span className="font-bold text-[#D9EFFC]">Fault Scenario</span>
+          <select
+            className="w-full min-w-0 rounded-md border border-[#326985] bg-[#0B253A] px-2 py-1.5 text-sm font-semibold text-white sm:w-60"
+            disabled={!gocb}
+            value={activeScenario}
+            onChange={event => applyFaultScenario(event.target.value)}
+            aria-describedby="goose-fault-effect"
+          >
+            {activeScenario === 'CUSTOM' && <option value="CUSTOM" disabled>Custom — multiple conditions</option>}
+            <optgroup label="GOOSE protocol">
+              {protocolScenarios.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </optgroup>
+            <optgroup label="PRP and device controls">
+              {additionalScenarios.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </optgroup>
+          </select>
+        </label>
+        <span id="goose-fault-effect" className="text-[#D0E6F5]">{activeEffect}</span>
+      </div>
+
       {/* 2. SIX SUB-NAVIGATION TABS ROW */}
       <div className="flex flex-wrap gap-2">
         {(
           [
+            { id: 'SCL_EDITOR', label: 'SCL Editor', icon: <FileCode2 className="w-3.5 h-3.5" /> },
             { id: 'ENGINEERING', label: 'Engineering', icon: <Settings className="w-3.5 h-3.5" /> },
             { id: 'NETWORK_TOPOLOGY', label: 'Network Topology', icon: <Network className="w-3.5 h-3.5" /> },
             { id: 'LIVE_SIMULATION', label: 'Live Simulation', icon: <Activity className="w-3.5 h-3.5" /> },
             { id: 'PACKET_ANALYZER', label: 'Packet Analyzer', icon: <FileCode2 className="w-3.5 h-3.5" /> },
+            { id: 'TRIP_CIRCUIT', label: 'Trip Circuit', icon: <Zap className="w-3.5 h-3.5" /> },
+            { id: 'PRP_DIAGNOSTICS', label: 'PRP Diagnostics', icon: <Network className="w-3.5 h-3.5" /> },
+            { id: 'FAT_SAT', label: 'GOOSE FAT/SAT', icon: <CheckCircle2 className="w-3.5 h-3.5" /> },
             { id: 'DIAGNOSTICS', label: 'Diagnostics', icon: <ShieldAlert className="w-3.5 h-3.5" /> },
+            { id: 'TROUBLESHOOTING', label: 'Troubleshooting', icon: <AlertTriangle className="w-3.5 h-3.5" /> },
             { id: 'EVENT_TIMELINE', label: 'Event Timeline', icon: <Clock className="w-3.5 h-3.5" /> },
           ] as const
         ).map((tab) => {
@@ -475,10 +1405,9 @@ export const GooseLabPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      setGoEna((v) => {
-                        logEvent(`Publisher GoEna set to ${!v ? 'TRUE (Publishing)' : 'FALSE (Disabled)'}`, !v ? 'INFO' : 'WARN');
-                        return !v;
-                      });
+                      if (!gocb) return;
+                      setDisabledPublishers(previous => ({ ...previous, [gocb.id]: goEna }));
+                      logEvent(`Publisher GoEna set to ${goEna ? 'FALSE (Disabled)' : 'TRUE (Publishing)'}`, goEna ? 'WARN' : 'INFO');
                     }}
                     className={`px-2 py-0.5 rounded text-[9.5px] font-mono font-bold border ${
                       goEna
@@ -619,11 +1548,11 @@ export const GooseLabPage: React.FC = () => {
                 </span>
               </div>
 
-              <div className="p-2 flex-1 flex items-center justify-center overflow-x-auto">
-                <div className="min-w-[680px] w-full">
+              <div className="flex flex-1 flex-col overflow-x-auto p-2">
+                <div className="m-auto w-[88%] min-w-[590px] max-w-[920px] shrink-0">
                   <svg
                     ref={svgRef}
-                    viewBox="0 0 740 430"
+                    viewBox="0 0 740 479"
                     className="w-full h-auto block select-none"
                     role="img"
                     aria-label="Station Bus Real Device PRP Topology with Publisher, Hirschmann Switches, and 4 Bay IEDs"
@@ -649,7 +1578,7 @@ export const GooseLabPage: React.FC = () => {
                     </defs>
 
                     {/* Metallic Industrial Relay Cabinet Interior */}
-                    <rect x="0" y="0" width="740" height="430" rx="8" fill="url(#rackWall)" stroke="#1E3A52" strokeWidth="1.5" />
+                    <rect x="0.75" y="0.75" width="738.5" height="477.5" rx="8" fill="url(#rackWall)" stroke="#1E3A52" strokeWidth="1.5" />
                     {/* Left & Right Vertical Rack Rails */}
                     <rect x="6" y="8" width="14" height="414" fill="#334155" stroke="#64748B" strokeWidth="1" />
                     <rect x="720" y="8" width="14" height="414" fill="#334155" stroke="#64748B" strokeWidth="1" />
@@ -675,10 +1604,7 @@ export const GooseLabPage: React.FC = () => {
                     <text x="276" y="51" textAnchor="middle" fill="#7DD3FC" fontSize="9.5">Hirschmann RSP35</text>
                     <image
                       href="assets/goose-lab/hirschmann-rsp35.png"
-                      x="196"
-                      y="56"
-                      width="168"
-                      height="92"
+                      {...switchA.image}
                       preserveAspectRatio="xMidYMid meet"
                       opacity={lanAUp ? 1 : 0.45}
                     />
@@ -690,10 +1616,7 @@ export const GooseLabPage: React.FC = () => {
                     <text x="498" y="51" textAnchor="middle" fill="#E879F9" fontSize="9.5">Hirschmann RSP35</text>
                     <image
                       href="assets/goose-lab/hirschmann-rsp35.png"
-                      x="420"
-                      y="56"
-                      width="168"
-                      height="92"
+                      {...switchB.image}
                       preserveAspectRatio="xMidYMid meet"
                       opacity={lanBUp ? 1 : 0.45}
                     />
@@ -721,33 +1644,19 @@ export const GooseLabPage: React.FC = () => {
                     <path id="gl-pub-a" d={pathPubA} fill="none" stroke={lanAUp ? '#38BDF8' : '#EF4444'} strokeWidth="3.2" strokeDasharray={lanAUp ? undefined : '5 3'} />
                     <path id="gl-pub-b" d={pathPubB} fill="none" stroke={lanBUp ? '#C084FC' : '#EF4444'} strokeWidth="3.2" strokeDasharray={lanBUp ? undefined : '5 3'} />
 
-                    {/* Animated GOOSE Overlay Packets + Live Data Flow Badges on Publisher -> Switch A & B */}
-                    {publishingActive && lanAUp && (
-                      <g>
-                        <animateMotion dur={dur(2.2)} repeatCount="indefinite"><mpath href="#gl-pub-a" /></animateMotion>
-                        <circle r="4.5" fill="#00E5FF" stroke="#FFFFFF" strokeWidth="1.2" filter="url(#gGlow)" />
-                        <rect x="-54" y="-22" width="108" height="15" rx="7.5" fill={simSqNum === 0 ? '#3B0D15' : '#05253C'} fillOpacity="0.95" stroke={simSqNum === 0 ? '#F87171' : '#00E5FF'} strokeWidth="1.2" />
-                        <text x="0" y="-12" textAnchor="middle" fill={simSqNum === 0 ? '#FECACA' : '#E0FAFF'} fontSize="7" fontWeight="800" fontFamily="monospace">
-                          {simSqNum === 0 ? `TRIP BURST · st:${gocb?.stNum ?? 1}` : `GOOSE 0x88B8 · st:${gocb?.stNum ?? 1} sq:${simSqNum}`}
-                        </text>
-                      </g>
-                    )}
-                    {publishingActive && lanBUp && (
-                      <g>
-                        <animateMotion dur={dur(2.3)} begin="0.5s" repeatCount="indefinite"><mpath href="#gl-pub-b" /></animateMotion>
-                        <circle r="4.5" fill="#D8B4FE" stroke="#FFFFFF" strokeWidth="1.2" filter="url(#gGlow)" />
-                        <rect x="-54" y="7" width="108" height="15" rx="7.5" fill="#23103D" fillOpacity="0.95" stroke="#C084FC" strokeWidth="1.2" />
-                        <text x="0" y="17" textAnchor="middle" fill="#F3E8FF" fontSize="6.9" fontWeight="800" fontFamily="monospace">
-                          {`PRP-B · ${gocb?.appId || '0x0001'} · V${gocb?.vlanId ?? 101}`}
-                        </text>
-                      </g>
-                    )}
+                    {visualFrame?.txLans.map(lan => (
+                      <React.Fragment key={lan}>
+                        {drawPacket(`gl-pub-${lan.toLowerCase()}`, progress / 0.27, lan,
+                          `${lan} · PRP ${visualFrame.prpSequence}`)}
+                      </React.Fragment>
+                    ))}
 
                     {/* Switch A & Switch B -> 4 Bay IEDs */}
                     {evaluatedNodes.map((node, idx) => {
-                      const swA = SWA_PORTS[idx + 1];
-                      const swB = SWB_PORTS[idx + 1];
+                      const swA = SWA_PORTS[idx + 1] ?? SWA_PORTS[4];
+                      const swB = SWB_PORTS[idx + 1] ?? SWB_PORTS[4];
                       const sub = SUB_ANCHORS[idx];
+                      if (!sub) return null;
                       const laneAY = 236 + idx * 4;
                       const laneBY = 250 + idx * 4;
 
@@ -775,40 +1684,8 @@ export const GooseLabPage: React.FC = () => {
                             opacity={node.subscribed ? 1 : 0.72}
                           />
 
-                          {/* Cyan/Green/Red GOOSE Overlay Packets + Live Subscriber Decision Badges */}
-                          {node.frameDelivered && lanAUp && (() => {
-                            const isRejected = node.subscribed && !node.accepted;
-                            const badgeColor = node.accepted ? '#4ADE80' : isRejected ? '#F87171' : '#38BDF8';
-                            const badgeFill = node.accepted ? '#052E1E' : isRejected ? '#3B0D15' : '#06243A';
-                            const badgeTxt = node.accepted
-                              ? 'ACCEPT · ExtRef'
-                              : isRejected
-                                ? `DROP · ${faultMode.replace('_MISMATCH', '')}`
-                                : 'L2 MCAST · IGNORE';
-                            return (
-                              <g>
-                                <animateMotion dur={dur(2.4 + idx * 0.18)} repeatCount="indefinite">
-                                  <mpath href={`#gl-a-${idx}`} />
-                                </animateMotion>
-                                <circle r={node.accepted ? 4.2 : 3.4} fill={badgeColor} stroke="#FFFFFF" strokeWidth="1" filter="url(#gGlow)" />
-                                {(idx === 0 || idx === 2 || isRejected) && (
-                                  <>
-                                    <rect x="-41" y="-19" width="82" height="13.5" rx="6.8" fill={badgeFill} fillOpacity="0.94" stroke={badgeColor} strokeWidth="1.1" />
-                                    <text x="0" y="-10" textAnchor="middle" fill="#F0FAFF" fontSize="6.5" fontWeight="800" fontFamily="monospace">
-                                      {badgeTxt}
-                                    </text>
-                                  </>
-                                )}
-                              </g>
-                            );
-                          })()}
-                          {node.frameDelivered && lanBUp && (
-                            <circle r={node.accepted ? 4.0 : 3.2} fill={node.accepted ? '#4ADE80' : '#C084FC'} filter="url(#gGlow)">
-                              <animateMotion dur={dur(2.45 + idx * 0.18)} begin="0.55s" repeatCount="indefinite">
-                                <mpath href={`#gl-b-${idx}`} />
-                              </animateMotion>
-                            </circle>
-                          )}
+                          {arrivalProgress('A', idx, node.iedId)}
+                          {arrivalProgress('B', idx, node.iedId)}
                         </g>
                       );
                     })}
@@ -826,6 +1703,7 @@ export const GooseLabPage: React.FC = () => {
                       const cx = 187 + idx * 142;
                       const x = cx - 54;
                       const sub = SUB_ANCHORS[idx];
+                      if (!sub) return null;
                       const isAcc = node.accepted;
                       const isErr = node.subscribed && !node.accepted;
                       return (
@@ -869,8 +1747,29 @@ export const GooseLabPage: React.FC = () => {
                             fontSize="8.6"
                             fontWeight="800"
                           >
-                            {isAcc ? 'ACCEPTED ✓' : isErr ? node.statusLabel.toUpperCase() : 'IGNORED —'}
+                            {node.statusLabel === 'Accepted' ? 'ACCEPTED ✓' : isAcc ? 'VALID · HOLD' : node.statusLabel.toUpperCase()}
                           </text>
+                          {visualFrame && progress >= 0.5 && (() => {
+                            const [first, duplicate] = visualFrame.arrivals[node.iedId] ?? [];
+                            return first && <text x={cx} y="424" textAnchor="middle" fill="#A5E6FF" fontSize="7" fontFamily="monospace">
+                              {duplicate && progress >= 0.57 ? `${first} first · ${duplicate} DUP DISCARDED` : `LAN ${first} first copy`}
+                            </text>;
+                          })()}
+                          {(node.rx?.tripFrame || (node.subscribed && node.hasTripBinding)) && (
+                            <g role="group" aria-label={`${node.iedName} simulated protection`}>
+                              <rect x={cx - 59} y="434" width="118" height="36" rx="5"
+                                fill={node.rx?.tripFrame ? '#48151F' : '#10283C'}
+                                stroke={node.rx?.tripFrame ? '#F87171' : '#477694'} />
+                              <text x={cx} y="448" textAnchor="middle" fill={node.rx?.tripFrame ? '#FECACA' : '#DBEAFE'}
+                                fontSize="8.2" fontWeight="800">
+                                {node.rx?.tripFrame ? 'IED TRIPPED' : testModeSub ? 'TRIP OUTPUT BLOCKED' : 'TRIP READY'}
+                              </text>
+                              <text x={cx} y="462" textAnchor="middle" fill="#FFFFFF" fontSize="7.8" fontWeight="800">
+                                {node.rx?.breakerOpen ? 'LAB BREAKER OPEN'
+                                  : node.rx?.tripFrame ? 'LAB BREAKER OPENING' : 'LAB BREAKER CLOSED'}
+                              </text>
+                            </g>
+                          )}
                         </g>
                       );
                     })}
@@ -927,14 +1826,18 @@ export const GooseLabPage: React.FC = () => {
             {/* RIGHT COLUMN: GOOSE Message Details (Live) + Animation Control + Status Summary */}
             <div className="flex flex-col gap-2.5">
               {/* GOOSE Message Details (Live) */}
-              <div className="rounded-xl border border-[#0E6A94] bg-[#041626] overflow-hidden shadow-lg">
-                <div className="px-3 py-2 border-b border-[#0E6A94] bg-gradient-to-r from-[#07304A] to-[#041829]">
-                  <span className="font-extrabold text-white flex items-center gap-1.5">
-                    <Radio className="w-3.5 h-3.5 text-[#4ADE80]" />
+              <section
+                aria-labelledby="goose-live-message-heading"
+                className="rounded-xl border border-[#0E6A94] bg-[#071A2B] overflow-hidden shadow-lg"
+                style={{ '--sas-surface-override': '#071A2B', '--sas-surface-blur': 'none' } as React.CSSProperties}
+              >
+                <div className="px-3 py-2.5 border-b border-[#236184] bg-[#0C2940]">
+                  <h3 id="goose-live-message-heading" className="flex items-center gap-2 text-sm font-bold text-white">
+                    <Radio className="w-4 h-4 shrink-0 text-[#4ADE80]" aria-hidden="true" />
                     GOOSE Message Details (Live)
-                  </span>
+                  </h3>
                 </div>
-                <div className="p-3 space-y-1 font-mono text-[10.5px]">
+                <dl className="px-3 py-1 text-[13px] leading-5">
                   {[
                     ['goID', goIdStr],
                     ['gocbRef', gocb?.gocbName || 'gcbLine1ProtTrip'],
@@ -943,15 +1846,17 @@ export const GooseLabPage: React.FC = () => {
                     ['sqNum', String(simSqNum)],
                     ['confRev', String(gocb?.confRev ?? 1)],
                     ['TAL', `${gocb?.timeAllowedToLiveMs ?? 2000} ms`],
-                    ['Payload', `${gocb?.extRefs.length ? gocb.extRefs.length + 3 : 5} DataSet entries`],
+                    ['State time', current?.stateChangedAt ?? '—'],
+                    ['Next interval', `${current?.interval ?? '—'} ms`],
+                    ['Payload', `${frame?.entries ?? dataset?.fcdas.length ?? 0} DataSet entries`],
                   ].map(([k, v]) => (
-                    <div key={k} className="grid grid-cols-[72px_minmax(0,1fr)] gap-2 border-b border-[#0F2C45] pb-0.5 last:border-b-0">
-                      <span className="text-[#8BB3D4]">{k}</span>
-                      <span className="text-white font-bold truncate">: {v}</span>
+                    <div key={k} className="grid grid-cols-[minmax(5rem,auto)_minmax(0,1fr)] gap-2 border-b border-[#25445C] py-1.5 last:border-b-0">
+                      <dt className="font-semibold text-[#BCD9EB]">{k}</dt>
+                      <dd className="m-0 font-mono font-semibold text-white [overflow-wrap:anywhere]">{v}</dd>
                     </div>
                   ))}
-                </div>
-              </div>
+                </dl>
+              </section>
 
               {/* Animation Control */}
               <div className="rounded-xl border border-[#0E6A94] bg-[#041626] overflow-hidden shadow-lg">
@@ -968,7 +1873,9 @@ export const GooseLabPage: React.FC = () => {
                     className="w-full py-1.5 rounded-lg border border-[#F59E0B] bg-[#332005] text-[#FDE68A] font-extrabold text-xs flex items-center justify-center gap-1.5 hover:brightness-110 transition"
                   >
                     <Zap className="w-3.5 h-3.5 text-[#FACC15]" />
-                    {isStatusDataset ? 'Publish Simulated CB Status (stNum++)' : 'Publish Trip (stNum++)'}
+                    {isStatusDataset ? 'Publish Simulated CB Status' : current?.payload[stimulusKey] === true
+                      ? 'Publish Protection Reset' : stimulusKey === 'RBRF1.OpEx' ? 'Publish Breaker Failure (50BF)'
+                        : stimulusKey === 'PTOC1.Str' ? 'Publish Protection Pickup' : 'Publish Trip'}
                   </button>
 
                   <div className="grid grid-cols-2 gap-2">
@@ -1024,14 +1931,19 @@ export const GooseLabPage: React.FC = () => {
                 <div className="p-3 space-y-1.5 text-[11px]">
                   {[
                     { label: 'GOOSE Publishing', ok: publishingActive, text: publishingActive ? 'Active' : 'Stopped' },
-                    { label: 'Delivery (LAN A)', ok: lanAUp && publishingActive, text: lanAUp ? 'OK' : 'DOWN' },
-                    { label: 'Delivery (LAN B)', ok: lanBUp && publishingActive, text: lanBUp ? 'OK' : 'DOWN' },
+                    { label: 'Delivery (LAN A)', ok: lanAUp && publishingActive && !!frame?.ingress.includes('A'), text: !lanAUp ? 'DOWN' : !publishingActive ? 'NO TX' : frame?.ingress.includes('A') ? 'OK' : 'NO DELIVERY' },
+                    { label: 'Delivery (LAN B)', ok: lanBUp && publishingActive && !!frame?.ingress.includes('B'), text: !lanBUp ? 'DOWN' : !publishingActive ? 'NO TX' : frame?.ingress.includes('B') ? 'OK' : 'NO DELIVERY' },
                     ...evaluatedNodes.map((n) => ({
                       label: n.iedName,
                       ok: n.accepted,
                       muted: !n.subscribed,
-                      text: n.accepted ? 'Accepted' : n.subscribed ? n.statusLabel : 'Not Subscribed',
+                      text: n.subscribed ? n.statusLabel : 'Not Subscribed',
                     })),
+                      ...evaluatedNodes.filter(n => n.rx?.tripFrame).map(n => ({
+                        label: `${n.iedName} lab breaker`,
+                        ok: false,
+                        text: n.rx?.breakerOpen ? 'OPEN' : 'OPENING',
+                      })),
                   ].map((row) => (
                     <div key={row.label} className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5 text-[#DCEEFB]">
@@ -1057,6 +1969,46 @@ export const GooseLabPage: React.FC = () => {
               </div>
             </div>
           </div>
+
+          <section aria-label="GOOSE badge flow" className="rounded-xl border border-[#0E6A94] bg-[#041626] p-3">
+            <h3 className="font-extrabold text-white">Publisher → Network → Subscriber → Trip → Breaker → SCADA</h3>
+            <p className="mt-1 text-[#9ED8F6]">Lab-only outputs. SCADA indication follows breaker feedback in the demonstration.</p>
+            {evaluatedNodes.filter(node => node.subscribed).map(node => {
+              const [first, duplicate] = visualFrame?.arrivals[node.iedId] ?? [];
+              const visible = progress >= 0.57;
+              const tripFrame = node.rx?.tripFrame;
+              const tripPending = tripFrame && visualFrame && visualFrame.serial <= tripFrame.serial;
+              const trip = tripFrame && node.rx?.mappedTrip && node.accepted && (!tripPending || progress >= 0.66);
+              const tripText = testModeSub ? 'Output blocked'
+                : trip ? 'Trip asserted' : tripFrame && !tripPending && node.accepted ? 'Trip input reset' : '—';
+              const breaker = node.rx?.breakerOpen && (!tripPending || progress >= 0.77);
+              const alarm = node.rx?.alarm && (!tripPending || progress >= 0.88);
+              const steps = [
+                ['Publisher', !goEna ? 'GoEna OFF' : !publishingActive ? 'TX paused by timeout fault' : visualFrame ? `st ${visualFrame.stNum} · sq ${visualFrame.sqNum}` : 'Waiting', !!visualFrame],
+                ['Network', visible && first ? `LAN ${first} first${duplicate ? ` · ${duplicate} duplicate discarded` : ''}`
+                  : visible && visualFrame?.txLans.length && !visualFrame.ingress.length ? 'VLAN drop'
+                    : visible ? 'No delivery' : '—', visible && !!first],
+                ['Subscriber', visible && visualFrame ? visualFrame.decisions[node.iedId] : node.statusLabel,
+                  visible && visualFrame?.decisions[node.iedId] === 'Accepted'],
+                ['Trip', tripText, !!trip && !testModeSub],
+                ['Breaker', breaker ? 'OPEN · 52a=0 / 52b=1' : '—', !!breaker],
+                ['SCADA', alarm ? 'Trip alarm · CB OPEN' : '—', !!alarm],
+              ] as const;
+              return (
+                <div key={node.iedId} className="mt-2">
+                  <div className="font-mono font-bold text-[#BAE6FD]">{node.iedName}</div>
+                  <div className="mt-1 grid grid-cols-2 gap-1.5 sm:grid-cols-3 xl:grid-cols-6">
+                    {steps.map(([label, value, active]) => (
+                      <div key={label} className={`min-w-0 rounded-md border px-2 py-1 transition-colors motion-reduce:transition-none ${active ? 'border-[#38BDF8] bg-[#073451]' : 'border-[#153B57] bg-[#030F1D]'}`}>
+                        <div className="font-bold text-[#8AD8FF]">{label}</div>
+                        <div className="break-words text-white">{value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </section>
 
           {/* 4. BOTTOM 2-COLUMN ROW: GOOSE Transmission Timeline + Subscriber Response Table */}
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.12fr] gap-2.5">
@@ -1090,20 +2042,10 @@ export const GooseLabPage: React.FC = () => {
                 <div className="grid grid-cols-[62px_minmax(0,1fr)] items-center gap-2">
                   <span className="text-[#8BB3D4]">sqNum</span>
                   <div className="flex items-center justify-between gap-1 bg-[#031222] border border-[#123952] rounded px-2 py-1 overflow-x-auto">
-                    {['...', '127', '128', '129', '130'].map((n) => (
-                      <span key={n} className="text-[#7B9BB8]">{n}</span>
-                    ))}
-                    <span className="text-[#FACC15] font-extrabold">|</span>
-                    {Array.from({ length: 13 }, (_, i) => i).map((n) => (
-                      <span
-                        key={n}
-                        className={`px-1 rounded ${
-                          n === simSqNum % 13 ? 'bg-[#22C55E] text-[#02101F] font-extrabold' : 'text-[#DCEEFB]'
-                        }`}
-                      >
-                        {n}
-                      </span>
-                    ))}
+                    <span className="text-[#4ADE80] font-extrabold">{simSqNum}</span>
+                    <span className="text-[#BAE6FD]">
+                      {current?.sentCurrentState ? `Next retransmission interval: ${current.interval} ms` : 'Next publication: sqNum 0'}
+                    </span>
                   </div>
                 </div>
 
@@ -1153,9 +2095,9 @@ export const GooseLabPage: React.FC = () => {
                     <tr className="bg-[#082238] text-[#9ED8F6] border-b border-[#164463]">
                       <th className="py-1.5 px-3">IED</th>
                       <th className="py-1.5 px-2">Subscription</th>
-                      <th className="py-1.5 px-2">Packet Rx</th>
+                      <th className="py-1.5 px-2">Unique Rx / GOOSE Accepted / Duplicate</th>
                       <th className="py-1.5 px-2">Accept</th>
-                      <th className="py-1.5 px-2">{isStatusDataset ? 'Input (CB Status)' : 'Input (Trip)'}</th>
+                      <th className="py-1.5 px-2">Mapped inputs</th>
                       <th className="py-1.5 px-3">Status</th>
                     </tr>
                   </thead>
@@ -1168,15 +2110,15 @@ export const GooseLabPage: React.FC = () => {
                             {n.subscribed ? '✓ Yes' : '✕ No'}
                           </span>
                         </td>
-                        <td className="py-2 px-2 text-[#BAE6FD]">{n.rxCount.toLocaleString()}</td>
+                        <td className="py-2 px-2 text-[#BAE6FD]">{n.rxCount} / {n.rx?.acceptedCount ?? 0} / {n.rx?.duplicates ?? 0}</td>
                         <td className="py-2 px-2">
                           <span className={n.accepted ? 'text-[#38BDF8] font-bold' : 'text-[#94A3B8]'}>
                             {n.accepted ? '✓ Yes' : '— No'}
                           </span>
                         </td>
                         <td className="py-2 px-2">
-                          <span className={n.inputActive ? 'text-[#4ADE80] font-bold' : 'text-[#94A3B8]'}>
-                            {isStatusDataset ? (n.accepted ? (n.inputActive ? 'CLOSED' : 'OPEN') : '—') : (n.inputActive ? 'TRUE (1)' : 'FALSE (0)')}
+                          <span className={n.accepted ? 'text-[#4ADE80] font-bold' : 'text-[#94A3B8]'}>
+                            {n.inputs.join(' · ') || '—'}
                           </span>
                         </td>
                         <td className="py-2 px-3">
@@ -1208,28 +2150,8 @@ export const GooseLabPage: React.FC = () => {
               Fault Injection &amp; Diagnostics Controls
             </h3>
             <div className="space-y-2">
-              {faultOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => {
-                    if (!gocb) return;
-                    setGooseMismatchFault(gocb.id, opt.value);
-                    logEvent(`GOOSE Fault set to: ${opt.label}`, opt.value === 'NONE' ? 'INFO' : 'ERR');
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-lg border font-mono text-xs transition flex justify-between items-center"
-                  style={{
-                    backgroundColor: faultMode === opt.value ? '#08324F' : '#031220',
-                    borderColor: faultMode === opt.value ? '#00DFFF' : '#163D5E',
-                    color: faultMode === opt.value ? '#FFFFFF' : '#B6D4EA',
-                  }}
-                >
-                  <span>{opt.label}</span>
-                  {faultMode === opt.value && <span className="text-[#4ADE80] font-extrabold">ACTIVE</span>}
-                </button>
-              ))}
               <label className="flex items-center justify-between px-3 py-2 rounded-lg border border-[#163D5E] bg-[#031220] cursor-pointer">
-                <span>Subscriber Test Mode (LPHD1.Sim / Test Block)</span>
+                <span>Subscriber Test Mode (block lab trip output)</span>
                 <input
                   type="checkbox"
                   checked={testModeSub}
@@ -1255,6 +2177,14 @@ export const GooseLabPage: React.FC = () => {
                   <div className="text-[#E879F9]">
                     LAN B: {publisherIed?.name}/{pubPortB.iedPort} → {pubPortB.swName}/{pubPortB.swPort} → {n.iedName}/{n.portB.iedPort}
                   </div>
+                  {gocb?.extRefs.filter(ref => ref.subscriberIedId === n.iedId).map(ref => {
+                    const matches = datasetMember(dataset, publisherIed?.name ?? '', ref);
+                    return <div key={`${ref.intAddr}:${ref.srcRef}`} className={ref.bound && matches ? 'break-all text-[#86EFAC]' : 'break-all text-[#FCA5A5]'}>
+                      {ref.srcRef} → {ref.intAddr} · {ref.bound && matches ? 'Bound' : matches ? 'Disabled' : 'Source outside dataset'}
+                    </div>;
+                  })}
+                  {n.subscribed && !gocb?.extRefs.some(ref => ref.subscriberIedId === n.iedId) &&
+                    <div className="text-[#FCA5A5]">No ExtRef configured</div>}
                 </div>
               ))}
             </div>
@@ -1262,27 +2192,147 @@ export const GooseLabPage: React.FC = () => {
         </div>
       )}
 
+      <div hidden={activeTab !== 'SCL_EDITOR'}><SclEngineeringEditor /></div>
+
       {/* PACKET ANALYZER TAB */}
       {activeTab === 'PACKET_ANALYZER' && (
         <div className="rounded-xl border border-[#0E6A94] bg-[#041626] p-4 space-y-3">
           <h3 className="text-sm font-extrabold text-white">IEC 61850-8-1 GOOSE Layer-2 Frame &amp; ASN.1 BER Dissector</h3>
+          <p className="text-[#9ED8F6]">Simulated frame fields. Latest transmission is retained during silence.</p>
           <pre className="p-3 rounded-lg bg-[#020C17] border border-[#164463] font-mono text-[11px] text-[#7DD3FC] overflow-x-auto leading-relaxed">
-{`Ethernet II, Src: ${publisherIed?.macAddress || '00:1B:1B:61:85:10'}, Dst: ${gocb?.multicastMac || '01-0C-CD-01-00-01'} (IEC 61850 GOOSE Multicast)
-802.1Q Virtual LAN, PRI: ${gocb?.vlanPriority ?? 4}, DEI: 0, ID: ${gocb?.vlanId ?? 101}
+{!frame ? 'Waiting for the first simulated publication.' :
+`TX: ${!goEna ? 'GoEna OFF' : !publishingActive ? 'Suppressed (timeout test)' : playing ? 'Publishing' : 'Paused'}
+Ethernet II, Src: ${publisherIed?.macAddress ?? 'Unknown'}, Dst: ${gocb?.multicastMac} (GOOSE multicast)
+802.1Q VLAN: ${frame.vlan} (configured ${gocb?.vlanId}), PCP: ${gocb?.vlanPriority}
 Type: IEC 61850/GOOSE (0x88b8)
-GOOSE Header:
-  APPID: ${gocb?.appId || '0x0001'} | Length: 142 bytes | Reserved1: 0x0000 | Reserved2: 0x0000
+APPID: ${frame.appId} (configured ${gocb?.appId}) | Reserved1: ${frame.simulation ? '0x8000' : '0x0000'} | Reserved2: 0x0000
+PRP sequence: ${frame.prpSequence} | TX LANs: ${frame.txLans.join(', ') || 'none'} | Switch ingress: ${frame.ingress.join(', ') || 'no delivery'}
 goosePdu:
   gocbRef: ${gocb?.gocbRef}
-  timeAllowedtoLive: ${gocb?.timeAllowedToLiveMs ?? 2000} ms
-  datSet: ${gocb?.datSet}
+  timeAllowedtoLive: ${frame.tal} ms
+  datSet: ${frame.dataSet} (configured ${gocb?.datSet})
   goID: ${goIdStr}
-  t: ${new Date().toISOString()}
-  stNum: ${currentStNum} | sqNum: ${simSqNum} | simulation: ${testModeSub} | confRev: ${gocb?.confRev ?? 1} | ndsCom: ${faultMode === 'CONFREV_MISMATCH'}
-  numDatSetEntries: ${datasetEntries ?? '—'}`}
+  t: ${frame.t}
+  stNum: ${frame.stNum} | sqNum: ${frame.sqNum} | simulation: ${frame.simulation} | confRev: ${frame.confRev} (configured ${gocb?.confRev}) | ndsCom: ${frame.ndsCom}
+  numDatSetEntries: ${frame.entries}
+  allData (simulated): ${JSON.stringify(frame.payload)}
+Receiver filter:
+${evaluatedNodes.filter(node => node.subscribed).map(node => {
+  const rx = node.rx;
+  return `  ${node.iedName}: ${rx?.first ? `LAN ${rx.first} first; ` : ''}${rx?.duplicate ? `LAN ${rx.duplicate} duplicate discarded; ` : ''}${rx?.status ?? 'No Rx'} · supervision: ${node.statusLabel}`;
+}).join('\n')}`}
           </pre>
+          {gocb && current && <PacketComparison key={gocb.id} history={current.capture} block={gocb}
+            sourceMac={publisherIed?.macAddress} goId={goIdStr} subscribers={topologyNodes} />}
         </div>
       )}
+
+      {activeTab === 'TROUBLESHOOTING' && (
+        <section className="space-y-3 rounded-xl border border-[#235B76] bg-[#071A2B] p-4"
+          style={{ '--sas-surface-override': '#071A2B' } as React.CSSProperties}>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-white">GOOSE Receive Troubleshooting</h3>
+              <p className="mt-1 text-[#A9C8DD]">Select a subscriber and follow the first step marked FAIL.</p>
+            </div>
+            {diagnosticNode && (
+              <label className="grid w-full gap-1 font-semibold text-[#D7EEFD] sm:w-64">
+                Subscriber IED
+                <select className="w-full min-w-0 rounded-md border border-[#326985] px-2 py-1.5 text-sm"
+                  value={diagnosticNode.iedId} onChange={event => setDiagnosticIedId(event.target.value)}>
+                  {evaluatedNodes.map(node => (
+                    <option key={node.iedId} value={node.iedId}>{node.iedName}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          {diagnosticNode && rxChecks.length > 0 ? (
+            <>
+              <div className="rounded-md border border-[#326985] bg-[#0C2538] px-3 py-2 leading-5">
+                <p className={blockingStep?.status === 'FAIL' ? 'font-bold text-[#FECACA]' : 'font-bold text-[#BFEADF]'}>
+                  {blockingStep?.status === 'FAIL' ? `First failure: ${blockingStep.title}`
+                    : blockingStep ? `Waiting: ${blockingStep.title}` : 'GOOSE reception confirmed'}
+                </p>
+                <p className="text-[#D7EEFD]">
+                  Supervision: {diagnosticNode.statusLabel} · Unique Rx: {diagnosticNode.rxCount} · Accepted: {diagnosticNode.rx?.acceptedCount ?? 0}
+                </p>
+                <p className="text-[#A9C8DD]">Counters are cumulative for the selected publisher and subscriber.</p>
+                {!blockingStep && (
+                  <p className="text-[#D7EEFD]">
+                    {testModeSub ? 'Subscriber Test Mode is active. Trip output is blocked.'
+                      : diagnosticNode.hasTripBinding ? 'If the breaker does not operate, check the mapped trip input and lab breaker state in Network Topology.'
+                        : 'This subscriber has no trip output mapped for this DataSet.'}
+                  </p>
+                )}
+              </div>
+              <ol className="space-y-2">
+                {rxChecks.map((step, index) => (
+                  <li key={step.title} className="rounded-md border border-[#25445C] bg-[#061522] p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="font-bold text-white">{index + 1}. {step.title}</h4>
+                      <span className={`shrink-0 rounded border px-2 py-0.5 font-mono text-[10px] font-bold ${
+                        step.status === 'PASS' ? 'border-[#30654D] text-[#86EFAC]'
+                          : step.status === 'FAIL' ? 'border-[#85424A] text-[#FECACA]' : 'border-[#40576C] text-[#B8CFE0]'
+                      }`}>{step.status}</span>
+                    </div>
+                    <p className="mt-1 break-words leading-5 text-[#D7EEFD]">{step.evidence}</p>
+                    {step.action && <p className="mt-1 leading-5 text-[#9ACBE8]">{step.action}</p>}
+                  </li>
+                ))}
+              </ol>
+            </>
+          ) : <p className="text-[#D7EEFD]">Select a GoCB with a subscriber in Network Topology.</p>}
+        </section>
+      )}
+
+      {activeTab === 'TRIP_CIRCUIT' && (
+        <section className={panelClass}>
+          <h3 className="text-base font-bold text-white">GOOSE to Breaker Trip Circuit</h3>
+          <p className="text-[#B6D4EA]">Simulated protection output, DC trip circuit and auxiliary contacts. Reset the lab to repeat a completed trip.</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label>Trip circuit subscriber<select className={fieldClass} value={circuitNode?.iedId ?? ''} onChange={event => setDiagnosticIedId(event.target.value)}>
+              {evaluatedNodes.map(node => <option key={node.iedId} value={node.iedId}>{node.iedName}</option>)}
+            </select></label>
+            <label>Circuit condition<select className={fieldClass} value={circuitFault}
+              onChange={event => setCircuitFault(event.target.value as CircuitFault)}>
+              {circuitFaults.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select></label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={actionClass} disabled={!playing || !circuitNode?.hasTripBinding}
+              onClick={handlePublishState}>{current?.payload[stimulusKey] === true ? 'Clear trip stimulus' : 'Publish trip stimulus'}</button>
+            <button type="button" className={actionClass} onClick={handleReset}>Reset lab</button>
+          </div>
+          {circuitNode && <>
+            <ol className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              {tripStages.map((stage, index) => {
+                const reached = index === 0 ? circuitNode.accepted || !!circuitNode.rx?.tripFrame : (circuitNode.rx?.tripStage ?? 0) >= index;
+                const blocked = index === (circuitNode.rx?.tripStage ?? 0) + 1 && !!circuitNode.rx?.circuitFailure;
+                return <li key={stage} style={{ animationDelay: `${index * 100}ms` }} className={`rounded-md border px-3 py-2 transition-colors duration-300 motion-reduce:transition-none ${reached && index > 0 ? 'motion-safe:animate-[pulse_0.7s_ease-out_1]' : ''} ${
+                  blocked ? 'border-red-400 bg-[#401722] text-[#FECACA]' : reached ? 'border-emerald-400 bg-[#12362E] text-[#A7F3D0]' : 'border-[#25445C] bg-[#061522] text-[#D7EEFD]'
+                }`}>
+                  <span className="block font-bold">{index + 1}. {stage}</span>
+                  <span>{blocked ? 'Blocked' : reached ? 'Reached' : 'Waiting'}</span>
+                </li>;
+              })}
+            </ol>
+            <p className="text-white">Lab breaker: {circuitNode.rx?.breakerOpen ? 'OPEN' : 'CLOSED'} · {
+              circuitNode.rx?.breakerOpen ? (circuitNode.rx.tripStage ?? 0) >= 5 ? '52a=0 / 52b=1' : '52a/52b awaiting feedback'
+                : '52a=1 / 52b=0'
+            }</p>
+            <p className="text-[#FCD394]">{circuitNode.rx?.circuitFailure
+              ?? (testModeSub ? 'Subscriber Test Mode blocks trip output.'
+                : !circuitNode.hasTripBinding ? 'No valid trip ExtRef for this subscriber.' : '')}</p>
+          </>}
+        </section>
+      )}
+
+      {activeTab === 'PRP_DIAGNOSTICS' && <PrpDiagnostics runtime={current} lanAUp={lanAUp} lanBUp={lanBUp} nodes={topologyNodes} />}
+
+      <div hidden={activeTab !== 'FAT_SAT'}>{gocb && <GooseFatSat key={gocb.id} block={gocb} dataset={dataset} />}</div>
+
+      {activeTab === 'EVENT_TIMELINE' && <TripSequence runtime={current} />}
 
       {/* EVENT TIMELINE TAB */}
       {activeTab === 'EVENT_TIMELINE' && (

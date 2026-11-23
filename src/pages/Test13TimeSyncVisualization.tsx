@@ -285,7 +285,7 @@ export function Test13TimeSyncVisualization({
                 <g transform="translate(625, 18)">
                   <rect x="0" y="0" width="265" height="158" rx="7" fill="#041423" stroke={sntpHealthy ? '#00DFFF' : '#FF3344'} />
                   <text x="132" y="18" textAnchor="middle" fill="#D4EEFF" fontSize="9.5" fontWeight="800">SCADA / HMI (SOE Workstation)</text>
-                  <image href="/assets/devices/scada-workstation.png" x="16" y="26" width="232" height="82" preserveAspectRatio="xMidYMid slice" />
+                  <image href="/assets/devices/scada-workstation.png" x="16" y="26" width="232" height="82" preserveAspectRatio="xMidYMid meet" />
                   <text x="16" y="126" fill="#00DFFF" fontSize="9" fontWeight="800">SCADA Time: UTC {utcNow}</text>
                   <text x="16" y="142" fill={sntpHealthy ? '#00FF70' : '#FF3344'} fontSize="8.5" fontWeight="800">
                     SNTP: {sntpHealthy ? 'SYNCHRONIZED (Offset 1.8 ms)' : 'TIME SYNC ALARM'}

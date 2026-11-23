@@ -43,9 +43,76 @@ type MmsFaultMode =
   | 'TYPE_MISMATCH'
   | 'INVALID_QUALITY'
   | 'IEC104_DISCONNECTED'
-  | 'COMMAND_REJECTED';
+  | 'COMMAND_REJECTED'
+  | 'LAN_A_DOWN'
+  | 'LAN_B_DOWN'
+  | 'BOTH_LANS_DOWN';
+
+type ClientOperation = 'READ' | 'WRITE' | 'GI' | 'CONTROL' | 'REPORT';
+type OutcomeCode = 'read' | 'write' | 'gi' | 'sent' | 'sent-invalid' | 'offline' | 'no-rcb'
+  | 'mapping' | 'rcc-offline' | 'interlock' | 'rejected' | 'busy' | 'controlled';
+type OperationOutcome = { code: OutcomeCode; detail: string };
+
+const MMS_SCENARIOS = [
+  { id: 'READ', label: 'MMS association and Read', fault: 'NONE', op: 'READ', expect: 'read',
+    expected: 'An established MMS association returns the selected live value and quality.',
+    checks: ['Confirm the target IED and its configured IP.', 'Verify TCP/102, then COTP/ACSE and MMS Initiate.', 'Compare the object reference, functional constraint and value in Packet Analyzer.'] },
+  { id: 'REPORT', label: 'BRCB breaker status to RCC', fault: 'NONE', op: 'REPORT', expect: 'sent',
+    expected: 'An enabled status BRCB publishes breaker position and starts an M_DP_NA_1 transfer with IV=0.',
+    checks: ['Check RptEna and dsStatus membership under RCB.', 'Verify Type ID, CA and IOA in Protocol Conversion.', 'Resume playback if paused and verify the arriving ASDU in the RCC Receive Monitor.'] },
+  { id: 'REPORT_URCB', label: 'URCB measurements to RCC', fault: 'NONE', op: 'REPORT', expect: 'sent',
+    expected: 'An enabled measurement URCB publishes phase-A current and starts an M_ME_NC_1 transfer with IV=0.',
+    checks: ['Check RptEna and dsMeas membership under RCB.', 'Verify the mapped current value, Type ID and IOA.', 'Resume playback if paused and confirm the same current value arrives at the RCC.'] },
+  { id: 'GI', label: 'MMS General Interrogation', fault: 'NONE', op: 'GI', expect: 'gi',
+    expected: 'GI refreshes enabled RCB datasets with the GI trigger enabled.',
+    checks: ['Check association and RptEna.', 'Confirm TrgOps includes GI for the intended RCB.', 'Look for the MMS GI result in Packet Analyzer. An RCC IEC-104 interrogation is a separate service.'] },
+  { id: 'LAN_A_DOWN', label: 'PRP LAN A down', fault: 'LAN_A_DOWN', op: 'READ', expect: 'read',
+    expected: 'LAN A is down and MMS Read still succeeds through LAN B.',
+    checks: ['Confirm LAN A is down and LAN B is up.', 'Verify that no second association is required for the simulated Read.', 'Clear the fault and confirm both paths recover.'] },
+  { id: 'LAN_B_DOWN', label: 'PRP LAN B down', fault: 'LAN_B_DOWN', op: 'READ', expect: 'read',
+    expected: 'LAN B is down and MMS Read still succeeds through LAN A.',
+    checks: ['Confirm LAN B is down and LAN A is up.', 'Verify the Read result.', 'Clear the fault and confirm both paths recover.'] },
+  { id: 'BOTH_LANS_DOWN', label: 'Both PRP LANs down', fault: 'BOTH_LANS_DOWN', op: 'READ', expect: 'offline',
+    expected: 'MMS Read is rejected because neither station LAN is available.',
+    checks: ['Check both LAN indicators.', 'Restore one independent path and confirm association recovers.', 'Repeat Read before checking reports or the gateway mapping.'] },
+  { id: 'TCP_102_BLOCKED', label: 'TCP/102 blocked', fault: 'TCP_102_BLOCKED', op: 'READ', expect: 'offline',
+    expected: 'MMS association cannot be established and Read is rejected.',
+    checks: ['Check the IED IP and L2 path.', 'Verify the configured policy permits TCP/102 between gateway and IED.', 'Check for a TCP handshake before investigating ACSE.'] },
+  { id: 'MMS_ASSOC_FAIL', label: 'MMS association rejected (ACSE)', fault: 'MMS_ASSOC_FAIL', op: 'READ', expect: 'offline',
+    expected: 'The simulated TCP path is available, but ACSE rejects association and Read fails.',
+    checks: ['Confirm TCP/102 is available.', 'Inspect COTP and ACSE association diagnostics.', 'Check addressing/selectors and the IED client limit, then retry.'] },
+  { id: 'IED_OFFLINE', label: 'IED offline', fault: 'IED_OFFLINE', op: 'READ', expect: 'offline',
+    expected: 'The destination IED is unavailable and MMS Read is rejected.',
+    checks: ['Confirm the correct IED is selected.', 'Check IED power, link and IP reachability.', 'Re-establish MMS before testing RCBs.'] },
+  { id: 'GATEWAY_UNAVAILABLE', label: 'Station gateway unavailable', fault: 'GATEWAY_UNAVAILABLE', op: 'READ', expect: 'offline',
+    expected: 'The gateway cannot initiate MMS and cannot serve IEC-104.',
+    checks: ['Check gateway health and both network interfaces.', 'Confirm the MMS client and IEC-104 server services recover.', 'Rerun Read and verify RCC reception.'] },
+  { id: 'RCB_DISABLED', label: 'Reporting disabled (RptEna=0)', fault: 'RCB_DISABLED', op: 'REPORT', expect: 'no-rcb',
+    expected: 'MMS Read remains available but the report is suppressed at the IED.',
+    checks: ['Use Read to verify the association is healthy.', 'Inspect the point’s DataSet, RptEna and trigger options.', 'Clear the fault and confirm a report appears in Packet Analyzer.'] },
+  { id: 'MAPPING_MISSING', label: 'Gateway point mapping missing', fault: 'MAPPING_MISSING', op: 'REPORT', expect: 'mapping',
+    expected: 'MMS receives the report, but the gateway cannot create the corresponding IEC-104 indication.',
+    checks: ['Confirm the MMS report arrived.', 'Check the selected point’s gateway reference, CA and IOA.', 'Fix the mapping and verify the matching RCC indication.'] },
+  { id: 'TYPE_MISMATCH', label: 'Breaker indication type mismatch', fault: 'TYPE_MISMATCH', op: 'REPORT', expect: 'mapping',
+    expected: 'The gateway rejects the breaker’s double-point value configured with a single-point Type ID.',
+    checks: ['Check XCBR1.Pos.stVal and its Dbpos states.', 'Compare configured Type ID, CA and IOA at both endpoints.', 'Restore M_DP_NA_1 and confirm the RCC receives the same position.'] },
+  { id: 'INVALID_QUALITY', label: 'Invalid source quality', fault: 'INVALID_QUALITY', op: 'REPORT', expect: 'sent-invalid',
+    expected: 'The gateway starts an IEC-104 transfer with IV=1 for the invalid source point.',
+    checks: ['Check MMS q.validity before conversion.', 'Verify the gateway propagates IV=1 instead of marking the value Good.', 'Resume playback if paused and verify Invalid in the RCC Receive Monitor.'] },
+  { id: 'IEC104_DISCONNECTED', label: 'RCC TCP/2404 disconnected', fault: 'IEC104_DISCONNECTED', op: 'REPORT', expect: 'rcc-offline',
+    expected: 'MMS reporting works, but there is no IEC-104 transmission to the RCC.',
+    checks: ['Confirm gateway MMS reports still arrive.', 'Check the gateway/RCC TCP/2404 session and STARTDT state.', 'Restore the session and verify a fresh indication arrives.'] },
+  { id: 'COMMAND_REJECTED', label: 'SBO blocked by interlock', fault: 'COMMAND_REJECTED', op: 'CONTROL', expect: 'interlock',
+    expected: 'The simulated IED rejects the command and the breaker position stays unchanged.',
+    checks: ['Verify both protocol sessions are up.', 'Check control authority, local/remote and interlock permissives.', 'Read the rejection reason and compare breaker position feedback before retrying.'] },
+] as const satisfies readonly {
+  id: string; label: string; fault: MmsFaultMode; op: ClientOperation; expect: OutcomeCode;
+  expected: string; checks: readonly string[];
+}[];
+type MmsScenario = typeof MMS_SCENARIOS[number];
 
 interface GatewayPointRow {
+  dataSet: string;
   idx: number;
   iecRef: string;
   fc: 'ST' | 'MX' | 'CO';
@@ -64,6 +131,7 @@ interface LogEntry {
   service: string;
   details: string;
   result: 'Success' | 'Delivered' | 'Failed';
+  route?: string;
   kind: 'Association' | 'Read' | 'Write' | 'Report' | 'Control' | 'GI' | 'Error';
 }
 
@@ -83,13 +151,47 @@ const MMS_LAB_NETWORK_CONFIG = {
 } as const;
 
 type Iec104FlowState =
-  | 'MMS_RECEIVED'
-  | 'MAPPING_COMPLETED'
-  | 'ASDU_CREATED'
+  | 'IDLE'
+  | 'IED_TO_PRP'
+  | 'PRP_TO_GATEWAY'
+  | 'GATEWAY_CONVERSION'
   | 'IEC104_IN_FLIGHT'
-  | 'RCC_RECEIVED'
   | 'RCC_POINT_UPDATED'
   | 'FAILED';
+
+const FLOW_PATHS = {
+  aIn: [[146, 120], [182, 120], [182, 114], [258, 114]],
+  aOut: [[314, 114], [392, 114], [392, 120], [444, 120]],
+  bIn: [[146, 140], [182, 140], [182, 198], [258, 198]],
+  bOut: [[314, 198], [392, 198], [392, 140], [444, 140]],
+  wan: [[554, 130], [640, 130]],
+} as const;
+type FlowPath = readonly (readonly [number, number])[];
+const cablePath = (points: FlowPath) => points.map(([x, y], index) => `${index ? 'L' : 'M'} ${x} ${y}`).join(' ');
+
+function packetPosition(points: FlowPath, progress: number) {
+  const segments = points.slice(1).map(([x, y], i) => Math.hypot(x - points[i][0], y - points[i][1]));
+  let remaining = segments.reduce((sum, length) => sum + length, 0) * progress;
+  for (const [i, length] of segments.entries()) {
+    if (remaining <= length) {
+      const [x, y] = points[i];
+      const [nextX, nextY] = points[i + 1];
+      return [x + (nextX - x) * remaining / length, y + (nextY - y) * remaining / length];
+    }
+    remaining -= length;
+  }
+  return points[points.length - 1];
+}
+
+const SWITCH_PROGRESS = 0.25;
+const GATEWAY_PROGRESS = 0.5;
+const WAN_PROGRESS = 0.68;
+
+function flowPhase(progress: number): Iec104FlowState {
+  if (progress < SWITCH_PROGRESS) return 'IED_TO_PRP';
+  if (progress < GATEWAY_PROGRESS) return 'PRP_TO_GATEWAY';
+  return progress < WAN_PROGRESS ? 'GATEWAY_CONVERSION' : 'IEC104_IN_FLIGHT';
+}
 
 export const MmsLabPage: React.FC = () => {
   const {
@@ -118,18 +220,20 @@ export const MmsLabPage: React.FC = () => {
     [ieds, localIedId, defaultIed]
   );
   const associatedBay = useMemo(
-    () => bays.find((b) => b.id === selectedIed?.bayId) || bays[0],
+    () => bays.find((b) => b.id === selectedIed?.bayId),
     [bays, selectedIed?.bayId]
   );
 
   const [activeTab, setActiveTab] = useState<MmsLabTab>('PROTOCOL_CONVERSION');
-  // Mandatory default animation speed = 0.5x
   const [speed, setSpeed] = useState<0.1 | 0.25 | 0.5 | 1 | 2 | 4>(0.1);
   const [playing, setPlaying] = useState<boolean>(true);
   const [manualDisconnect, setManualDisconnect] = useState<boolean>(false);
-  const [lanAUp, setLanAUp] = useState<boolean>(true);
-  const [lanBUp, setLanBUp] = useState<boolean>(true);
+  const [manualLanAUp, setLanAUp] = useState<boolean>(true);
+  const [manualLanBUp, setLanBUp] = useState<boolean>(true);
   const [faultMode, setFaultMode] = useState<MmsFaultMode>('NONE');
+  const [scenarioId, setScenarioId] = useState<MmsScenario['id']>('READ');
+  const [scenarioToRun, setScenarioToRun] = useState<MmsScenario | null>(null);
+  const [scenarioResult, setScenarioResult] = useState<{ id: MmsScenario['id']; passed: boolean; detail: string } | null>(null);
   const [selectedPointIdx, setSelectedPointIdx] = useState<number>(1);
   const [selectedLdInst, setSelectedLdInst] = useState<string>(
     selectedIed?.logicalDevices[0]?.ldInst || 'Application'
@@ -138,11 +242,14 @@ export const MmsLabPage: React.FC = () => {
   const [inspectedDevice, setInspectedDevice] = useState<string | null>(null);
   const [pktFilter, setPktFilter] = useState<'ALL' | 'MMS' | 'IEC-104'>('ALL');
   const [lastActivity, setLastActivity] = useState<string>(nowTimeMs());
-  const [seqCounter, setSeqCounter] = useState<number>(42);
+  const sequenceRef = useRef(0);
 
   // Event-driven IEC-104 Gateway -> RCC transmission pipeline state
   const [inFlight104, setInFlight104] = useState<{
     id: number;
+    reportName: string;
+    sourceDetail: string;
+    block: { service: string; detail: string } | null;
     typeId: string;
     ca: number;
     ioa: number;
@@ -150,8 +257,7 @@ export const MmsLabPage: React.FC = () => {
     quality: 'Good' | 'Invalid';
     cot: number;
     ns: number;
-    progress: number; // 0 -> 1 along Gateway -> RCC cable
-    stage: 'MMS_RX' | 'GW_MAPPED' | 'ASDU_CREATED' | 'IEC104_SENT' | 'RCC_RECEIVED' | 'RCC_UPDATED';
+    progress: number; // 0 -> 1 across the entire IED-to-RCC sequence
   } | null>(null);
   const [rccFlash, setRccFlash] = useState<boolean>(false);
   const [rccState, setRccState] = useState<{
@@ -166,64 +272,42 @@ export const MmsLabPage: React.FC = () => {
     apciNr: number;
     lastStage: string;
   }>(() => ({
-    typeId: 'M_DP_NA_1',
-    ca: 1,
-    ioa: 1001,
-    value: 'CLOSED',
-    quality: 'Good',
-    timestamp: nowTimeMs(),
-    rxCount: 148,
-    apciNs: 42,
-    apciNr: 42,
-    lastStage: 'RCC Point Updated',
+    typeId: '—', ca: 0, ioa: 0, value: 'Awaiting first indication',
+    quality: 'Good', timestamp: '—', rxCount: 0, apciNs: 0, apciNr: 0,
+    lastStage: 'Waiting for first packet',
   }));
-  const pointCursorRef = useRef<number>(0);
-  const nextEventIdRef = useRef<number>(1);
-  const processedEventIdsRef = useRef<Set<number>>(new Set());
-  const [flowState, setFlowState] = useState<Iec104FlowState>('RCC_POINT_UPDATED');
+  const pointCursorRef = useRef(0);
+  const nextEventIdRef = useRef(1);
+  const [flowState, setFlowState] = useState<Iec104FlowState>('IDLE');
+  const [logs, setLogs] = useState<LogEntry[]>([]);
 
-  const [logs, setLogs] = useState<LogEntry[]>(() => [
-    { time: nowTimeMs(), protocol: 'IEC-104', service: 'M_ME_NC_1', details: 'IOA=1101, Value=318.6 A', result: 'Delivered', kind: 'Report' },
-    { time: nowTimeMs(), protocol: 'MMS', service: 'Report (URCB)', details: 'MMXU1.A.phsA.mag.f = 318.6 A', result: 'Success', kind: 'Report' },
-    { time: nowTimeMs(), protocol: 'IEC-104', service: 'M_DP_NA_1', details: 'IOA=1001, DPI=2 (CLOSED)', result: 'Delivered', kind: 'Report' },
-    { time: nowTimeMs(), protocol: 'MMS', service: 'Report (BRCB)', details: 'XCBR1.Pos.stVal = 1 (CLOSED)', result: 'Success', kind: 'Report' },
-  ]);
-
-  const svgRef = useRef<SVGSVGElement | null>(null);
-
-  const anyLanUp = lanAUp || lanBUp;
-  const mmsConnected =
-    !manualDisconnect &&
-    anyLanUp &&
-    selectedIed?.mmsConnected !== false &&
-    faultMode !== 'TCP_102_BLOCKED' &&
-    faultMode !== 'MMS_ASSOC_FAIL' &&
-    faultMode !== 'IED_OFFLINE' &&
-    faultMode !== 'GATEWAY_UNAVAILABLE';
-
-  const iec104Connected =
-    mmsConnected &&
-    faultMode !== 'IEC104_DISCONNECTED' &&
-    faultMode !== 'GATEWAY_UNAVAILABLE';
-
-  const conversionActive =
-    iec104Connected && faultMode !== 'MAPPING_MISSING' && faultMode !== 'TYPE_MISMATCH';
-
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    try {
-      if (playing) svg.unpauseAnimations?.();
-      else svg.pauseAnimations?.();
-    } catch {
-      // Non-DOM fallback
-    }
-  }, [playing]);
+  const lanAUp = manualLanAUp && faultMode !== 'LAN_A_DOWN' && faultMode !== 'BOTH_LANS_DOWN';
+  const lanBUp = manualLanBUp && faultMode !== 'LAN_B_DOWN' && faultMode !== 'BOTH_LANS_DOWN';
+  const gatewayUp = faultMode !== 'GATEWAY_UNAVAILABLE';
+  const mmsBlock = !selectedIed || selectedIed.mmsConnected === false || faultMode === 'IED_OFFLINE' ? 'Selected IED unavailable'
+    : !gatewayUp ? 'Station gateway unavailable'
+    : manualDisconnect ? 'MMS session manually disconnected'
+    : !lanAUp && !lanBUp ? 'Both PRP paths unavailable'
+    : faultMode === 'TCP_102_BLOCKED' ? 'TCP/102 blocked; MMS Initiate not reached'
+    : faultMode === 'MMS_ASSOC_FAIL' ? 'ACSE association rejected after TCP connection' : '';
+  const mmsConnected = !mmsBlock;
+  // The gateway's northbound session can remain healthy while its IED link is down.
+  const iec104Connected = gatewayUp && faultMode !== 'IEC104_DISCONNECTED';
+  const rcbs = selectedIed?.rcbs ?? [];
+  const reportingAvailable = mmsConnected && faultMode !== 'RCB_DISABLED' && rcbs.some(rcb => rcb.enabled);
+  const conversionActive = reportingAvailable && iec104Connected && faultMode !== 'MAPPING_MISSING';
 
   const addLog = (entry: Omit<LogEntry, 'time'>) => {
     const t = nowTimeMs();
     setLastActivity(t);
-    setLogs((prev) => [{ time: t, ...entry }, ...prev].slice(0, 20));
+    const route = entry.protocol === 'MMS'
+      ? entry.kind === 'Report'
+        ? `${selectedIed?.ipAddressLanA}:102 → ${MMS_LAB_NETWORK_CONFIG.gatewayMmsClientIp}`
+        : `${MMS_LAB_NETWORK_CONFIG.gatewayMmsClientIp} ↔ ${selectedIed?.ipAddressLanA}:102`
+      : entry.kind === 'Control'
+        ? `${MMS_LAB_NETWORK_CONFIG.rccIec104ClientIp} → ${MMS_LAB_NETWORK_CONFIG.gatewayIec104ServerIp}:2404`
+        : undefined;
+    setLogs((prev) => [{ time: t, route, ...entry }, ...prev].slice(0, 20));
   };
 
   // Authoritative 5-point Gateway Mapping Table derived from selectedIed & associatedBay
@@ -231,25 +315,27 @@ export const MmsLabPage: React.FC = () => {
   const liveCurrent = associatedBay ? associatedBay.currentA.toFixed(1) : '318.6';
   const liveVoltage = associatedBay ? associatedBay.voltageAbKv.toFixed(2) : '33.12';
   const qualFlag: 'Good' | 'Invalid' =
-    faultMode === 'INVALID_QUALITY' || !mmsConnected ? 'Invalid' : 'Good';
+    faultMode === 'INVALID_QUALITY' || !mmsConnected || associatedBay?.quality !== 'GOOD' ? 'Invalid' : 'Good';
 
   const mappingRows: GatewayPointRow[] = useMemo(
     () => [
       {
         idx: 1,
+        dataSet: 'dsStatus',
         iecRef: 'XCBR1.Pos.stVal',
         fc: 'ST',
-        mmsVal: isClosed ? 'TRUE (1) — Closed' : 'FALSE (0) — Open',
+        mmsVal: isClosed ? 'Dbpos 10 — Closed' : associatedBay?.breakerState === 'OPEN' ? 'Dbpos 01 — Open' : associatedBay?.breakerState === 'BAD' ? 'Dbpos 11 — Bad state' : 'Dbpos 00 — Intermediate',
         iec104Type: faultMode === 'TYPE_MISMATCH' ? 'M_SP_NA_1 (ERR)' : 'M_DP_NA_1',
         ca: 1,
         ioa: 1001,
-        convertedVal: isClosed ? '2 — ON / CLOSED' : '1 — OFF / OPEN',
-        quality: qualFlag,
+        convertedVal: isClosed ? '2 — ON / CLOSED' : associatedBay?.breakerState === 'OPEN' ? '1 — OFF / OPEN' : associatedBay?.breakerState === 'BAD' ? '3 — INDETERMINATE' : '0 — INTERMEDIATE',
+        quality: associatedBay?.breakerState === 'BAD' ? 'Invalid' : qualFlag,
         mapped: faultMode !== 'MAPPING_MISSING' && faultMode !== 'TYPE_MISMATCH',
       },
       {
         idx: 2,
-        iecRef: 'PTRC1.Op.general',
+        dataSet: 'dsProtTrip',
+        iecRef: 'PTRC1.Tr.general',
         fc: 'ST',
         mmsVal: associatedBay?.protectionTripActive ? 'TRUE (1)' : 'FALSE (0)',
         iec104Type: 'M_SP_NA_1',
@@ -261,6 +347,7 @@ export const MmsLabPage: React.FC = () => {
       },
       {
         idx: 3,
+        dataSet: 'dsMeas',
         iecRef: 'MMXU1.A.phsA.mag.f',
         fc: 'MX',
         mmsVal: `${liveCurrent} A`,
@@ -273,7 +360,8 @@ export const MmsLabPage: React.FC = () => {
       },
       {
         idx: 4,
-        iecRef: 'MMXU1.U.phsA.mag.f',
+        dataSet: 'dsMeas',
+        iecRef: 'MMXU1.PPV.phsAB.mag.f',
         fc: 'MX',
         mmsVal: `${liveVoltage} kV`,
         iec104Type: 'M_ME_NC_1',
@@ -285,162 +373,145 @@ export const MmsLabPage: React.FC = () => {
       },
       {
         idx: 5,
-        iecRef: 'CSWI1.Pos.stVal',
+        dataSet: 'dsStatus',
+        iecRef: 'XSWI1.Pos.stVal',
         fc: 'ST',
-        mmsVal: isClosed ? 'ON (2)' : 'OFF (1)',
-        iec104Type: 'M_SP_NA_1',
+        mmsVal: associatedBay?.busDisconnectorState ?? 'Unknown',
+        iec104Type: 'M_DP_NA_1',
         ca: 1,
         ioa: 1201,
-        convertedVal: isClosed ? '1 (CLOSED)' : '0 (OPEN)',
+        convertedVal: associatedBay?.busDisconnectorState === 'CLOSED' ? '2 — ON / CLOSED' : associatedBay?.busDisconnectorState === 'OPEN' ? '1 — OFF / OPEN' : '0 — INTERMEDIATE',
         quality: qualFlag,
         mapped: faultMode !== 'MAPPING_MISSING',
       },
     ],
-    [isClosed, associatedBay?.protectionTripActive, liveCurrent, liveVoltage, qualFlag, faultMode]
+    [isClosed, associatedBay?.breakerState, associatedBay?.busDisconnectorState, associatedBay?.protectionTripActive, liveCurrent, liveVoltage, qualFlag, faultMode]
   );
 
-  // Dispatch an event-driven MMS Report -> Gateway Mapping -> IEC-104 ASDU -> RCC packet
-  const dispatchIec104Event = (row: GatewayPointRow) => {
-    if (!mmsConnected) return;
-    const tNow = nowTimeMs();
-    setLastActivity(tNow);
-    setSeqCounter((c) => c + 1);
-
-    // Step 1: MMS_RECEIVED
-    setFlowState('MMS_RECEIVED');
-    if (faultMode === 'RCB_DISABLED') {
+  const dispatchIec104Event = (row: GatewayPointRow): OperationOutcome => {
+    const reject = (code: OutcomeCode, protocol: LogEntry['protocol'], service: string, detail: string): OperationOutcome => {
       setFlowState('FAILED');
-      addLog({
-        protocol: 'MMS',
-        service: 'Report Suppressed',
-        details: `${row.iecRef} blocked (BRCB/URCB RptEna=0)`,
-        result: 'Failed',
-        kind: 'Error',
-      });
-      return;
+      addLog({ protocol, service, details: detail, result: 'Failed', kind: 'Error' });
+      return { code, detail };
+    };
+    if (!mmsConnected) return reject('offline', 'MMS', 'Report unavailable', mmsBlock);
+    if (inFlight104) return { code: 'busy', detail: 'An IEC-104 indication is already in flight.' };
+
+    const rcb = rcbs.find(block => block.datSet === row.dataSet && block.enabled);
+    if (faultMode === 'RCB_DISABLED' || !rcb) {
+      return reject('no-rcb', 'MMS', 'Report suppressed', `${row.iecRef}: no enabled RCB for ${row.dataSet}.`);
     }
-
-    // Step 2: MAPPING_COMPLETED check
-    if (!row.mapped || faultMode === 'MAPPING_MISSING' || faultMode === 'TYPE_MISMATCH') {
-      setFlowState('FAILED');
-      addLog({
-        protocol: 'IEC-104',
-        service: 'Mapping Error',
-        details: `Gateway failed to map ${row.iecRef} (${faultMode})`,
-        result: 'Failed',
-        kind: 'Error',
-      });
-      return;
-    }
-
-    setFlowState('MAPPING_COMPLETED');
-    // Step 3-4: ASDU_CREATED & TCP/2404 Session Check
-    setFlowState('ASDU_CREATED');
-    if (!iec104Connected) {
-      setFlowState('FAILED');
-      addLog({
-        protocol: 'IEC-104',
-        service: `${row.iec104Type} Queued`,
-        details: `TCP/2404 disconnected — IOA=${row.ioa} not delivered to RCC`,
-        result: 'Failed',
-        kind: 'Error',
-      });
-      return;
-    }
-
-    const shortVal = row.convertedVal.includes('CLOSED')
-      ? 'CLOSED'
-      : row.convertedVal.includes('OPEN')
-      ? 'OPEN'
-      : row.convertedVal;
-
-    const eventId = nextEventIdRef.current++;
-    setFlowState('IEC104_IN_FLIGHT');
+    const block = !row.mapped
+      ? { code: 'mapping' as const, service: 'Mapping error', detail: `${row.iecRef} has ${faultMode === 'TYPE_MISMATCH' ? 'an incompatible Type ID' : 'no gateway mapping'}. Flow stops at the gateway.` }
+      : !iec104Connected
+        ? { code: 'rcc-offline' as const, service: 'Transmission blocked', detail: `TCP/2404 is down. IOA ${row.ioa} will stop at the gateway.` }
+        : null;
+    const value = row.convertedVal.includes('CLOSED') ? 'CLOSED'
+      : row.convertedVal.includes('OPEN') ? 'OPEN' : row.convertedVal;
+    const ns = sequenceRef.current;
+    if (!block) sequenceRef.current = (ns + 1) % 32768;
+    setFlowState('IED_TO_PRP');
     setInFlight104({
-      id: eventId,
-      typeId: row.iec104Type,
-      ca: row.ca,
-      ioa: row.ioa,
-      value: shortVal,
-      quality: row.quality,
-      cot: 3, // Spontaneous
-      ns: seqCounter + 1,
-      progress: 0,
-      stage: 'IEC104_SENT',
+      id: nextEventIdRef.current++, typeId: row.iec104Type,
+      reportName: rcb.name, sourceDetail: `${row.iecRef} = ${row.mmsVal} · Quality ${row.quality}`, block,
+      ca: row.ca, ioa: row.ioa, value, quality: row.quality, cot: 3, ns, progress: 0,
     });
+    if (block) return { code: block.code, detail: block.detail };
+    return {
+      code: row.quality === 'Good' ? 'sent' : 'sent-invalid',
+      detail: `${rcb.name} → ${row.iec104Type}, CA ${row.ca}, IOA ${row.ioa}, IV=${row.quality === 'Good' ? 0 : 1}. Transfer started; check the RCC monitor for arrival.`,
+    };
   };
 
-  // Shared periodic report scheduler (respects Pause & Speed; default 0.5x)
+  // Telemetry can update faster than the demo clock. Read the latest sample when the timer fires.
+  const dispatchPeriodicRef = useRef<() => void>(() => {});
   useEffect(() => {
-    if (!playing || !mmsConnected || inFlight104) return;
-    const delayMs = Math.max(450, Math.round(1400 / speed));
-    const tid = window.setTimeout(() => {
-      const candidates = [mappingRows[0], mappingRows[2], mappingRows[3]];
+    dispatchPeriodicRef.current = () => {
+      const candidates = [mappingRows[0], mappingRows[2], mappingRows[3]].filter(row =>
+        rcbs.some(rcb => rcb.enabled && rcb.datSet === row.dataSet && rcb.trgOps.includes('period')));
+      if (!candidates.length) return;
       const row = candidates[pointCursorRef.current % candidates.length];
       pointCursorRef.current += 1;
       dispatchIec104Event(row);
-    }, delayMs);
-    return () => window.clearTimeout(tid);
-  }, [playing, speed, mmsConnected, iec104Connected, faultMode, inFlight104, mappingRows]);
+    };
+  });
 
-  // Smooth requestAnimationFrame motion for the in-flight green IEC-104 packet (0.5x = half speed; Pause freezes in place)
+  useEffect(() => {
+    if (!playing || !reportingAvailable || !iec104Connected || inFlight104 || faultMode === 'MAPPING_MISSING') return;
+    const timer = window.setInterval(() => dispatchPeriodicRef.current(), Math.min(1200, Math.max(450, Math.round(800 / speed))));
+    return () => window.clearInterval(timer);
+  }, [playing, speed, reportingAvailable, iec104Connected, faultMode, inFlight104?.id, selectedIed?.id]);
+
+  useEffect(() => {
+    if (!inFlight104) return;
+    const beforeGateway = inFlight104.progress < GATEWAY_PROGRESS;
+    const onWan = inFlight104.progress >= WAN_PROGRESS;
+    if (gatewayUp && (beforeGateway ? mmsConnected : !onWan || iec104Connected)) return;
+    setInFlight104(null);
+    setFlowState('FAILED');
+    setRccFlash(false);
+    addLog({
+      protocol: beforeGateway ? 'MMS' : 'IEC-104', service: 'Transfer interrupted',
+      details: `IOA ${inFlight104.ioa} was not received by RCC.`, result: 'Failed', kind: 'Error',
+    });
+  }, [inFlight104?.id, iec104Connected, mmsConnected, gatewayUp]);
+
   useEffect(() => {
     if (!playing || !inFlight104) return;
+    const frame = inFlight104;
+    if (!gatewayUp || (frame.progress < GATEWAY_PROGRESS && !mmsConnected)
+      || (frame.progress >= WAN_PROGRESS && !iec104Connected)) return;
+    const duration = 3600 / speed;
+    const started = performance.now() - frame.progress * duration;
+    let previous = frame.progress;
     let rafId = 0;
-    let lastTs = performance.now();
-    // Base 1x travel duration = 1800ms -> at 0.5x = 3600ms (clearly readable)
-    const durationMs = 1800 / speed;
-
     const step = (now: number) => {
-      const dt = now - lastTs;
-      lastTs = now;
-      setInFlight104((cur) => {
-        if (!cur) return null;
-        const nextP = cur.progress + dt / durationMs;
-        if (nextP >= 1) {
-          // Idempotent guard: each unique eventId is processed at most once (prevents StrictMode/re-render double increments)
-          if (!processedEventIdsRef.current.has(cur.id)) {
-            processedEventIdsRef.current.add(cur.id);
-            const rxTime = nowTimeMs();
-            setFlowState('RCC_RECEIVED');
-            setRccState((prev) => ({
-              typeId: cur.typeId,
-              ca: cur.ca,
-              ioa: cur.ioa,
-              value: cur.value,
-              quality: cur.quality,
-              timestamp: rxTime,
-              rxCount: prev.rxCount + 1,
-              apciNs: cur.ns,
-              apciNr: cur.ns,
-              lastStage: 'RCC Point Updated',
-            }));
-            setRccFlash(true);
-            window.setTimeout(() => {
-              setFlowState('RCC_POINT_UPDATED');
-              setRccFlash(false);
-            }, 420);
-            setLogs((prev) => [
-              {
-                time: rxTime,
-                protocol: 'IEC-104',
-                service: cur.typeId,
-                details: `CA=${cur.ca}, IOA=${cur.ioa}, Val=${cur.value}, COT=${cur.cot} (RCC RX #${cur.id})`,
-                result: 'Delivered',
-                kind: 'Report',
-              },
-              ...prev,
-            ].slice(0, 20));
-          }
-          return null;
-        }
-        return { ...cur, progress: nextP };
+      const progress = Math.min(1, (now - started) / duration);
+      if (previous < GATEWAY_PROGRESS && progress >= GATEWAY_PROGRESS) {
+        addLog({ protocol: 'MMS', service: `Report (${frame.reportName})`, details: frame.sourceDetail, result: 'Success', kind: 'Report' });
+      }
+      if (progress >= WAN_PROGRESS && (frame.block || !iec104Connected)) {
+        setInFlight104(null);
+        setFlowState('FAILED');
+        addLog({
+          protocol: 'IEC-104', service: frame.block?.service ?? 'Transmission blocked',
+          details: frame.block?.detail ?? 'TCP/2404 went down before transmission.',
+          result: 'Failed', kind: 'Error',
+        });
+        return;
+      }
+      if (flowPhase(previous) !== flowPhase(progress)) setFlowState(flowPhase(progress));
+      previous = progress;
+      if (progress < 1) {
+        setInFlight104({ ...frame, progress });
+        rafId = window.requestAnimationFrame(step);
+        return;
+      }
+      const timestamp = nowTimeMs();
+      setInFlight104(null);
+      setFlowState('RCC_POINT_UPDATED');
+      setRccState(previous => ({
+        typeId: frame.typeId, ca: frame.ca, ioa: frame.ioa, value: frame.value, quality: frame.quality,
+        timestamp, rxCount: previous.rxCount + 1, apciNs: frame.ns, apciNr: (frame.ns + 1) % 32768,
+        lastStage: 'RCC Point Updated',
+      }));
+      setRccFlash(true);
+      addLog({
+        protocol: 'IEC-104', service: frame.typeId,
+        details: `CA=${frame.ca}, IOA=${frame.ioa}, Val=${frame.value}, COT=${frame.cot}, IV=${frame.quality === 'Good' ? 0 : 1} (RCC RX #${frame.id})`,
+        result: 'Delivered', kind: 'Report',
+        route: `${MMS_LAB_NETWORK_CONFIG.gatewayIec104ServerIp}:2404 → ${MMS_LAB_NETWORK_CONFIG.rccIec104ClientIp}`,
       });
-      rafId = window.requestAnimationFrame(step);
     };
     rafId = window.requestAnimationFrame(step);
     return () => window.cancelAnimationFrame(rafId);
-  }, [playing, speed, inFlight104?.id]);
+  }, [playing, speed, inFlight104?.id, iec104Connected, mmsConnected, gatewayUp]);
+
+  useEffect(() => {
+    if (!rccFlash) return;
+    const timer = window.setTimeout(() => setRccFlash(false), 420);
+    return () => window.clearTimeout(timer);
+  }, [rccFlash, rccState.rxCount]);
 
   const selectedPoint = mappingRows.find((r) => r.idx === selectedPointIdx) || mappingRows[0];
 
@@ -461,116 +532,113 @@ export const MmsLabPage: React.FC = () => {
   const iedPortA = resolvePort(selectedIed?.id || 'IED-33-TF1', 'LAN_A');
   const iedPortB = resolvePort(selectedIed?.id || 'IED-33-TF1', 'LAN_B');
 
-  // At 0.5x default speed, a 4s 1x animation takes 8.0s (smooth, readable for students)
-  const dur = (base1xSec: number) => `${(base1xSec / speed).toFixed(2)}s`;
 
   const handleSelectIed = (id: string) => {
+    const next = ieds.find(ied => ied.id === id);
+    if (!next) return;
     setLocalIedId(id);
     setSelectedIedId(id);
-    const next = ieds.find((x) => x.id === id);
-    if (next) {
-      setSelectedLdInst(next.logicalDevices[0]?.ldInst || 'Application');
-      setSelectedNodeKey('');
-      addLog({
-        protocol: 'MMS',
-        service: 'Initiate (TCP/102)',
-        details: `Associated with ${next.name} (${next.ipAddressLanA})`,
-        result: 'Success',
-        kind: 'Association',
-      });
+    setSelectedLdInst(next.logicalDevices[0]?.ldInst || 'Application');
+    setSelectedNodeKey('');
+    setInFlight104(null);
+    setFlowState('IDLE');
+    setScenarioResult(null);
+    setRccFlash(false);
+  };
+
+  const handleClientOp = (op: ClientOperation, point = selectedPoint): OperationOutcome => {
+    const record = (code: OutcomeCode, detail: string, service: string, kind: LogEntry['kind'], protocol: LogEntry['protocol'] = 'MMS'): OperationOutcome => {
+      addLog({ protocol, service, details: detail, kind, result: kind === 'Error' ? 'Failed' : 'Success' });
+      return { code, detail };
+    };
+    if (op === 'CONTROL' && !iec104Connected) {
+      return record('rcc-offline', 'RCC TCP/2404 is down; no SBO request was sent.', 'Control blocked', 'Error', 'IEC-104');
+    }
+    if (!mmsConnected || !selectedIed) return record('offline', mmsBlock, `${op} rejected`, 'Error');
+
+    switch (op) {
+      case 'READ': {
+        const path = lanAUp && lanBUp ? 'LAN A and LAN B available' : lanAUp ? 'LAN A only' : 'LAN B only';
+        return record('read', `${point.iecRef} = ${point.mmsVal} · Quality ${point.quality} · ${path}.`, 'GetDataValues', 'Read');
+      }
+      case 'WRITE': {
+        const rcb = rcbs.find(block => block.datSet === point.dataSet);
+        if (!rcb || faultMode === 'RCB_DISABLED') {
+          return record('no-rcb', 'The selected report control block is unavailable for writes.', 'SetDataValues rejected', 'Error');
+        }
+        if (!rcb.enabled) toggleRcbEnabled(selectedIed.id, rcb.name);
+        return record('write', `${rcb.name}.RptEna = TRUE${rcb.enabled ? ' (already enabled)' : ''}.`, 'SetDataValues', 'Write');
+      }
+      case 'GI': {
+        const blocks = rcbs.filter(block => block.enabled && block.trgOps.includes('gi'));
+        if (faultMode === 'RCB_DISABLED' || !blocks.length) {
+          return record('no-rcb', 'No enabled RCB with the GI trigger is available.', 'General Interrogation rejected', 'Error');
+        }
+        triggerMmsGeneralInterrogation(selectedIed.id);
+        const refreshed = mappingRows.filter(row => blocks.some(block => block.datSet === row.dataSet));
+        const snapshot = refreshed.map(row => `${row.iecRef} = ${row.mmsVal}`).join('; ');
+        return record('gi', `MMS GI snapshot: ${refreshed.length} lab points from ${blocks.map(block => block.datSet).join(', ')}. ${snapshot}`, 'General Interrogation', 'GI');
+      }
+      case 'CONTROL': {
+        if (!associatedBay) return record('rejected', 'No breaker is mapped to the selected IED.', 'Control blocked', 'Error');
+        if (faultMode === 'COMMAND_REJECTED') {
+          return record('interlock', `Simulated CILO1 interlock rejected SBO; ${associatedBay.bayCode} remains ${associatedBay.breakerState}.`, 'C_DC_NA_1 negative confirmation', 'Error', 'IEC-104');
+        }
+        if (qualFlag === 'Invalid') return record('rejected', 'The selected bay quality is invalid; control was blocked.', 'SBO rejected', 'Error');
+        const target = isClosed ? 'OPEN' : 'CLOSED';
+        const accepted = commandBreaker(associatedBay.id, target, 'SCADA_SBO');
+        if (!accepted) {
+          const reason = useSubstationStore.getState().lastCommandFeedback?.message;
+          return record('rejected', reason ?? `${associatedBay.bayCode} denied the breaker command.`, 'SBO negative confirmation', 'Error');
+        }
+        return record('controlled', `${associatedBay.bayCode} confirmed ${target} via CSWI1.Pos.SBOw / Oper.`, 'C_DC_NA_1 positive confirmation', 'Control', 'IEC-104');
+      }
+      case 'REPORT': return dispatchIec104Event(point);
     }
   };
 
-  const handleClientOp = (op: 'READ' | 'WRITE' | 'GI' | 'CONTROL' | 'REPORT') => {
-    if (!mmsConnected) {
-      addLog({
-        protocol: 'MMS',
-        service: `${op} Rejected`,
-        details: `MMS association with ${selectedIed?.name} is disconnected`,
-        result: 'Failed',
-        kind: 'Error',
-      });
-      return;
-    }
-    if (op === 'READ') {
-      addLog({
-        protocol: 'MMS',
-        service: 'GetDataValues',
-        details: `${selectedPoint.iecRef} = ${selectedPoint.mmsVal}`,
-        result: 'Success',
-        kind: 'Read',
-      });
-    } else if (op === 'WRITE') {
-      addLog({
-        protocol: 'MMS',
-        service: 'SetDataValues',
-        details: `Updated BRCB TrgOps on ${selectedIed?.name}`,
-        result: 'Success',
-        kind: 'Write',
-      });
-    } else if (op === 'GI') {
-      if (selectedIed) triggerMmsGeneralInterrogation(selectedIed.id);
-      addLog({
-        protocol: 'MMS',
-        service: 'General Interrogation',
-        details: `GI=TRUE sent to ${selectedIed?.name} → 5 points reported`,
-        result: 'Success',
-        kind: 'GI',
-      });
-      if (iec104Connected) {
-        addLog({
-          protocol: 'IEC-104',
-          service: 'C_IC_NA_1 (Type 100)',
-          details: `Gateway forwarded GI snapshot (CA=1) to RCC`,
-          result: 'Delivered',
-          kind: 'GI',
-        });
-      }
-    } else if (op === 'CONTROL') {
-      if (faultMode === 'COMMAND_REJECTED') {
-        addLog({
-          protocol: 'IEC-104',
-          service: 'C_DC_NA_1 (COT=47)',
-          details: `Command rejected by CILO1 interlock on ${associatedBay?.bayCode}`,
-          result: 'Failed',
-          kind: 'Error',
-        });
-        return;
-      }
-      const nextTarget = isClosed ? 'OPEN' : 'CLOSED';
-      if (associatedBay) commandBreaker(associatedBay.id, nextTarget, 'SCADA_SBO');
-      addLog({
-        protocol: 'IEC-104',
-        service: 'C_DC_NA_1 (SBO)',
-        details: `RCC → Gateway → ${selectedIed?.name} CSWI1.Pos.Oper (${nextTarget})`,
-        result: 'Delivered',
-        kind: 'Control',
-      });
-    } else if (op === 'REPORT') {
-      addLog({
-        protocol: 'MMS',
-        service: 'Report (BRCB01)',
-        details: `${selectedPoint.iecRef} = ${selectedPoint.mmsVal} (q=${selectedPoint.quality})`,
-        result: 'Success',
-        kind: 'Report',
-      });
-      dispatchIec104Event(selectedPoint);
-    }
+  const scenario = MMS_SCENARIOS.find(item => item.id === scenarioId) ?? MMS_SCENARIOS[0];
+  const runScenario = () => {
+    setScenarioResult(null);
+    setFaultMode(scenario.fault);
+    setInFlight104(null);
+    setRccFlash(false);
+    setFlowState('IDLE');
+    setScenarioToRun(scenario);
+  };
+
+  useEffect(() => {
+    if (!scenarioToRun) return;
+    const point = scenarioToRun.id === 'REPORT_URCB' ? mappingRows[2]
+      : scenarioToRun.op === 'REPORT' ? mappingRows[0] : selectedPoint;
+    const outcome = handleClientOp(scenarioToRun.op, point);
+    const passed = outcome.code === scenarioToRun.expect
+      && (scenarioToRun.fault !== 'LAN_A_DOWN' || (!lanAUp && lanBUp))
+      && (scenarioToRun.fault !== 'LAN_B_DOWN' || (lanAUp && !lanBUp))
+      && (scenarioToRun.fault !== 'BOTH_LANS_DOWN' || (!lanAUp && !lanBUp));
+    setScenarioResult({ id: scenarioToRun.id, passed, detail: outcome.detail });
+    setScenarioToRun(null);
+  }, [scenarioToRun]);
+
+  const clearScenario = () => {
+    setFaultMode('NONE');
+    setScenarioResult(null);
+    setScenarioToRun(null);
+    setInFlight104(null);
+    setFlowState('IDLE');
+    setRccFlash(false);
   };
 
   const handleReset = () => {
+    clearScenario();
     setSpeed(0.1);
     setPlaying(true);
     setManualDisconnect(false);
     setLanAUp(true);
     setLanBUp(true);
-    setFaultMode('NONE');
     addLog({
-      protocol: 'MMS',
-      service: 'Session Reset',
-      details: `Restored MMS (TCP/102) & IEC-104 (TCP/2404) at 0.5× speed`,
-      result: 'Success',
-      kind: 'Association',
+      protocol: 'MMS', service: 'Lab reset',
+      details: 'Cleared local fault overrides and reset playback to 0.1×.', result: 'Success', kind: 'Association',
     });
   };
 
@@ -582,19 +650,52 @@ export const MmsLabPage: React.FC = () => {
   const brcbCount = (selectedIed?.rcbs || []).filter((r) => r.buffered && r.enabled).length;
   const urcbCount = (selectedIed?.rcbs || []).filter((r) => !r.buffered && r.enabled).length;
 
-  const faultList: { id: MmsFaultMode; label: string }[] = [
-    { id: 'NONE', label: 'Healthy — All Links & Conversions Normal' },
-    { id: 'TCP_102_BLOCKED', label: 'TCP/102 Blocked (Firewall / Socket Timeout)' },
-    { id: 'MMS_ASSOC_FAIL', label: 'MMS Association Failure (ACSE Reject)' },
-    { id: 'IED_OFFLINE', label: 'IED Offline (No TCP/102 Response)' },
-    { id: 'GATEWAY_UNAVAILABLE', label: 'Station Gateway Unavailable' },
-    { id: 'RCB_DISABLED', label: 'BRCB/URCB Reporting Disabled (RptEna=0)' },
-    { id: 'MAPPING_MISSING', label: 'Gateway Point Mapping Missing' },
-    { id: 'TYPE_MISMATCH', label: 'IEC 61850 → IEC-104 Data Type Mismatch' },
-    { id: 'INVALID_QUALITY', label: 'Invalid Source Quality (q=0x0100 → IV=1)' },
-    { id: 'IEC104_DISCONNECTED', label: 'IEC-104 TCP/2404 Disconnected (RCC Loss)' },
-    { id: 'COMMAND_REJECTED', label: 'Control Command Rejected (CILO1 Interlock)' },
-  ];
+  const renderScenarioPanel = (compact: boolean) => (
+    <section aria-labelledby="mms-scenario-heading" className={compact
+      ? 'border-b border-[#0E6A94] bg-[#041626] px-3 py-2 space-y-2'
+      : 'rounded-xl border border-[#0E6A94] bg-[#041626] p-4 space-y-3'}>
+      <h3 id="mms-scenario-heading" className="font-extrabold text-white text-sm flex items-center gap-2">
+        <ShieldAlert className="w-4 h-4 text-[#F59E0B]" />
+        MMS Tests, Faults &amp; Troubleshooting
+      </h3>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="min-w-0 w-full sm:w-auto sm:max-w-full space-y-1">
+          <span className="block font-bold text-[#BAE6FD]">Test or fault scenario</span>
+          <select value={scenarioId} onChange={event => {
+            const choice = MMS_SCENARIOS.find(item => item.id === event.target.value);
+            if (choice) setScenarioId(choice.id);
+          }} className="w-full sm:max-w-full px-3 py-2 rounded-lg bg-[#020E1B] border border-[#1B4B72] text-white">
+            <optgroup label="Functional tests">
+              {MMS_SCENARIOS.filter(item => item.fault === 'NONE').map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </optgroup>
+            <optgroup label="Fault scenarios">
+              {MMS_SCENARIOS.filter(item => item.fault !== 'NONE').map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </optgroup>
+          </select>
+        </label>
+        <button type="button" onClick={runScenario} className="px-3 py-2 rounded-lg border border-[#00DFFF] bg-[#083B5E] font-bold text-white">Run Scenario</button>
+        <button type="button" onClick={clearScenario} className="px-3 py-2 rounded-lg border border-[#1E5680] bg-[#061B2E] font-bold text-[#BAE6FD]">Clear Scenario</button>
+      </div>
+      <div className={compact ? 'space-y-1 break-words' : 'rounded-lg border border-[#1E5680] bg-[#031220] p-3 space-y-2'}>
+        <p><strong className="text-[#BAE6FD]">Active fault</strong> · {MMS_SCENARIOS.find(item => item.fault !== 'NONE' && item.fault === faultMode)?.label ?? 'None'}</p>
+        <p><strong className="text-[#BAE6FD]">Expected</strong> · {scenario.expected}</p>
+        {scenarioResult?.id === scenario.id && (
+          <p role="status" className="break-words">
+            <strong className={scenarioResult.passed ? 'text-[#4ADE80]' : 'text-[#FCA5A5]'}>{scenarioResult.passed ? 'PASS' : 'FAIL'}</strong>
+            {' · '}{scenarioResult.detail}
+          </p>
+        )}
+        {!compact && (
+          <>
+            <h4 className="font-bold text-white">Troubleshooting steps</h4>
+            <ol className="list-decimal space-y-1 pl-5 text-[#BAE6FD]">
+              {scenario.checks.map(step => <li key={step}>{step}</li>)}
+            </ol>
+          </>
+        )}
+      </div>
+    </section>
+  );
 
   return (
     <div style={{ backgroundColor: '#020B16', color: '#E2F1FC' }} className="space-y-2.5 pb-4 text-xs select-none">
@@ -612,7 +713,7 @@ export const MmsLabPage: React.FC = () => {
             MMS Lab V2 — IEC 61850 Client–Server &amp; Protocol Conversion (MMS → IEC 60870-5-104)
           </h2>
           <p className="text-[11px] text-[#8BBCE0] mt-0.5">
-            IEC 61850-8-1 (MMS over TCP/102) | RCB (BRCB/URCB) | Read/Write | Control (SBO/Direct) | Gateway Protocol Conversion | Diagnostics
+            IEC 61850-8-1 (MMS over TCP/102) | RCB (BRCB/URCB) | Read/Write | SBO Control | Gateway Protocol Conversion | Diagnostics
           </p>
         </div>
 
@@ -656,7 +757,7 @@ export const MmsLabPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. EIGHT NAVIGATION TABS + ANIMATION SPEED CONTROLS (DEFAULT 0.5x) */}
+      {/* 2. EIGHT NAVIGATION TABS + ANIMATION SPEED CONTROLS */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1.5">
           {(
@@ -668,7 +769,7 @@ export const MmsLabPage: React.FC = () => {
               { id: 'CONTROL', label: 'Control (Select / Operate)', icon: <Sliders className="w-3.5 h-3.5" /> },
               { id: 'PROTOCOL_CONVERSION', label: 'Protocol Conversion', icon: <Layers className="w-3.5 h-3.5" /> },
               { id: 'PACKET_ANALYZER', label: 'Packet Analyzer', icon: <FileCode2 className="w-3.5 h-3.5" /> },
-              { id: 'DIAGNOSTICS', label: 'Logs & Diagnostics', icon: <Terminal className="w-3.5 h-3.5" /> },
+              { id: 'DIAGNOSTICS', label: 'Tests, Faults & Troubleshooting', icon: <Terminal className="w-3.5 h-3.5" /> },
             ] as const
           ).map((t) => {
             const act = activeTab === t.id;
@@ -692,7 +793,7 @@ export const MmsLabPage: React.FC = () => {
           })}
         </div>
 
-        {/* Shared Playback & Speed Controls (0.5x Default!) */}
+        {/* Shared Playback & Speed Controls */}
         <div className="flex items-center gap-1.5 text-[10.5px] font-bold">
           <button
             type="button"
@@ -781,15 +882,13 @@ export const MmsLabPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      setManualDisconnect((v) => {
-                        addLog({
-                          protocol: 'MMS',
-                          service: !v ? 'Release Association' : 'MMS Initiate',
-                          details: `${selectedIed?.name} TCP/102 ${!v ? 'disconnected' : 're-associated'}`,
-                          result: !v ? 'Failed' : 'Success',
-                          kind: 'Association',
-                        });
-                        return !v;
+                      setManualDisconnect(mmsConnected);
+                      addLog({
+                        protocol: 'MMS', service: mmsConnected ? 'Release Association' : 'MMS Initiate',
+                        details: mmsConnected ? 'MMS association released by operator'
+                          : manualDisconnect || !mmsBlock ? 'MMS association retry requested' : mmsBlock,
+                        result: !mmsConnected && !manualDisconnect && mmsBlock ? 'Failed' : 'Success',
+                        kind: 'Association',
                       });
                     }}
                     className="w-full py-1.5 rounded-lg border font-bold text-[11px] transition"
@@ -846,8 +945,8 @@ export const MmsLabPage: React.FC = () => {
                       ['READ', 'Read', 'GetData'],
                       ['WRITE', 'Write', 'SetData'],
                       ['GI', 'GI', 'Gen.Int.'],
-                      ['CONTROL', 'Control', 'SBO/Dir'],
-                      ['REPORT', 'Report', 'BRCB'],
+                      ['CONTROL', 'Control', 'SBO'],
+                      ['REPORT', 'Report', 'RCB'],
                     ] as const
                   ).map(([op, lbl, sub]) => (
                     <button
@@ -865,7 +964,7 @@ export const MmsLabPage: React.FC = () => {
             </div>
 
             {/* CENTER COLUMN: System Topology + Live Data Flow Protocol Conversion Monitor */}
-            <div className="flex flex-col gap-2.5">
+            <div className="flex min-w-0 flex-col gap-2.5">
               {/* System Topology — MMS Communication with Protocol Conversion */}
               <div
                 className="rounded-xl border overflow-hidden shadow-xl"
@@ -874,13 +973,14 @@ export const MmsLabPage: React.FC = () => {
                   background: 'linear-gradient(180deg, #061A2E 0%, #030F1D 100%)',
                 }}
               >
-                <div className="px-4 py-2 border-b border-[#0E6A94] bg-gradient-to-r from-[#07304A] via-[#052038] to-[#07304A] flex items-center justify-between">
+                <div className="px-4 py-2 border-b border-[#0E6A94] bg-gradient-to-r from-[#07304A] via-[#052038] to-[#07304A] flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs sm:text-sm font-extrabold text-white">
                     System Topology — MMS Communication with Protocol Conversion
                   </span>
                   <div className="flex items-center gap-1.5 text-[10px] font-mono">
                     <button
                       type="button"
+                      disabled={faultMode === 'LAN_A_DOWN' || faultMode === 'BOTH_LANS_DOWN'}
                       onClick={() => setLanAUp((v) => !v)}
                       className={`px-2 py-0.5 rounded border font-bold ${lanAUp ? 'border-[#38BDF8] text-[#7DD3FC] bg-[#082F49]' : 'border-[#EF4444] text-[#FCA5A5] bg-[#3B0D15]'}`}
                     >
@@ -888,6 +988,7 @@ export const MmsLabPage: React.FC = () => {
                     </button>
                     <button
                       type="button"
+                      disabled={faultMode === 'LAN_B_DOWN' || faultMode === 'BOTH_LANS_DOWN'}
                       onClick={() => setLanBUp((v) => !v)}
                       className={`px-2 py-0.5 rounded border font-bold ${lanBUp ? 'border-[#C084FC] text-[#F0ABFC] bg-[#3B0764]' : 'border-[#EF4444] text-[#FCA5A5] bg-[#3B0D15]'}`}
                     >
@@ -896,9 +997,10 @@ export const MmsLabPage: React.FC = () => {
                   </div>
                 </div>
 
+                {renderScenarioPanel(true)}
+
                 <div className="p-2 overflow-x-auto">
                   <svg
-                    ref={svgRef}
                     viewBox="0 0 820 345"
                     className="w-full min-w-[680px] h-auto block select-none"
                     role="img"
@@ -976,13 +1078,13 @@ export const MmsLabPage: React.FC = () => {
                     </g>
 
                     {/* PHYSICAL PRP LAN A (BLUE) & LAN B (VIOLET) CABLES — SEATED IN SWITCH PORTS */}
-                    <path id="mms-a1" d="M 146 120 L 182 120 L 182 114 L 258 114" fill="none" stroke={lanAUp ? '#38BDF8' : '#EF4444'} strokeWidth="2.8" strokeDasharray={lanAUp ? undefined : '5 3'} />
-                    <path id="mms-a2" d="M 314 114 L 392 114 L 392 120 L 444 120" fill="none" stroke={lanAUp ? '#38BDF8' : '#EF4444'} strokeWidth="2.8" strokeDasharray={lanAUp ? undefined : '5 3'} />
-                    <path id="mms-b1" d="M 146 140 L 182 140 L 182 198 L 258 198" fill="none" stroke={lanBUp ? '#C084FC' : '#EF4444'} strokeWidth="2.8" strokeDasharray={lanBUp ? undefined : '5 3'} />
-                    <path id="mms-b2" d="M 314 198 L 392 198 L 392 140 L 444 140" fill="none" stroke={lanBUp ? '#C084FC' : '#EF4444'} strokeWidth="2.8" strokeDasharray={lanBUp ? undefined : '5 3'} />
+                    <path id="mms-a1" d={cablePath(FLOW_PATHS.aIn)} fill="none" stroke={lanAUp ? '#38BDF8' : '#EF4444'} strokeWidth="2.8" strokeDasharray={lanAUp ? undefined : '5 3'} />
+                    <path id="mms-a2" d={cablePath(FLOW_PATHS.aOut)} fill="none" stroke={lanAUp ? '#38BDF8' : '#EF4444'} strokeWidth="2.8" strokeDasharray={lanAUp ? undefined : '5 3'} />
+                    <path id="mms-b1" d={cablePath(FLOW_PATHS.bIn)} fill="none" stroke={lanBUp ? '#C084FC' : '#EF4444'} strokeWidth="2.8" strokeDasharray={lanBUp ? undefined : '5 3'} />
+                    <path id="mms-b2" d={cablePath(FLOW_PATHS.bOut)} fill="none" stroke={lanBUp ? '#C084FC' : '#EF4444'} strokeWidth="2.8" strokeDasharray={lanBUp ? undefined : '5 3'} />
 
                     {/* Gateway -> RCC WAN / TCP-IP Link (Visually Distinct from PRP LAN A/B) */}
-                    <path id="iec104-link" d="M 554 130 L 640 130" fill="none" stroke={iec104Connected ? '#22C55E' : '#EF4444'} strokeWidth="3.2" strokeDasharray={iec104Connected ? undefined : '6 4'} />
+                    <path id="iec104-link" d={cablePath(FLOW_PATHS.wan)} fill="none" stroke={iec104Connected ? '#22C55E' : '#EF4444'} strokeWidth="3.2" strokeDasharray={iec104Connected ? undefined : '6 4'} />
 
                     {/* Port Connector Plugs */}
                     <rect x="255" y="110" width="6" height="8" rx="1" fill={lanAUp ? '#38BDF8' : '#EF4444'} />
@@ -990,53 +1092,40 @@ export const MmsLabPage: React.FC = () => {
                     <rect x="255" y="194" width="6" height="8" rx="1" fill={lanBUp ? '#C084FC' : '#EF4444'} />
                     <rect x="311" y="194" width="6" height="8" rx="1" fill={lanBUp ? '#C084FC' : '#EF4444'} />
 
-                    {/* ANIMATED MMS PACKETS + LIVE PROTOCOL DATA FLOW BADGES (TCP/102) */}
-                    {mmsConnected && lanAUp && (
-                      <>
-                        <g>
-                          <animateMotion dur={dur(4.0)} repeatCount="indefinite" path="M 146 120 L 182 120 L 182 114 L 392 114 L 392 120 L 444 120" />
-                          <circle r="4.8" fill="#00E5FF" stroke="#FFFFFF" strokeWidth="1.2" filter="url(#mmsGl)" />
-                          <rect x="-46" y="-22" width="92" height="15" rx="7.5" fill="#05243A" fillOpacity="0.95" stroke="#00E5FF" strokeWidth="1.2" />
-                          <text x="0" y="-12" textAnchor="middle" fill="#E0FAFF" fontSize="6.9" fontWeight="800" fontFamily="monospace">
-                            MMS BRCB · TCP/102
-                          </text>
-                        </g>
-                        <g>
-                          <animateMotion dur={dur(4.0)} begin="2.0s" repeatCount="indefinite" path="M 444 120 L 392 120 L 392 114 L 182 114 L 182 120 L 146 120" />
-                          <circle r="4.0" fill="#7DD3FC" stroke="#FFFFFF" strokeWidth="1" />
-                          <rect x="-42" y="7" width="84" height="14.5" rx="7.2" fill="#062238" fillOpacity="0.94" stroke="#7DD3FC" strokeWidth="1.1" />
-                          <text x="0" y="16.5" textAnchor="middle" fill="#BAE6FD" fontSize="6.7" fontWeight="800" fontFamily="monospace">
-                            MMS Read / ACK
-                          </text>
-                        </g>
-                      </>
-                    )}
-                    {mmsConnected && lanBUp && (
+                    {/* One report cycle, mirrored on the available PRP paths before gateway conversion. */}
+                    {inFlight104 && inFlight104.progress < GATEWAY_PROGRESS && (() => {
+                      const progress = inFlight104.progress;
+                      const firstLeg = progress < SWITCH_PROGRESS;
+                      const legProgress = firstLeg ? progress / SWITCH_PROGRESS
+                        : (progress - SWITCH_PROGRESS) / (GATEWAY_PROGRESS - SWITCH_PROGRESS);
+                      return [
+                        { lane: 'A', up: lanAUp, path: firstLeg ? FLOW_PATHS.aIn : FLOW_PATHS.aOut, color: '#38BDF8', labelOffset: -15 },
+                        { lane: 'B', up: lanBUp, path: firstLeg ? FLOW_PATHS.bIn : FLOW_PATHS.bOut, color: '#C084FC', labelOffset: 17 },
+                      ].filter(lane => lane.up).map(({ lane, path, color, labelOffset }) => {
+                        const [x, y] = packetPosition(path, legProgress);
+                        return (
+                          <g key={lane} transform={`translate(${x} ${y})`} data-mms-lane={lane}>
+                            <circle r="4.5" fill={color} stroke="#FFFFFF" strokeWidth="1" filter="url(#mmsGl)" />
+                            <rect x="-52" y={labelOffset - 9} width="104" height="14" rx="7" fill="#061827" stroke={color} />
+                            <text x="0" y={labelOffset + 1} textAnchor="middle" fill="#FFFFFF" fontSize="7" fontWeight="800">
+                              LAN {lane} · {inFlight104.reportName}
+                            </text>
+                          </g>
+                        );
+                      });
+                    })()}
+
+                    {inFlight104 && inFlight104.progress >= GATEWAY_PROGRESS && inFlight104.progress < WAN_PROGRESS && (
                       <g>
-                        <animateMotion dur={dur(4.2)} begin="1.0s" repeatCount="indefinite" path="M 146 140 L 182 140 L 182 198 L 392 198 L 392 140 L 444 140" />
-                        <circle r="4.4" fill="#D8B4FE" stroke="#FFFFFF" strokeWidth="1.1" filter="url(#mmsGl)" />
-                        <rect x="-46" y="7" width="92" height="15" rx="7.5" fill="#23103D" fillOpacity="0.95" stroke="#C084FC" strokeWidth="1.2" />
-                        <text x="0" y="17" textAnchor="middle" fill="#F3E8FF" fontSize="6.8" fontWeight="800" fontFamily="monospace">
-                          PRP-B · URCB Report
+                        <rect x="423" y="54" width="147" height="18" rx="6" fill="#05243A" stroke={inFlight104.block ? '#F59E0B' : '#38BDF8'} />
+                        <text x="496.5" y="66" textAnchor="middle" fill="#FFFFFF" fontSize="8" fontWeight="800">
+                          {inFlight104.block ? 'Gateway · checking failed stage' : 'Gateway · MMS → IEC-104 ASDU'}
                         </text>
                       </g>
                     )}
 
-                    {/* STEADY WAN LINK BADGE WHEN IDLE BETWEEN EVENT-DRIVEN ASDU BURSTS */}
-                    {!inFlight104 && iec104Connected && (
-                      <g>
-                        <animateMotion dur={dur(3.6)} repeatCount="indefinite" path="M 554 130 L 640 130" />
-                        <circle r="4.5" fill="#4ADE80" stroke="#ECFDF5" strokeWidth="1.1" filter="url(#mmsGl)" />
-                        <rect x="-44" y="-22" width="88" height="15" rx="7.5" fill="#052E16" fillOpacity="0.95" stroke="#22C55E" strokeWidth="1.2" />
-                        <text x="0" y="-12" textAnchor="middle" fill="#DCFCE7" fontSize="6.8" fontWeight="800" fontFamily="monospace">
-                          IEC-104 · TCP/2404
-                        </text>
-                      </g>
-                    )}
-
-                    {/* EVENT-DRIVEN ANIMATED IEC-104 PACKET WITH LIVE LABEL (Gateway -> RCC, NEVER on LAN A/B) */}
-                    {inFlight104 && iec104Connected && (() => {
-                      const px = 554 + (640 - 554) * inFlight104.progress;
+                    {inFlight104 && inFlight104.progress >= WAN_PROGRESS && iec104Connected && (() => {
+                      const [px] = packetPosition(FLOW_PATHS.wan, (inFlight104.progress - WAN_PROGRESS) / (1 - WAN_PROGRESS));
                       return (
                         <g>
                           <circle cx={px} cy={130} r="6.5" fill="#4ADE80" filter="url(#mmsGl)" stroke="#ECFDF5" strokeWidth="1.2" />
@@ -1106,12 +1195,13 @@ export const MmsLabPage: React.FC = () => {
                     <span className="font-extrabold text-white">RCC RECEIVE MONITOR (IEC-104 TCP/2404):</span>
                     <span className="text-[#4ADE80] font-bold">
                       {iec104Connected
-                        ? `${rccState.typeId} | CA=${rccState.ca} | IOA=${rccState.ioa} | ${rccState.value} | ${rccState.quality.toUpperCase()}`
+                        ? rccState.rxCount === 0 ? rccState.value
+                          : `${rccState.typeId} | CA=${rccState.ca} | IOA=${rccState.ioa} | ${rccState.value} | ${rccState.quality.toUpperCase()}`
                         : 'IEC-104 LINK DOWN — NO DATA RECEIVED'}
                     </span>
                   </div>
                   <div className="flex items-center gap-3 text-[#9ED8F6]">
-                    <span>Stage: <b className="text-[#4ADE80]">{inFlight104 ? 'IEC-104 In-Flight' : rccState.lastStage}</b></span>
+                    <span>Stage: <b className="text-[#4ADE80]">{inFlight104 ? flowState.replace(/_/g, ' ') : flowState === 'FAILED' ? 'Flow stopped' : rccState.lastStage}</b></span>
                     <span>Rx Count: <b className="text-white">{rccState.rxCount}</b></span>
                     <span>APCI N(S)/N(R): <b className="text-[#7DD3FC]">{rccState.apciNs}/{rccState.apciNr}</b></span>
                     <span>TS: <b className="text-[#BAE6FD]">{rccState.timestamp}</b></span>
@@ -1153,7 +1243,7 @@ export const MmsLabPage: React.FC = () => {
                         color: flowState === 'FAILED' ? '#FCA5A5' : flowState === 'IEC104_IN_FLIGHT' ? '#7DD3FC' : '#4ADE80',
                       }}
                     >
-                      State: {flowState.replace(/_/g, ' ')}
+                      <span data-mms-stage={flowState}>State: {flowState.replace(/_/g, ' ')}</span>
                     </span>
                     <span className="text-[#7DD3FC]">Speed {speed}×</span>
                   </div>
@@ -1195,7 +1285,7 @@ export const MmsLabPage: React.FC = () => {
                     <div className="flex justify-between gap-2"><span className="text-[#8BB3D4] shrink-0">Last RX Type</span><b className="text-[#4ADE80]">{rccState.typeId}</b></div>
                     <div className="flex justify-between gap-2"><span className="text-[#8BB3D4] shrink-0">CA / IOA</span><b className="text-white">CA={rccState.ca} · IOA={rccState.ioa}</b></div>
                     <div className="flex justify-between gap-2"><span className="text-[#8BB3D4] shrink-0">RX Value</span><b className="text-[#4ADE80]">{rccState.value}</b></div>
-                    <div className="flex justify-between gap-2"><span className="text-[#8BB3D4] shrink-0">TX Status</span><b style={{ color: !iec104Connected ? '#F87171' : inFlight104 ? '#38BDF8' : '#4ADE80' }}>{!iec104Connected ? 'Failed / Down' : inFlight104 ? 'IEC-104 In-Flight' : 'Sent'}</b></div>
+                    <div className="flex justify-between gap-2"><span className="text-[#8BB3D4] shrink-0">TX Status</span><b style={{ color: !iec104Connected ? '#F87171' : inFlight104 ? '#38BDF8' : '#4ADE80' }}>{!iec104Connected ? 'Failed / Down' : inFlight104 ? (flowState === 'IEC104_IN_FLIGHT' ? 'IEC-104 In-Flight' : 'Awaiting gateway TX') : flowState === 'FAILED' ? 'Blocked' : rccState.rxCount ? 'Last frame delivered' : 'Idle'}</b></div>
                     <div className="flex justify-between gap-2"><span className="text-[#8BB3D4] shrink-0">RCC Status</span><b style={{ color: !iec104Connected ? '#F87171' : inFlight104 ? '#FBBF24' : '#4ADE80' }}>{!iec104Connected ? 'No RX' : inFlight104 ? 'Awaiting RX' : `${rccState.lastStage} (#${rccState.rxCount})`}</b></div>
                   </div>
                 </div>
@@ -1287,21 +1377,20 @@ export const MmsLabPage: React.FC = () => {
                 </div>
                 <svg viewBox="0 0 360 72" className="w-full h-[72px]">
                   <line x1="12" y1="54" x2="348" y2="54" stroke="#1E4E74" strokeWidth="1.5" />
-                  {[
-                    { x: 24, y: 24, c: '#4ADE80', t: 't-18s' },
-                    { x: 76, y: 28, c: '#38BDF8', t: 't-15s' },
-                    { x: 128, y: 22, c: '#FACC15', t: 't-12s' },
-                    { x: 180, y: 20, c: '#C084FC', t: 't-9s' },
-                    { x: 232, y: 26, c: '#38BDF8', t: 't-6s' },
-                    { x: 284, y: 22, c: '#F87171', t: 't-3s' },
-                    { x: 332, y: 18, c: '#4ADE80', t: 'Now' },
-                  ].map((pt) => (
-                    <g key={pt.x}>
-                      <line x1={pt.x} y1={pt.y} x2={pt.x} y2="54" stroke={pt.c} strokeWidth="1.8" />
-                      <circle cx={pt.x} cy={pt.y} r="4.5" fill={pt.c} />
-                      <text x={pt.x} y="67" textAnchor="middle" fill="#8BB3D4" fontSize="8" fontFamily="monospace">{pt.t}</text>
-                    </g>
-                  ))}
+                  {logs.length === 0 && <text x="180" y="37" fill="#9ED8F6" textAnchor="middle" fontSize="10">Awaiting MMS transactions</text>}
+                  {logs.slice(0, 7).reverse().map((entry, idx) => {
+                    const colors = { Association: '#4ADE80', Read: '#38BDF8', Write: '#FACC15', Report: '#C084FC', Control: '#F87171', GI: '#94A3B8', Error: '#EF4444' };
+                    const x = 24 + idx * 51;
+                    const color = colors[entry.kind];
+                    return (
+                      <g key={idx}>
+                        <title>{entry.time} · {entry.service} · {entry.result}</title>
+                        <line x1={x} y1="28" x2={x} y2="54" stroke={color} strokeWidth="1.8" />
+                        <circle cx={x} cy="28" r="4.5" fill={color} />
+                        <text x={x} y="67" textAnchor="middle" fill="#8BB3D4" fontSize="7" fontFamily="monospace">{entry.time.slice(0, 8)}</text>
+                      </g>
+                    );
+                  })}
                 </svg>
               </div>
             </div>
@@ -1349,8 +1438,8 @@ export const MmsLabPage: React.FC = () => {
                   ['MMS Association (TCP/102)', mmsConnected, mmsConnected ? 'Connected (ACSE: OK)' : 'Disconnected'],
                   ['IEC-104 Connection (TCP/2404)', iec104Connected, iec104Connected ? 'Connected (Active)' : 'Offline'],
                   ['Protocol Conversion', conversionActive, conversionActive ? 'Running (5 Points)' : 'Fault / Halted'],
-                  ['Report Delivery', mmsConnected && faultMode !== 'RCB_DISABLED', `BRCB:${brcbCount}, URCB:${urcbCount}`],
-                  ['Last Conversion', conversionActive, `${lastActivity} (${liveCurrent} A)`],
+                  ['Report Delivery', reportingAvailable, faultMode === 'RCB_DISABLED' ? 'Suppressed (RptEna=0)' : `BRCB:${brcbCount}, URCB:${urcbCount}`],
+                  ['Last RCC Arrival', rccState.rxCount > 0, rccState.timestamp],
                 ].map(([lbl, ok, val]) => (
                   <div key={String(lbl)} className="flex items-center justify-between gap-2">
                     <span className="flex items-center gap-1.5 text-[#DCEEFB] truncate">
@@ -1419,10 +1508,10 @@ export const MmsLabPage: React.FC = () => {
               Trigger General Interrogation (GI)
             </button>
           </div>
-          <table className="w-full text-left font-mono text-[11px]">
+          <div className="overflow-x-auto"><table className="w-full text-left font-mono text-[11px]">
             <thead>
               <tr className="bg-[#082238] text-[#9ED8F6] border-b border-[#164463]">
-                <th className="py-2 px-2">Name</th><th className="py-2 px-2">Type</th><th className="py-2 px-2">DataSet</th><th className="py-2 px-2">IntgPd</th><th className="py-2 px-2">Client IP</th><th className="py-2 px-2">RptEna</th>
+                <th className="py-2 px-2">Name</th><th className="py-2 px-2">Type</th><th className="py-2 px-2">DataSet</th><th className="py-2 px-2">TrgOps</th><th className="py-2 px-2">IntgPd</th><th className="py-2 px-2">Client IP</th><th className="py-2 px-2">RptEna</th>
               </tr>
             </thead>
             <tbody>
@@ -1431,21 +1520,23 @@ export const MmsLabPage: React.FC = () => {
                   <td className="py-2 px-2 text-white font-bold">{rcb.name}</td>
                   <td className="py-2 px-2 text-[#7DD3FC]">{rcb.buffered ? 'BRCB (Buffered)' : 'URCB (Unbuffered)'}</td>
                   <td className="py-2 px-2 text-[#BAE6FD]">{rcb.datSet}</td>
+                  <td className="py-2 px-2">{rcb.trgOps.join(", ")}</td>
                   <td className="py-2 px-2">{rcb.intgPdMs} ms</td>
                   <td className="py-2 px-2">{rcb.clientIp}</td>
                   <td className="py-2 px-2">
                     <button
                       type="button"
+                      disabled={!mmsConnected || faultMode === 'RCB_DISABLED'}
                       onClick={() => selectedIed && toggleRcbEnabled(selectedIed.id, rcb.name)}
-                      className={`px-2.5 py-0.5 rounded border font-bold text-[10px] ${rcb.enabled ? 'bg-[#063322] border-[#22C55E] text-[#4ADE80]' : 'bg-[#3B0D15] border-[#EF4444] text-[#FCA5A5]'}`}
+                      className={`px-2.5 py-0.5 rounded border font-bold text-[10px] ${rcb.enabled && faultMode !== 'RCB_DISABLED' ? 'bg-[#063322] border-[#22C55E] text-[#4ADE80]' : 'bg-[#3B0D15] border-[#EF4444] text-[#FCA5A5]'}`}
                     >
-                      {rcb.enabled ? 'ENABLED' : 'DISABLED'}
+                      {rcb.enabled && faultMode !== 'RCB_DISABLED' ? 'ENABLED' : 'DISABLED'}
                     </button>
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 
@@ -1462,7 +1553,7 @@ export const MmsLabPage: React.FC = () => {
               onClick={() => handleClientOp('CONTROL')}
               className="px-4 py-1.5 rounded-lg bg-[#083B5E] border border-[#00DFFF] text-white font-extrabold text-xs hover:brightness-110"
             >
-              Execute SBO {isClosed ? 'OPEN' : 'CLOSE'} via IEC-104 (C_DC_NA_1 → CSWI1.Pos.Oper)
+              Execute SBO {isClosed ? 'OPEN' : 'CLOSE'} via IEC-104 (C_DC_NA_1 → CSWI1.Pos.SBOw / Oper)
             </button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 font-mono text-[10.5px]">
@@ -1506,7 +1597,7 @@ export const MmsLabPage: React.FC = () => {
                 <tr key={i} className="border-b border-[#123952]">
                   <td className="py-1.5 px-2 text-[#7DD3FC]">{l.time}</td>
                   <td className="py-1.5 px-2 font-bold" style={{ color: l.protocol === 'MMS' ? '#FACC15' : '#4ADE80' }}>{l.protocol}</td>
-                  <td className="py-1.5 px-2 text-[#BAE6FD]">{l.protocol === 'MMS' ? `${selectedIed?.ipAddressLanA}:102 → ${MMS_LAB_NETWORK_CONFIG.gatewayMmsClientIp}` : `${MMS_LAB_NETWORK_CONFIG.gatewayIec104ServerIp}:2404 → ${MMS_LAB_NETWORK_CONFIG.rccIec104ClientIp}`}</td>
+                  <td className="py-1.5 px-2 text-[#BAE6FD]">{l.route ?? '—'}</td>
                   <td className="py-1.5 px-2 text-white">{l.service}</td>
                   <td className="py-1.5 px-2 text-[#9ED8F6]">{l.details}</td>
                 </tr>
@@ -1516,42 +1607,7 @@ export const MmsLabPage: React.FC = () => {
         </div>
       )}
 
-      {/* LOGS & FAULT INJECTION DIAGNOSTICS TAB */}
-      {activeTab === 'DIAGNOSTICS' && (
-        <div className="rounded-xl border border-[#0E6A94] bg-[#041626] p-4 space-y-3">
-          <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
-            <ShieldAlert className="w-4 h-4 text-[#F59E0B]" />
-            MMS &amp; IEC-104 Protocol Conversion Fault Injection
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-            {faultList.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => {
-                  setFaultMode(f.id);
-                  addLog({
-                    protocol: f.id.includes('104') ? 'IEC-104' : 'MMS',
-                    service: 'Fault Injection',
-                    details: f.label,
-                    result: f.id === 'NONE' ? 'Success' : 'Failed',
-                    kind: f.id === 'NONE' ? 'Association' : 'Error',
-                  });
-                }}
-                className="p-2.5 rounded-lg border text-left font-mono text-[10.5px] transition flex justify-between items-center"
-                style={{
-                  backgroundColor: faultMode === f.id ? (f.id === 'NONE' ? '#063322' : '#3B0D15') : '#031220',
-                  borderColor: faultMode === f.id ? (f.id === 'NONE' ? '#22C55E' : '#EF4444') : '#163D5E',
-                  color: faultMode === f.id ? '#FFFFFF' : '#B6D4EA',
-                }}
-              >
-                <span>{f.label}</span>
-                {faultMode === f.id && <span className="font-extrabold text-[9.5px]">{f.id === 'NONE' ? 'OK' : 'ACTIVE'}</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {activeTab === 'DIAGNOSTICS' && renderScenarioPanel(false)}
     </div>
   );
 };
