@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -66,9 +66,12 @@ interface SignalChainDashboardProps {
   onSelectBay: (bayId: string) => void;
   networkLinks: NetworkLink[];
   gooseControlBlocks: GooseControlBlock[];
+  /** Configured fast-message demo delay in milliseconds. */
+  gooseTransferLatencyMs?: number;
   networkRedundancyMode: NetworkRedundancyMode;
   tracedPoint?: InstantiatedSasSignal;
   chainFaultMode: SignalChainFaultMode;
+  faultModeByBay?: Partial<Record<string, SignalChainFaultMode>>;
   setChainFaultMode: (mode: SignalChainFaultMode) => void;
   selectedStageIndex: number | null;
   setSelectedStageIndex: (idx: number | null) => void;
@@ -89,6 +92,526 @@ function formatMsTime(d = new Date()): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 }
 
+type FlowPosition = { x: number; y: number };
+type PrpLan = 'A' | 'B';
+type FlowLeg = {
+  path: string;
+  parallelPath?: string;
+  lan?: PrpLan;
+  label: string;
+  color: string;
+  duration: number;
+  stop?: boolean;
+  endFraction?: number;
+};
+
+const FLOW_SPEEDS = [0.25, 0.5, 0.75, 1, 2, 4] as const;
+const DEFAULT_FLOW_SPEED = FLOW_SPEEDS[0];
+type FlowSpeed = (typeof FLOW_SPEEDS)[number];
+
+const LAN_COLORS: Record<PrpLan, string> = { A: '#7DD3FC', B: '#E879F9' };
+
+const PRP_FRAME_SOURCE = '02:00:00:00:00:01'; // Simulated gateway source MAC
+const PRP_FAST_MS = 1250;
+const PRP_SLOW_MS = 2000;
+const RECEIVER_HOLD_MS = 1000;
+
+function buildPrpArrivals(sequence: number, lanAUp: boolean, lanBUp: boolean) {
+  const firstLan: PrpLan = sequence % 2 === 0 ? 'A' : 'B';
+  const frames = (['A', 'B'] as const)
+    .filter((lan) => (lan === 'A' ? lanAUp : lanBUp))
+    .map((lan) => ({
+      lan,
+      sequence,
+      sourceMac: PRP_FRAME_SOURCE,
+      arrival: lan === firstLan ? PRP_FAST_MS : PRP_SLOW_MS,
+    }))
+    .sort((a, b) => a.arrival - b.arrival);
+
+  // Receiver history for the current simulated pair. Only frames on working LANs arrive.
+  const seen = new Set<string>();
+  return frames.map((frame) => {
+    const key = frame.sourceMac + '/' + frame.sequence;
+    const duplicate = seen.has(key);
+    seen.add(key);
+    return { ...frame, duplicate };
+  });
+}
+
+interface SignalFlowOverlayProps {
+  legs: FlowLeg[];
+  playing: boolean;
+  speed: FlowSpeed;
+  lanAUp: boolean;
+  lanBUp: boolean;
+  isPrp: boolean;
+  tagMismatch: boolean;
+  mappedValue: string;
+  receiver: FlowPosition;
+  receiverPorts: Record<PrpLan, FlowPosition>;
+  trayBottom: number;
+  width: number;
+  allocateSequence: () => number;
+}
+
+function SignalFlowOverlay({
+  legs, playing, speed, lanAUp, lanBUp, isPrp, tagMismatch,
+  mappedValue, receiver, receiverPorts, trayBottom, width, allocateSequence,
+}: SignalFlowOverlayProps) {
+  const layer = useRef<SVGGElement>(null);
+  const current = useRef({ elapsed: 0, sequence: -1 });
+  const [frame, setFrame] = useState(current.current);
+  const pickupTime = legs.reduce((duration, leg) => duration + leg.duration, 0);
+  const blocked = Boolean(legs[legs.length - 1].stop);
+  const networkTime = isPrp ? PRP_SLOW_MS : PRP_FAST_MS;
+  const cycleTime = pickupTime + (blocked ? 0 : networkTime + RECEIVER_HOLD_MS);
+
+  useEffect(() => {
+    if (current.current.sequence < 0) {
+      current.current = { elapsed: 0, sequence: allocateSequence() };
+      setFrame(current.current);
+    }
+    if (!playing) return;
+
+    let request: number;
+    let previous: number | undefined;
+    function tick(now: number) {
+      const delta = previous === undefined ? 0 : Math.min(now - previous, 64);
+      previous = now;
+      const elapsed = current.current.elapsed + delta * speed;
+      current.current = elapsed >= cycleTime
+        ? blocked
+          ? { ...current.current, elapsed: cycleTime }
+          : { elapsed: 0, sequence: allocateSequence() }
+        : { ...current.current, elapsed };
+      setFrame(current.current);
+      if (!blocked || elapsed < cycleTime) request = requestAnimationFrame(tick);
+    }
+    request = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(request);
+  }, [allocateSequence, blocked, cycleTime, playing, speed]);
+
+  function cablePoint(pathId: string, fraction: number): FlowPosition | undefined {
+    const path = layer.current?.ownerSVGElement?.querySelector<SVGPathElement>('#' + pathId);
+    return path?.getPointAtLength(path.getTotalLength() * Math.max(0, Math.min(1, fraction)));
+  }
+
+  function pill(point: FlowPosition, label: string, color: string, lan?: PrpLan) {
+    const w = label.length * 5.5 + 16;
+    const x = Math.max(w / 2 + 3, Math.min(width - w / 2 - 3, point.x));
+    return (
+      <g data-flow-badge-lan={lan} transform={'translate(' + x + ' ' + point.y + ')'}>
+        <rect x={-w / 2} y={-9} width={w} height="18" rx="8" fill="#041525" stroke={color} />
+        <text y="3" textAnchor="middle" fill={color} fontSize="9" fontWeight="800" fontFamily="monospace">{label}</text>
+      </g>
+    );
+  }
+
+  function laneBadge(point: FlowPosition, lan: PrpLan, label: string) {
+    // Track the packet horizontally on two rows above the cable tray.
+    const y = trayBottom - (lan === 'A' ? 72 : 50);
+    return pill({ x: point.x, y }, `LAN-${lan} · ${label}`, LAN_COLORS[lan], lan);
+  }
+
+  let legStart = 0;
+  const activeLeg = legs.find((leg) => {
+    if (frame.elapsed < legStart + leg.duration || leg.stop) return true;
+    legStart += leg.duration;
+    return false;
+  });
+  const legProgress = activeLeg
+    ? Math.min((frame.elapsed - legStart) / activeLeg.duration, activeLeg.endFraction ?? 1)
+    : 0;
+  const legPosition = activeLeg ? cablePoint(activeLeg.path, legProgress) : undefined;
+  const parallelPosition = activeLeg?.parallelPath ? cablePoint(activeLeg.parallelPath, legProgress) : undefined;
+  const launched = !activeLeg && frame.sequence >= 0;
+  const networkElapsed = frame.elapsed - pickupTime;
+  const copies = launched && isPrp ? buildPrpArrivals(frame.sequence, lanAUp, lanBUp) : [];
+  const received = copies.filter((copy) => copy.arrival <= networkElapsed);
+  const accepted = received.find((copy) => !copy.duplicate);
+  const discarded = received.find((copy) => copy.duplicate);
+  const singleLan = lanAUp ? 'A' : 'B';
+  const singlePoint = launched && !isPrp && networkElapsed < PRP_FAST_MS
+    ? cablePoint('cable-gtw-hmi-' + singleLan.toLowerCase(), networkElapsed / PRP_FAST_MS)
+    : undefined;
+  const delivered = isPrp ? Boolean(accepted) : launched && networkElapsed >= PRP_FAST_MS;
+  const badgeX = receiver.x;
+  const resultY = trayBottom + 29;
+
+  return (
+    <g ref={layer} data-signal-flow="" data-delivered={delivered ? 1 : 0}>
+      {activeLeg && legPosition && (
+        <g>
+          <circle data-flow-path={activeLeg.path} cx={legPosition.x} cy={legPosition.y} r="4" fill={activeLeg.color} />
+          {activeLeg.lan
+            ? laneBadge(legPosition, activeLeg.lan, activeLeg.label)
+            : pill({ x: legPosition.x, y: legPosition.y + 14 }, activeLeg.label, activeLeg.color)}
+          {parallelPosition && (
+            <>
+              <circle data-flow-path={activeLeg.parallelPath} cx={parallelPosition.x} cy={parallelPosition.y}
+                r="4" fill={LAN_COLORS.B} stroke="#041525" />
+              {laneBadge(parallelPosition, 'B', activeLeg.label)}
+            </>
+          )}
+        </g>
+      )}
+      {copies.filter((copy) => copy.arrival > networkElapsed).map((copy) => {
+        const point = cablePoint('cable-gtw-hmi-' + copy.lan.toLowerCase(), networkElapsed / copy.arrival);
+        return point && (
+          <g key={copy.lan}>
+            <circle data-prp-lan={copy.lan} cx={point.x} cy={point.y}
+              r="4" fill={LAN_COLORS[copy.lan]} stroke="#041525" />
+            {laneBadge(point, copy.lan, `SCADA · SEQ ${copy.sequence}`)}
+          </g>
+        );
+      })}
+      {singlePoint && (
+        <g>
+          <circle cx={singlePoint.x} cy={singlePoint.y} r="4" fill={LAN_COLORS[singleLan]} />
+          {laneBadge(singlePoint, singleLan, 'SCADA UPDATE')}
+        </g>
+      )}
+      {received.map((copy) => {
+        const age = (networkElapsed - copy.arrival) / 420;
+        const port = receiverPorts[copy.lan];
+        return age < 1 && (
+          <circle key={copy.lan} cx={port.x} cy={port.y} r={4 + age * 9} fill="none"
+            stroke={copy.duplicate ? '#FCA5A5' : '#86EFAC'} strokeWidth="2" opacity={1 - age} />
+        );
+      })}
+      {launched && isPrp && (
+        <g aria-label="SCADA receiver LRE">
+          {pill({ x: badgeX, y: trayBottom + 8 },
+            'SCADA LRE · SRC ' + PRP_FRAME_SOURCE + ' · SEQ ' + frame.sequence, '#BAE6FD')}
+          {accepted
+            ? pill({ x: badgeX, y: resultY }, 'LAN ' + accepted.lan + ' · ACCEPTED · 1 FRAME TO SCADA', '#86EFAC')
+            : pill({ x: badgeX, y: resultY }, 'WAITING FOR FIRST VALID COPY', '#7DD3FC')}
+          {discarded
+            ? pill({ x: badgeX, y: resultY + 20 }, 'LAN ' + discarded.lan + ' · DUPLICATE DISCARDED', '#FCA5A5')
+            : (!lanAUp || !lanBUp) && pill({ x: badgeX, y: resultY + 20 },
+              'LAN ' + (lanAUp ? 'B' : 'A') + ' DOWN · NO COPY', '#FDE68A')}
+        </g>
+      )}
+      {delivered && (
+        <g>
+          <circle cx={receiver.x} cy={receiver.y} r="4" fill={tagMismatch ? '#FCA5A5' : '#86EFAC'} />
+          {pill({ x: receiver.x, y: receiver.y - 15 },
+            tagMismatch ? 'HMI TAG MISMATCH' : mappedValue, tagMismatch ? '#FCA5A5' : '#86EFAC')}
+        </g>
+      )}
+    </g>
+  );
+}
+
+type GooseDemoValue = BayEquipment['breakerState'] | 'ASSERTED' | 'RESET';
+
+interface GooseDemoFrame {
+  position: GooseDemoValue;
+  stNum: number;
+  sqNum: number;
+  lans: Record<PrpLan, boolean>;
+}
+
+type GooseRxState = 'WAITING' | 'HEALTHY' | 'INVALID / TIMEOUT';
+
+interface GooseDemoProps {
+  block: GooseControlBlock;
+  position: GooseDemoValue;
+  showTrip: boolean;
+  visible: boolean;
+  inputHealthy: boolean;
+  enabled: boolean;
+  lanAUp: boolean;
+  lanBUp: boolean;
+  isPrp: boolean;
+  playing: boolean;
+  speed: FlowSpeed;
+  transferLatencyMs: number;
+  switchOutputs: Record<PrpLan, FlowPosition>;
+  branchY: number;
+  peers: MultiVendorIed[];
+  onRxStatusChange?: (blockId: string, status: GooseRxState) => void;
+}
+
+const GOOSE_DEFAULT_TRANSFER_MS = 3;
+const GOOSE_LAN_B_OFFSET_MS = 1;
+const GOOSE_TRAVEL_MS: Record<PrpLan, number> = { A: 1080, B: 1200 };
+const GOOSE_LAN_COLORS: Record<PrpLan, string> = { A: '#38BDF8', B: '#C084FC' };
+const GOOSE_RECEIPT_HOLD_MS = 240;
+
+function GoosePositionDemo({
+  block, position, showTrip, visible, inputHealthy, enabled, lanAUp, lanBUp, isPrp, playing, speed, transferLatencyMs,
+  switchOutputs, branchY, peers, onRxStatusChange,
+}: GooseDemoProps) {
+  const layer = useRef<SVGGElement>(null);
+  const publisher = useRef({
+    position, stNum: block.stNum, nextSqNum: block.sqNum, retryInterval: block.maxTimeMs,
+  });
+  const published = useRef<GooseDemoFrame | null>(null);
+  const lastReceipt = useRef<{ frame: GooseDemoFrame; lan: PrpLan; at: number } | null>(null);
+  const startedAt = useRef<number | null>(null);
+  const [rx, setRx] = useState<{ receipt: typeof lastReceipt.current; expired: boolean; duplicateLan?: PrpLan }>({
+    receipt: null, expired: false,
+  });
+  const ttlMs = Math.max(1, block.timeAllowedToLiveMs);
+  const minTimeMs = Math.max(1, block.minTimeMs);
+  const maxTimeMs = Math.max(minTimeMs, block.maxTimeMs);
+
+  // Transport, retransmissions and expiry run even while the drawing is paused.
+  useEffect(() => {
+    const start = startedAt.current ??= performance.now();
+    const state = publisher.current;
+    if (inputHealthy && state.position !== position) {
+      state.position = position;
+      state.stNum++;
+      state.nextSqNum = 0;
+      state.retryInterval = minTimeMs;
+    }
+    let publishTimer: number | undefined;
+    let expiryTimer: number;
+    const arrivals = new Set<number>();
+
+    const scheduleExpiry = () => {
+      window.clearTimeout(expiryTimer);
+      const remaining = ttlMs - (performance.now() - (lastReceipt.current?.at ?? start));
+      if (remaining <= 0) {
+        setRx({ receipt: lastReceipt.current, expired: true });
+      } else {
+        expiryTimer = window.setTimeout(scheduleExpiry, Math.ceil(remaining));
+      }
+    };
+
+    const publish = () => {
+      const frame = {
+        position: state.position, stNum: state.stNum, sqNum: state.nextSqNum++,
+        lans: { A: lanAUp, B: lanBUp },
+      };
+      published.current = frame;
+
+      for (const lan of ['A', 'B'] as const) {
+        if (!frame.lans[lan]) continue;
+        const delay = transferLatencyMs + (lan === 'B' ? GOOSE_LAN_B_OFFSET_MS : 0);
+        const arrival = window.setTimeout(() => {
+          arrivals.delete(arrival);
+          // PRP copies have the same publisher and frame identity. Late copies
+          // and older frames cannot update the receivers or refresh their TTL.
+          const previous = lastReceipt.current?.frame;
+          if (previous === frame) {
+            setRx(current => current.receipt?.frame === frame ? { ...current, duplicateLan: lan } : current);
+            return;
+          }
+          if (previous && (previous.stNum > frame.stNum ||
+              (previous.stNum === frame.stNum && previous.sqNum >= frame.sqNum))) return;
+          const receipt = { frame, lan, at: performance.now() };
+          lastReceipt.current = receipt;
+          setRx({ receipt, expired: false });
+          scheduleExpiry();
+        }, delay);
+        arrivals.add(arrival);
+      }
+
+      const retry = Math.min(maxTimeMs, state.retryInterval);
+      state.retryInterval = Math.min(maxTimeMs, retry * 2);
+      publishTimer = window.setTimeout(publish, retry);
+    };
+
+    scheduleExpiry();
+    if (enabled && (lanAUp || lanBUp)) publish();
+    return () => {
+      window.clearTimeout(publishTimer);
+      window.clearTimeout(expiryTimer);
+      arrivals.forEach((arrival) => window.clearTimeout(arrival));
+    };
+  }, [position, inputHealthy, enabled, lanAUp, lanBUp, transferLatencyMs, ttlMs, minTimeMs, maxTimeMs]);
+
+  type VisualFlight = GooseDemoFrame & { sentAt: number };
+  const visual = useRef({
+    now: 0,
+    flight: null as VisualFlight | null,
+    lastAnimated: null as GooseDemoFrame | null,
+    showReceiptUntil: 0,
+  });
+  const [view, setView] = useState(() => ({ ...visual.current }));
+
+  useEffect(() => {
+    const state = visual.current;
+    if (state.flight) {
+      const lans = {
+        A: state.flight.lans.A && enabled && lanAUp,
+        B: state.flight.lans.B && enabled && lanBUp,
+      };
+      state.flight = lans.A || lans.B ? { ...state.flight, lans } : null;
+      setView({ ...state });
+    }
+    if (!playing || !visible) return;
+
+    let request: number;
+    let previous: number | undefined;
+    const tick = (timestamp: number) => {
+      state.now += previous === undefined ? 0 : Math.min(timestamp - previous, 64) * speed;
+      previous = timestamp;
+      if (state.flight) {
+        const duration = state.flight.lans.B ? GOOSE_TRAVEL_MS.B : GOOSE_TRAVEL_MS.A;
+        if (state.now - state.flight.sentAt >= duration) {
+          state.flight = null;
+          state.showReceiptUntil = state.now + GOOSE_RECEIPT_HOLD_MS;
+        }
+      }
+      const frame = published.current;
+      if (enabled && frame && frame !== state.lastAnimated && !state.flight && state.now >= state.showReceiptUntil) {
+        const lans = { A: frame.lans.A && lanAUp, B: frame.lans.B && lanBUp };
+        if (lans.A || lans.B) {
+          state.flight = { ...frame, lans, sentAt: state.now };
+          state.lastAnimated = frame;
+        }
+      }
+      setView({ ...state });
+      request = requestAnimationFrame(tick);
+    };
+    request = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(request);
+  }, [enabled, lanAUp, lanBUp, playing, speed, visible]);
+
+  const { receipt, expired, duplicateLan } = rx;
+  const received = receipt?.frame;
+  const rxState: GooseRxState = expired ? 'INVALID / TIMEOUT' : received ? 'HEALTHY' : 'WAITING';
+  useEffect(() => {
+    onRxStatusChange?.(block.id, rxState);
+  }, [block.id, onRxStatusChange, rxState]);
+
+  if (!visible) return null;
+
+  const status = expired ? 'GOOSE TIMEOUT' : received ? 'GOOSE RX ✓' : 'WAITING FOR GOOSE';
+  const payloadLabel = showTrip ? 'Protection Trip' : 'CB';
+  const color = expired ? '#FCA5A5' : received ? '#86EFAC' : '#BAE6FD';
+  const lans: PrpLan[] = isPrp || lanBUp ? ['A', 'B'] : ['A'];
+  const liveLans = { A: lanAUp, B: lanBUp };
+  const deviceSpacing = 226;
+  const headerWidth = 178;
+  const imageWidth = 174;
+  const imageHeight = 148;
+  const imageY = branchY + 76;
+  const headerY = imageY + 45;
+  const portY = imageY + 2;
+  const labelY = imageY + imageHeight + 20;
+  const centerX = (switchOutputs.A.x + switchOutputs.B.x) / 2;
+  const age = view.flight ? view.now - view.flight.sentAt : 0;
+
+  const lanColor = (lan: PrpLan) => liveLans[lan] ? GOOSE_LAN_COLORS[lan] : '#F87171';
+  const packetPoint = (pathId: string, fraction: number) => {
+    const path = layer.current?.ownerSVGElement?.querySelector<SVGPathElement>('#' + pathId);
+    return path?.getPointAtLength(path.getTotalLength() * fraction);
+  };
+
+  const packetBadge = (lan: PrpLan, point: FlowPosition, y: number) => (
+    <g data-goose-packet-badge={lan} transform={`translate(${point.x} ${y})`}>
+      <rect x="-58" y="-8" width="116" height="16" rx="7" fill="#061C30" stroke={GOOSE_LAN_COLORS[lan]} />
+      <text y="3" textAnchor="middle" fill="#E0F2FE" fontSize="8.5" fontWeight="700" fontFamily="monospace">
+        {`GOOSE · LAN-${lan} · ${view.flight?.sqNum}`}
+      </text>
+    </g>
+  );
+
+  return (
+    <g ref={layer} data-goose-position-demo="" data-goose-accepted-lan={receipt?.lan} data-goose-discarded-lan={duplicateLan}>
+      {lans.map((lan) => {
+        const output = switchOutputs[lan];
+        const flying = view.flight?.lans[lan] && age < GOOSE_TRAVEL_MS[lan] * 0.34;
+        const ingress = flying ? packetPoint('cable-ied-' + lan.toLowerCase(), age / (GOOSE_TRAVEL_MS[lan] * 0.34)) : undefined;
+        return (
+          <g key={lan}>
+            <rect x={output.x - 4} y={output.y - 4} width="8" height="8" rx="2"
+              fill="#062139" stroke={lanColor(lan)} />
+            {ingress && (
+              <>
+                <circle cx={ingress.x} cy={ingress.y - 4} r="3.5" fill={GOOSE_LAN_COLORS[lan]} stroke="#E0F2FE" />
+                {packetBadge(lan, ingress, branchY - (lan === 'A' ? 103 : 45))}
+              </>
+            )}
+          </g>
+        );
+      })}
+      {peers.map((peer, index) => {
+        const x = centerX + (index - (peers.length - 1) / 2) * deviceSpacing;
+        const image = getIedImageByModel(peer.vendor, peer.model);
+        // Details sit outside the relay pair, leaving the cable and port area clear.
+        const detailsSide = index < peers.length / 2 ? -1 : 1;
+        const detailsX = x + detailsSide * (imageWidth / 2 + 13 + headerWidth / 2);
+        return (
+          <g key={peer.id} data-goose-peer={peer.id}>
+            <title>{block.extRefs.filter(ref => ref.bound && ref.subscriberIedId === peer.id)
+              .map(ref => `${ref.srcRef} → ${ref.intAddr}`).join(' · ') || block.gocbRef}</title>
+            <image href={image} x={x - imageWidth / 2} y={imageY}
+              width={imageWidth} height={imageHeight} preserveAspectRatio="xMidYMin meet"
+              style={{ filter: 'drop-shadow(0 7px 8px rgba(0, 0, 0, 0.55))' }}
+            />
+            {lans.map((lan) => {
+              const output = switchOutputs[lan];
+              const side = lan === 'A' ? -1 : 1;
+              const portX = x + side * 23;
+              const sideX = x + side * 99;
+              const bendY = branchY + (lan === 'B' ? 18 : 0);
+              const pathId = `goose-status-demo-${peer.id}-${lan}`;
+              const path = `M ${output.x} ${output.y + 4} V ${bendY} H ${sideX} V ${imageY - 16} H ${portX} V ${portY}`;
+              const fraction = (age / GOOSE_TRAVEL_MS[lan] - 0.34) / 0.66;
+              const point = view.flight?.lans[lan] && fraction >= 0 && fraction < 1
+                ? packetPoint(pathId, fraction) : undefined;
+              const stroke = lanColor(lan);
+              return (
+                <g key={lan}>
+                  <path d={path} fill="none" stroke="#10324B" strokeWidth="5" />
+                  <path id={pathId} d={path} fill="none" stroke={stroke} strokeWidth="2.1"
+                    strokeDasharray="5 4" strokeLinejoin="round" />
+                  <g data-goose-rx-port={`${peer.id}/${lan}`} transform={`translate(${portX} ${portY})`}>
+                    <title>{`${peer.id} ETH-${lan} · GOOSE Layer-2 subscriber`}</title>
+                    <rect x="-7" y="-6" width="14" height="12" rx="2.5" fill="#04243B" stroke={stroke} strokeWidth="1.6" />
+                    <path d="M -3 0 H 3" stroke={stroke} strokeWidth="1.4" />
+                    <text x="0" y="-9" textAnchor="middle" fill={stroke} fontSize="7.5" fontWeight="800">{`ETH-${lan}`}</text>
+                  </g>
+                  {point && (
+                    <>
+                      <circle cx={point.x} cy={point.y} r="4" fill={GOOSE_LAN_COLORS[lan]} stroke="#E0F2FE" />
+                      {(lan === 'A' ? index === 0 : index === peers.length - 1) &&
+                        packetBadge(lan, point, branchY + (lan === 'A' ? 31 : 50))}
+                    </>
+                  )}
+                </g>
+              );
+            })}
+            <rect x={detailsX - headerWidth / 2} y={headerY} width={headerWidth} height="53" rx="9"
+              fill="#052035" stroke="#00DFFF" />
+            <text x={detailsX} y={headerY + 16} textAnchor="middle" fill="#F8FAFC" fontSize="12" fontWeight="800">{peer.id}</text>
+            <text x={detailsX} y={headerY + 31} textAnchor="middle" fill="#BAE6FD" fontSize="10">{peer.model}</text>
+            <text x={detailsX} y={headerY + 45} textAnchor="middle" fill="#7DD3FC" fontSize="8" fontFamily="monospace">
+              {isPrp ? `A ${peer.ipAddressLanA} · B ${peer.ipAddressLanB}` : peer.ipAddressLanA}
+            </text>
+            <text x={x} y={labelY} textAnchor="middle" fill={color} fontSize="11" fontWeight="800">{status}</text>
+            <text x={x} y={labelY + 15} textAnchor="middle" fill={color} fontSize="10">
+              {received ? `${expired ? 'Last' : 'Remote'} ${payloadLabel} = ${received.position}` : `Remote ${payloadLabel} = —`}
+            </text>
+            <text x={x} y={labelY + 29} textAnchor="middle" fill="#BAE6FD" fontSize="9" fontFamily="monospace">
+              {received ? `stNum ${received.stNum} · sqNum ${received.sqNum}` : 'Status input'}
+            </text>
+            {receipt && !expired && <text x={x} y={labelY + 42} textAnchor="middle" fill="#7DD3FC" fontSize="8" fontFamily="monospace">
+              {duplicateLan ? `LAN ${receipt.lan} accepted · LAN ${duplicateLan} duplicate discarded` : `LAN ${receipt.lan} accepted`}
+            </text>}
+          </g>
+        );
+      })}
+      <g transform={`translate(${centerX - 130} ${branchY - 15})`}>
+        <rect x="-256" y="-10" width="256" height="20" rx="7" fill="#04243B" stroke="#38BDF8" />
+        <text x="-128" y="3.5" textAnchor="middle" fill="#BAE6FD" fontSize="9" fontFamily="monospace">
+          {enabled && view.flight
+            ? `GOOSE · ${payloadLabel} ${view.flight.position} · stNum ${view.flight.stNum} · sqNum ${view.flight.sqNum}`
+            : enabled && received && view.now < view.showReceiptUntil
+              ? `GOOSE RX · ${payloadLabel} ${received.position} · stNum ${received.stNum} · sqNum ${received.sqNum}`
+              : `GOOSE L2 multicast · APPID ${block.appId} · VLAN ${block.vlanId}`}
+        </text>
+      </g>
+    </g>
+  );
+}
+
 export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
   activeChain,
   ied,
@@ -97,8 +620,10 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
   onSelectBay,
   networkLinks,
   gooseControlBlocks,
+  gooseTransferLatencyMs = GOOSE_DEFAULT_TRANSFER_MS,
   networkRedundancyMode,
   chainFaultMode,
+  faultModeByBay,
   setChainFaultMode,
   selectedStageIndex,
   setSelectedStageIndex,
@@ -108,6 +633,15 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
   onResetTrip,
 }) => {
   const { bay } = activeChain;
+  const gooseDelayMs = Number.isFinite(gooseTransferLatencyMs)
+    ? Math.max(1, gooseTransferLatencyMs) : GOOSE_DEFAULT_TRANSFER_MS;
+  const nextPrpSequence = useRef(1024);
+  const allocateSequence = useCallback(() => {
+    const sequence = nextPrpSequence.current;
+    nextPrpSequence.current = (sequence + 1) % 65536;
+    return sequence;
+  }, []);
+  const [flowRevision, setFlowRevision] = useState(0);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const diagramWrapRef = useRef<HTMLDivElement | null>(null);
   const portRefs = useRef<Record<string, HTMLSpanElement | null>>({});
@@ -121,7 +655,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
 
   // Animation engine state (visual pause/resume does NOT stop underlying store simulation)
   const [playing, setPlaying] = useState<boolean>(true);
-  const [speed, setSpeed] = useState<1 | 2 | 4>(1);
+  const [speed, setSpeed] = useState<FlowSpeed>(DEFAULT_FLOW_SPEED);
 
   // Independent PRP & Fault Simulation toggles preserved per bay
   const [netFaultsByBay, setNetFaultsByBay] = useState<
@@ -172,40 +706,78 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
       { time: t, detail: `DI module acquired ${activeChain.diChannelLabel}`, severity: 'INFO' },
       { time: t, detail: `${activeChain.iedName} updated ${activeChain.lnPart}.${activeChain.doPart}.${activeChain.daPart}`, severity: 'INFO' },
       { time: t, detail: `DataSet (${activeChain.row.defaultDataset}) generated`, severity: 'INFO' },
-      { time: t, detail: `${activeChain.reportCbName} / ${activeChain.gooseCbName} active`, severity: 'INFO' },
+      { time: t, detail: `MMS: ${activeChain.reportCbName} · GOOSE: ${activeChain.gooseCbName}`, severity: 'INFO' },
       { time: t, detail: `SCADA/HMI updated — ${bay.bayCode} Breaker = ${bay.breakerState}`, severity: 'INFO' },
     ];
   });
 
-  // Derive authoritative link and protocol states
-  const bayLinks = useMemo(
-    () => networkLinks.filter((l) => l.sourceId === bay.iedId || l.targetId === bay.iedId),
-    [networkLinks, bay.iedId]
-  );
-  const storeLanAUp = bayLinks.find((l) => l.lanPlane === 'LAN_A')?.status !== 'DOWN';
-  const storeLanBUp = bayLinks.find((l) => l.lanPlane === 'LAN_B')?.status !== 'DOWN';
+  // Keep a transport instance mounted for every configured publisher while switching bays.
+  const linksByIed = useMemo(() => {
+    const map = new Map<string, NetworkLink[]>();
+    for (const link of networkLinks) {
+      for (const id of [link.sourceId, link.targetId]) {
+        const links = map.get(id) ?? [];
+        links.push(link);
+        map.set(id, links);
+      }
+    }
+    return map;
+  }, [networkLinks]);
+  const blocksByIed = useMemo(() => {
+    const map = new Map<string, GooseControlBlock>();
+    for (const block of gooseControlBlocks) {
+      if (block.subscriberIedIds.length && !map.has(block.publisherIedId)) map.set(block.publisherIedId, block);
+    }
+    return map;
+  }, [gooseControlBlocks]);
+  const primaryGoose = blocksByIed.get(bay.iedId);
+  const getLanState = (publisher: BayEquipment) => {
+    const links = linksByIed.get(publisher.iedId) ?? [];
+    const faults = netFaultsByBay[publisher.id];
+    const iedOnline = publisher.quality !== 'INVALID';
+    return {
+      A: iedOnline && !faults?.lanA && links.find(link => link.lanPlane === 'LAN_A')?.status !== 'DOWN',
+      B: iedOnline && !faults?.lanB && networkRedundancyMode !== 'SINGLE_LAN' &&
+        links.find(link => link.lanPlane === 'LAN_B')?.status !== 'DOWN',
+    };
+  };
+  const canPublishGoose = (block: GooseControlBlock, publisher: BayEquipment, mode: SignalChainFaultMode) =>
+    block.healthy && publisher.quality !== 'INVALID' && mode !== 'GOOSE_TIMEOUT' && mode !== 'DATASET_MISSING';
 
   const isSingleAttached = ied?.nodeType === 'REDBOX_SAN';
-  const isIedFailed = chainFaultMode === 'REPORT_DISABLED' || bay.quality === 'INVALID';
+  const isIedFailed = bay.quality === 'INVALID';
   const isDiFailed = chainFaultMode === 'DI_INPUT_FAIL' || !bay.dcSupplyHealthy;
-  const isMmsLoss = chainFaultMode === 'MMS_DISCONNECT' || isIedFailed;
-  const isGooseBlocked =
-    chainFaultMode === 'GOOSE_TIMEOUT' ||
-    isIedFailed ||
-    gooseControlBlocks.some((g) => g.publisherIedId === bay.iedId && !g.healthy);
-
-  const lanAUp = !lanAFailed && storeLanAUp && !isIedFailed;
-  const lanBUp = !lanBFailed && storeLanBUp && !isIedFailed && networkRedundancyMode !== 'SINGLE_LAN';
+  const isMmsLoss = chainFaultMode === 'MMS_DISCONNECT' || chainFaultMode === 'REPORT_DISABLED' || isIedFailed;
+  const { A: lanAUp, B: lanBUp } = getLanState(bay);
   const anyLanUp = lanAUp || lanBUp;
   const redundancyDegraded = (lanAUp && !lanBUp) || (!lanAUp && lanBUp);
 
   const mmsHealthy = !isMmsLoss && anyLanUp && chainFaultMode !== 'DATASET_MISSING' && chainFaultMode !== 'WRONG_IEC_REF';
-  const gooseHealthy = !isGooseBlocked && anyLanUp && chainFaultMode !== 'DATASET_MISSING';
+  const gooseDemos = bays.flatMap(publisher => {
+    const block = blocksByIed.get(publisher.iedId);
+    if (!block) return [];
+    const peers = block.subscriberIedIds.flatMap(id => {
+      const peer = ieds.find(candidate => candidate.id === id);
+      return peer ? [peer] : [];
+    });
+    if (!peers.length) return [];
+    const mode = publisher.id === bay.id ? chainFaultMode : faultModeByBay?.[publisher.id] ?? 'NONE';
+    const available = getLanState(publisher);
+    const links = linksByIed.get(publisher.iedId) ?? [];
+    const hasVlan = (plane: 'LAN_A' | 'LAN_B') => links.some(link => link.lanPlane === plane && link.vlanList.includes(block.vlanId));
+    const lans = { A: available.A && hasVlan('LAN_A'), B: available.B && hasVlan('LAN_B') };
+    return [{ block, publisher, peers, mode, lans, enabled: canPublishGoose(block, publisher, mode) && (lans.A || lans.B) }];
+  });
+  const selectedGoose = gooseDemos.find(demo => demo.publisher.id === bay.id);
+  const showGooseDemo = !!selectedGoose;
+  const gooseHealthy = selectedGoose?.enabled ?? false;
   const iec104Healthy = mmsHealthy && chainFaultMode !== 'HMI_TAG_MISMATCH';
+  const mmsFaultMode = chainFaultMode === 'GOOSE_TIMEOUT' ? 'NONE' : chainFaultMode;
+  const mmsDataGood = mmsHealthy && !isDiFailed && bay.quality === 'GOOD' && mmsFaultMode === 'NONE';
 
   const isBreakerClosed = bay.breakerState === 'CLOSED';
   const contact52aOn = isBreakerClosed && !isDiFailed;
-  const contact52bOn = !isBreakerClosed && !isDiFailed;
+  const contact52bOn = bay.breakerState === 'OPEN' && !isDiFailed;
 
   // Dynamic IED image: use Schneider MiCOM P143 asset for Schneider P143 or fallback to bay's configured model
   const iedImageSrc = useMemo(() => {
@@ -302,13 +874,13 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
           ? 'PRP LAN A & LAN B down — communication path lost'
           : redundancyDegraded
           ? `PRP redundancy degraded (${lanAUp ? 'LAN A active' : 'LAN B active'}) — 0 ms failover`
-          : `MMS (${mmsHealthy ? 'OK' : 'DOWN'}) / GOOSE (${gooseHealthy ? 'OK' : 'BLOCKED'}) published`,
-        severity: !anyLanUp || !mmsHealthy || !gooseHealthy ? 'WARN' : 'INFO',
+          : `MMS (${mmsHealthy ? 'OK' : 'DOWN'}) / GOOSE (${gooseHealthy ? 'OK' : showGooseDemo ? 'BLOCKED' : 'NOT CONFIGURED'}) published`,
+        severity: !anyLanUp || !mmsHealthy || (showGooseDemo && !gooseHealthy) ? 'WARN' : 'INFO',
       },
       {
         time: formatMsTime(new Date(now + 11)),
-        detail: `SCADA/HMI updated — ${bay.bayCode} Breaker = ${bay.breakerState} (${activeChain.overallQuality})`,
-        severity: chainFaultMode !== 'NONE' || !anyLanUp ? 'WARN' : 'INFO',
+        detail: `SCADA/HMI updated — ${bay.bayCode} Breaker = ${bay.breakerState} (${mmsDataGood ? 'GOOD' : activeChain.overallQuality})`,
+        severity: mmsFaultMode !== 'NONE' || !mmsHealthy ? 'WARN' : 'INFO',
       },
     ];
     setTimeline((prev) => [...newEntries.reverse(), ...prev].slice(0, 12));
@@ -326,25 +898,26 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
   // Increment simulated packet counters when playing and healthy
   useEffect(() => {
     if (!playing) return;
-    const intervalMs = Math.max(250, Math.round(1000 / speed));
+    const intervalMs = 1000 / speed;
     const id = window.setInterval(() => {
       setSimPackets((prev) => ({
-        mms: mmsHealthy ? prev.mms + Math.round(10 / speed) : prev.mms,
-        goose: gooseHealthy ? prev.goose + Math.round(120 / speed) : prev.goose,
-        iec104: iec104Healthy ? prev.iec104 + Math.round(6 / speed) : prev.iec104,
+        mms: mmsHealthy ? prev.mms + 10 : prev.mms,
+        goose: gooseHealthy ? prev.goose + 120 : prev.goose,
+        iec104: iec104Healthy ? prev.iec104 + 6 : prev.iec104,
       }));
     }, intervalMs);
     return () => window.clearInterval(id);
   }, [playing, speed, mmsHealthy, gooseHealthy, iec104Healthy]);
 
   const handleReset = () => {
+    setFlowRevision((revision) => revision + 1);
     setPlaying(true);
-    setSpeed(1);
+    setSpeed(DEFAULT_FLOW_SPEED);
     setLanAFailed(false);
     setLanBFailed(false);
     setInterlockTripActive(false);
     setChainFaultMode('NONE');
-    if (bay.protectionTripActive) {
+    if (bay.bayType !== 'OUTGOING_FEEDER' && bay.protectionTripActive) {
       onResetTrip(bay.id);
     }
     setSimPackets({ mms: 1482, goose: 24892, iec104: 940 });
@@ -365,20 +938,31 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
 
   const animDur = (baseSec: number) => `${(baseSec / speed).toFixed(2)}s`;
 
+  const goodStatus = { border: '#22C55E', text: '#4ADE80' };
+  const warningStatus = { border: '#F59E0B', text: '#FBBF24' };
+  const faultStatus = { border: '#FF5C65', text: '#FDA4AF' };
   const qualityBadgeColor =
-    chainFaultMode === 'NONE' && anyLanUp && bay.quality === 'GOOD'
-      ? { bg: '#072E22', border: '#22C55E', text: '#4ADE80', label: 'GOOD' }
-      : redundancyDegraded || chainFaultMode === 'BAD_QUALITY'
-      ? { bg: '#332206', border: '#F59E0B', text: '#FBBF24', label: 'DEGRADED' }
-      : { bg: '#3B0D15', border: '#FF5C65', text: '#FDA4AF', label: 'FAULT / INVALID' };
+    mmsFaultMode === 'MMS_DISCONNECT' || (!anyLanUp && !isIedFailed)
+      ? { ...faultStatus, label: 'COMMUNICATION LOST' }
+      : mmsDataGood
+      ? { ...goodStatus, label: 'GOOD' }
+      : (mmsHealthy && redundancyDegraded) || mmsFaultMode === 'BAD_QUALITY'
+      ? { ...warningStatus, label: 'DEGRADED' }
+      : { ...faultStatus, label: 'FAULT / INVALID' };
 
-  const primaryGoose = gooseControlBlocks.find((g) => g.publisherIedId === bay.iedId);
+  const [demoGooseRx, setDemoGooseRx] = useState<Partial<Record<string, GooseRxState>>>({});
+  const updateGooseRx = useCallback((blockId: string, status: GooseRxState) => {
+    setDemoGooseRx(previous => previous[blockId] === status ? previous : { ...previous, [blockId]: status });
+  }, []);
+  const gooseRxLabel = selectedGoose ? demoGooseRx[selectedGoose.block.id] ?? 'WAITING' : 'NOT CONFIGURED';
+  const gooseRxColor = gooseRxLabel === 'HEALTHY' ? goodStatus
+    : gooseRxLabel === 'INVALID / TIMEOUT' ? faultStatus : warningStatus;
 
   return (
     <div className="space-y-3">
       {/* Top Signal Chain Header Bar matching Reference */}
       <div
-        className="rounded-xl border px-4 py-2.5 flex flex-wrap items-center justify-between gap-3"
+        className="sas-signal-chain-summary rounded-xl border px-4 py-2.5 flex flex-wrap items-center justify-between gap-3"
         style={{
           background: 'linear-gradient(90deg, #041628 0%, #07223B 50%, #041628 100%)',
           borderColor: '#00DFFF',
@@ -390,7 +974,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
             Real-Time IEC 61850 SAS Signal Chain — {bay.bayCode}{' '}
             <span className="text-[#8AD8FF] font-semibold">({bay.voltageKv} kV · {bay.name})</span>
           </h2>
-          <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#9ED8F6]">
+          <label className="sas-signal-bay-control inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#9ED8F6]">
             <span>Select Bay / IED:</span>
             <select
               aria-label="Select Bay / IED"
@@ -419,7 +1003,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
             <span className={`w-2 h-2 rounded-full ${playing && anyLanUp ? 'bg-[#22C55E] animate-pulse' : 'bg-[#F59E0B]'}`} />
             {playing ? 'SIMULATION LIVE' : 'PAUSED'}
           </span>
-          <div className="inline-flex items-center gap-1 text-[10px] font-mono">
+          <div className="inline-flex flex-wrap items-center gap-1 text-[10px] font-mono">
             <button
               type="button"
               onClick={() => setPlaying((p) => !p)}
@@ -427,11 +1011,12 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
             >
               {playing ? 'Pause' : 'Resume'}
             </button>
-            {([1, 2, 4] as const).map((s) => (
+            {FLOW_SPEEDS.map((s) => (
               <button
                 key={s}
                 type="button"
                 onClick={() => setSpeed(s)}
+                aria-pressed={speed === s}
                 className="px-1.5 py-0.5 rounded border font-bold transition"
                 style={{
                   borderColor: speed === s ? '#00DFFF' : '#1B4B72',
@@ -471,9 +1056,19 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
             className="px-2.5 py-1 rounded-lg border bg-[#041526] flex items-center gap-1.5"
             style={{ borderColor: qualityBadgeColor.border }}
           >
-            <span className="text-[#94B8D7]">Quality :</span>
+            <span className="text-[#94B8D7]">MMS Quality :</span>
             <span className="font-extrabold" style={{ color: qualityBadgeColor.text }}>
               {qualityBadgeColor.label}
+            </span>
+          </div>
+
+          <div
+            className="px-2.5 py-1 rounded-lg border bg-[#041526] flex items-center gap-1.5"
+            style={{ borderColor: gooseRxColor.border }}
+          >
+            <span className="text-[#94B8D7]">GOOSE RX :</span>
+            <span className="font-extrabold" style={{ color: gooseRxColor.text }}>
+              {gooseRxLabel}
             </span>
           </div>
 
@@ -483,18 +1078,18 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
           </div>
 
           <div className="px-2.5 py-1 rounded-lg border border-[#1B4B72] bg-[#041526] flex items-center gap-1.5">
-            <span className="text-[#94B8D7]">Latency (GOOSE Sim) :</span>
-            <span className="font-extrabold text-[#38BDF8]">{gooseHealthy ? `${Math.max(1, Math.round(3 / speed))} ms` : 'BLOCKED'}</span>
+            <span className="text-[#94B8D7]" title="Configured demo transfer delay in milliseconds. LAN B adds 1 ms.">Latency (GOOSE Sim) :</span>
+            <span className="font-extrabold text-[#38BDF8]">{gooseHealthy ? `${gooseDelayMs + (selectedGoose && !selectedGoose.lans.A ? GOOSE_LAN_B_OFFSET_MS : 0)} ms` : showGooseDemo ? 'BLOCKED' : 'N/A'}</span>
           </div>
         </div>
       </div>
 
       {/* Main 6-Device Hardware Signal Chain + Physical SVG Cabling */}
       <div
-        className="rounded-xl border p-3 relative overflow-x-auto"
+        className="sas-signal-chain-scene rounded-xl border p-3 relative overflow-x-auto"
         style={{
           borderColor: '#00DFFF',
-          background: 'radial-gradient(ellipse at 50% 35%, #082744 0%, #041526 68%, #020C17 100%)',
+          background: 'radial-gradient(ellipse 62% 44% at 50% 38%, rgba(28, 92, 126, 0.74) 0%, rgba(14, 52, 78, 0.86) 58%, rgba(10, 38, 58, 0.92) 100%)',
           boxShadow: '0 0 24px rgba(0, 223, 255, 0.14), inset 0 0 28px rgba(0, 175, 255, 0.08)',
         }}
       >
@@ -506,7 +1101,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
 
         <div ref={diagramWrapRef} className={`min-w-[1140px] relative ${playing ? '' : 'sas-paused'}`}>
           {/* 6 Device Columns — Side Ports Hug Exact Hardware Chassis Edges (Measured via ResizeObserver) */}
-          <div className="grid grid-cols-6 gap-2.5 items-start relative z-10 pb-[124px]">
+          <div className={`grid grid-cols-6 gap-2.5 items-start relative z-10 ${showGooseDemo ? 'pb-[414px]' : 'pb-[140px]'}`}>
             {/* DEVICE 1: FIELD I/O */}
             <button
               type="button"
@@ -654,6 +1249,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                   {/* Right-edge GOOSE L2 Fiber Port Hugged Directly to IED Chassis */}
                   <span
                     ref={setPortRef('ied_goose')}
+                    style={{ visibility: !primaryGoose || showGooseDemo ? 'hidden' : 'visible' }}
                     title="GOOSE L2 Publisher Port (0x88B8)"
                     className="absolute -right-2 top-[42%] -translate-y-1/2 w-3.5 h-3.5 rounded-[3px] border-[1.5px] border-[#00E5FF] bg-[#04243B] shadow-[0_0_8px_rgba(0,229,255,0.8)]"
                   />
@@ -731,6 +1327,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                   {/* Left-edge GOOSE Port Hugged Directly to LAN A Switch Chassis */}
                   <span
                     ref={setPortRef('sw_goose')}
+                    style={{ visibility: !primaryGoose || showGooseDemo ? 'hidden' : 'visible' }}
                     title="Switch LAN A GOOSE L2 Port"
                     className="absolute -left-2 top-[44%] -translate-y-1/2 w-3.5 h-3.5 rounded-[3px] border-[1.5px] border-[#00E5FF] bg-[#04243B] shadow-[0_0_8px_rgba(0,229,255,0.8)]"
                   />
@@ -878,7 +1475,9 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
             const p = portCoords;
             const W = diagSize.w;
             const H = diagSize.h;
-            const ready = p.fio_1 && p.di_1 && p.di_out && p.ied_in && p.ied_a && p.swa_in && p.swa_out && p.swb_in && p.swb_out && p.gtw_a && p.gtw_mms && p.hmi_mms && p.hmi_a;
+            const ready = ['fio_1', 'fio_2', 'di_1', 'di_2', 'di_out', 'ied_in', 'ied_a', 'ied_b',
+              'swa_in', 'swa_out', 'swb_in', 'swb_out', 'gtw_a', 'gtw_b', 'gtw_mms',
+              'hmi_mms', 'hmi_a', 'hmi_b', 'ied_goose', 'sw_goose'].every((port) => p[port]);
             if (!ready) return null;
 
             const baseY = Math.max(p.fio_1.y, p.di_1.y, p.ied_a.y, p.swa_in.y, p.gtw_a.y, p.hmi_a.y);
@@ -896,7 +1495,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
             const dHw1 = ortho(p.fio_1.x, p.fio_1.y, p.di_1.x, p.di_1.y, laneA);
             const dHw2 = ortho(p.fio_2.x, p.fio_2.y, p.di_2.x, p.di_2.y, laneB);
             const diMidY = (p.di_out.y + p.ied_in.y) / 2;
-            const dDiIed = `M ${p.di_out.x} ${diMidY} L ${p.ied_in.x} ${diMidY}`;
+            const dDiIed = `M ${p.di_out.x} ${p.di_out.y} L ${p.ied_in.x} ${p.ied_in.y}`;
             const dIedLanA = ortho(p.ied_a.x, p.ied_a.y, p.swa_in.x, p.swa_in.y, laneA);
             const dIedLanB = ortho(p.ied_b.x, p.ied_b.y, p.swb_in.x, p.swb_in.y, laneB);
             const dBusGtwA = ortho(p.swa_out.x, p.swa_out.y, p.gtw_a.x, p.gtw_a.y, laneA);
@@ -906,10 +1505,54 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
             const mmsMidY = (p.gtw_mms.y + p.hmi_mms.y) / 2;
             const dGtwHmiMms = `M ${p.gtw_mms.x} ${mmsMidY} L ${p.hmi_mms.x} ${mmsMidY}`;
             const gooseMidY = (p.ied_goose.y + p.sw_goose.y) / 2;
-            const dGooseDirect = `M ${p.ied_goose.x} ${gooseMidY} L ${p.sw_goose.x} ${gooseMidY}`;
+            const dGooseDirect = `M ${p.ied_goose.x} ${p.ied_goose.y} L ${p.sw_goose.x} ${p.sw_goose.y}`;
             const gooseDropX = Math.round((p.ied_goose.x + p.sw_goose.x) / 2);
             const dGooseDrop = `M ${gooseDropX} ${gooseMidY} L ${gooseDropX} ${gooseY} L ${p.ied_a.x} ${gooseY}`;
 
+            const isPrp = networkRedundancyMode === 'PRP';
+            const upstreamLan: PrpLan = lanAUp ? 'A' : 'B';
+            const parallelUpstream = isPrp && lanAUp && lanBUp;
+            const upstreamColor = LAN_COLORS[upstreamLan];
+            const fieldPath = isBreakerClosed ? 'cable-hw-1' : 'cable-hw-2';
+            const faultLabel = !anyLanUp ? 'STATION BUS · NO LAN AVAILABLE'
+              : chainFaultMode === 'REPORT_DISABLED' ? 'MMS REPORT DISABLED'
+              : chainFaultMode === 'DATASET_MISSING' ? 'DATASET MEMBER MISSING'
+              : chainFaultMode === 'WRONG_IEC_REF' ? 'IEC 61850 REFERENCE ERROR'
+              : 'MMS ASSOCIATION LOST';
+            const flowLegs: FlowLeg[] = [
+              { path: fieldPath, label: isDiFailed ? 'DI INPUT FAULT'
+                : isBreakerClosed ? '52a · 110 V DC' : '52b · 110 V DC',
+                color: isDiFailed ? '#FCA5A5' : '#FEF08A', duration: 1050, stop: isDiFailed },
+            ];
+            if (!isDiFailed) {
+              flowLegs.push({
+                path: 'cable-di-ied', label: isIedFailed ? 'IED DATA UNAVAILABLE'
+                  : `DI1=${Number(contact52aOn)} · DI2=${Number(contact52bOn)}`,
+                color: isIedFailed ? '#FCA5A5' : '#86EFAC', duration: 850, stop: isIedFailed,
+              });
+            }
+            if (!isDiFailed && !isIedFailed) {
+              flowLegs.push({
+                path: 'cable-ied-' + (anyLanUp ? upstreamLan.toLowerCase() : 'a'),
+                lan: mmsHealthy ? upstreamLan : undefined,
+                parallelPath: mmsHealthy && parallelUpstream ? 'cable-ied-b' : undefined,
+                label: mmsHealthy ? `${activeChain.lnPart}.${activeChain.doPart}.${activeChain.daPart}` : faultLabel,
+                color: mmsHealthy ? upstreamColor : '#FCA5A5', duration: mmsHealthy ? 1100 : 350,
+                stop: !mmsHealthy, endFraction: mmsHealthy ? 1 : 0,
+              });
+              if (mmsHealthy) {
+                flowLegs.push({
+                  path: 'cable-bus-gtw-' + upstreamLan.toLowerCase(),
+                  lan: upstreamLan,
+                  parallelPath: parallelUpstream ? 'cable-bus-gtw-b' : undefined,
+                  label: 'MMS REPORT → GATEWAY', color: upstreamColor, duration: 1250,
+                });
+              }
+            }
+            const valueLabel = activeChain.row.catalogNumber === 1
+              ? bay.breakerState
+              : activeChain.displayVal;
+            const mappedValue = valueLabel.length > 28 ? 'SCADA TAG UPDATED' : 'SCADA · ' + valueLabel;
             return (
               <svg
                 ref={svgRef}
@@ -957,105 +1600,106 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                   strokeLinejoin="round"
                   strokeDasharray={isDiFailed ? '6 4' : undefined}
                 />
-                {!isDiFailed && contact52aOn && (
-                  <circle r="4.2" fill="#FEF08A" filter="url(#sasGlowGreen)">
-                    <animateMotion dur={animDur(1.7)} repeatCount="indefinite"><mpath href="#cable-hw-1" /></animateMotion>
-                  </circle>
-                )}
-                {!isDiFailed && contact52bOn && (
-                  <circle r="4.2" fill="#FEF08A" filter="url(#sasGlowGreen)">
-                    <animateMotion dur={animDur(1.7)} repeatCount="indefinite"><mpath href="#cable-hw-2" /></animateMotion>
-                  </circle>
-                )}
+
+
 
                 {/* 2. DEVICE 2 (DI MODULE) -> DEVICE 3 (IED) DIRECT CHASSIS-TO-CHASSIS LINK */}
                 <path id="cable-di-ied" d={dDiIed} fill="none" stroke={isDiFailed || isIedFailed ? '#EF4444' : '#22C55E'} strokeWidth="3.4" strokeLinecap="round" strokeDasharray={isDiFailed || isIedFailed ? '5 4' : undefined} />
                 <text x={(p.di_out.x + p.ied_in.x) / 2} y={diMidY - 8} textAnchor="middle" fill={isDiFailed || isIedFailed ? '#FCA5A5' : '#86EFAC'} fontSize="8.5" fontWeight="bold" fontFamily="monospace">
                   DI BUS
                 </text>
-                {!isDiFailed && !isIedFailed && (
-                  <circle r="4.2" fill="#4ADE80" filter="url(#sasGlowGreen)">
-                    <animateMotion dur={animDur(1.0)} repeatCount="indefinite"><mpath href="#cable-di-ied" /></animateMotion>
-                  </circle>
-                )}
+
 
                 {/* 3. DEVICE 3 (IED) [ETH-A / ETH-B] -> DEVICE 4 (STATION BUS) [A-P1 / B-P1] */}
                 <path id="cable-ied-a" d={dIedLanA} fill="none" stroke={lanAUp ? '#38BDF8' : '#EF4444'} strokeWidth="3.2" strokeLinejoin="round" strokeDasharray={lanAUp ? undefined : '6 4'} />
                 <path id="cable-ied-b" d={dIedLanB} fill="none" stroke={lanBUp ? '#C084FC' : '#EF4444'} strokeWidth="3.2" strokeLinejoin="round" strokeDasharray={lanBUp ? undefined : '6 4'} />
-                {lanAUp && (
-                  <circle r="4" fill="#7DD3FC" filter="url(#sasGlowCyan)">
-                    <animateMotion dur={animDur(1.5)} repeatCount="indefinite"><mpath href="#cable-ied-a" /></animateMotion>
-                  </circle>
-                )}
-                {lanBUp && (
-                  <circle r="4" fill="#E879F9" filter="url(#sasGlowCyan)">
-                    <animateMotion dur={animDur(1.5)} begin="0.5s" repeatCount="indefinite"><mpath href="#cable-ied-b" /></animateMotion>
-                  </circle>
-                )}
+
+
 
                 {/* 4. DEVICE 4 (STATION BUS) -> DEVICE 5 (GATEWAY) -> DEVICE 6 (SCADA) PRP LAN A & LAN B */}
                 <path id="cable-bus-gtw-a" d={dBusGtwA} fill="none" stroke={lanAUp ? '#0EA5E9' : '#EF4444'} strokeWidth="3.2" strokeLinejoin="round" strokeDasharray={lanAUp ? undefined : '6 4'} />
                 <path id="cable-bus-gtw-b" d={dBusGtwB} fill="none" stroke={lanBUp ? '#EC4899' : '#EF4444'} strokeWidth="3.2" strokeLinejoin="round" strokeDasharray={lanBUp ? undefined : '6 4'} />
                 <path id="cable-gtw-hmi-a" d={dGtwHmiA} fill="none" stroke={lanAUp && mmsHealthy ? '#0EA5E9' : '#EF4444'} strokeWidth="3.0" strokeLinejoin="round" strokeDasharray={lanAUp && mmsHealthy ? undefined : '6 4'} />
                 <path id="cable-gtw-hmi-b" d={dGtwHmiB} fill="none" stroke={lanBUp && mmsHealthy ? '#EC4899' : '#EF4444'} strokeWidth="3.0" strokeLinejoin="round" strokeDasharray={lanBUp && mmsHealthy ? undefined : '6 4'} />
-                {lanAUp && (
-                  <circle r="4" fill="#38BDF8" filter="url(#sasGlowCyan)">
-                    <animateMotion dur={animDur(1.6)} repeatCount="indefinite"><mpath href="#cable-bus-gtw-a" /></animateMotion>
-                  </circle>
-                )}
-                {lanAUp && mmsHealthy && (
-                  <circle r="3.8" fill="#38BDF8">
-                    <animateMotion dur={animDur(1.6)} begin="0.6s" repeatCount="indefinite"><mpath href="#cable-gtw-hmi-a" /></animateMotion>
-                  </circle>
-                )}
-                {lanBUp && (
-                  <circle r="4" fill="#F472B6" filter="url(#sasGlowCyan)">
-                    <animateMotion dur={animDur(1.6)} begin="0.3s" repeatCount="indefinite"><mpath href="#cable-bus-gtw-b" /></animateMotion>
-                  </circle>
-                )}
-                {lanBUp && mmsHealthy && (
-                  <circle r="3.8" fill="#F472B6">
-                    <animateMotion dur={animDur(1.6)} begin="0.9s" repeatCount="indefinite"><mpath href="#cable-gtw-hmi-b" /></animateMotion>
-                  </circle>
-                )}
 
-                {/* 5. DEVICE 5 (GATEWAY) -> DEVICE 6 (SCADA/HMI) DIRECT CHASSIS-TO-CHASSIS MMS/IEC-104 LINK */}
+
+
+
+
+                {/* Gateway and SCADA chassis uplink shown as part of the hardware diagram */}
                 <path id="cable-gtw-hmi-mms" d={dGtwHmiMms} fill="none" stroke={mmsHealthy && iec104Healthy ? '#22C55E' : '#EF4444'} strokeWidth="3.4" strokeLinecap="round" strokeDasharray={mmsHealthy && iec104Healthy ? undefined : '6 4'} />
                 <text x={(p.gtw_mms.x + p.hmi_mms.x) / 2} y={mmsMidY - 8} textAnchor="middle" fill={mmsHealthy && iec104Healthy ? '#86EFAC' : '#FCA5A5'} fontSize="8.5" fontWeight="bold" fontFamily="monospace">
                   MMS/104
                 </text>
-                {mmsHealthy && iec104Healthy && (
-                  <circle r="4.4" fill="#4ADE80" filter="url(#sasGlowGreen)">
-                    <animateMotion dur={animDur(1.0)} repeatCount="indefinite"><mpath href="#cable-gtw-hmi-mms" /></animateMotion>
-                  </circle>
-                )}
+
 
                 {/* 6. DEVICE 3 (IED) -> DEVICE 4 (STATION BUS) DIRECT GOOSE L2 CHASSIS-TO-CHASSIS + PEER DROP */}
-                <path id="cable-goose-direct" d={dGooseDirect} fill="none" stroke={gooseHealthy ? '#00E5FF' : '#EF4444'} strokeWidth="2.8" strokeDasharray="5 3" />
-                <path d={dGooseDrop} fill="none" stroke={gooseHealthy ? '#00DFFF' : '#EF4444'} strokeWidth="2.2" strokeDasharray="4 3" />
-                <circle cx={gooseDropX} cy={gooseMidY} r="3" fill={gooseHealthy ? '#00E5FF' : '#EF4444'} />
-                <text x={gooseDropX} y={gooseMidY - 8} textAnchor="middle" fill={gooseHealthy ? '#7DD3FC' : '#FCA5A5'} fontSize="8.5" fontWeight="bold" fontFamily="monospace">
+                {primaryGoose && !showGooseDemo && <path id="cable-goose-direct" d={dGooseDirect} fill="none" stroke={gooseHealthy ? '#00E5FF' : '#EF4444'} strokeWidth="2.8" strokeDasharray="5 3" />}
+                {primaryGoose && !showGooseDemo && <path d={dGooseDrop} fill="none" stroke={gooseHealthy ? '#00DFFF' : '#EF4444'} strokeWidth="2.2" strokeDasharray="4 3" />}
+                {primaryGoose && !showGooseDemo && <circle cx={gooseDropX} cy={gooseMidY} r="3" fill={gooseHealthy ? '#00E5FF' : '#EF4444'} />}
+                {primaryGoose && !showGooseDemo && <text x={gooseDropX} y={gooseMidY - 8} textAnchor="middle" fill={gooseHealthy ? '#7DD3FC' : '#FCA5A5'} fontSize="8.5" fontWeight="bold" fontFamily="monospace">
                   GOOSE L2
-                </text>
-                {gooseHealthy && (
+                </text>}
+                {primaryGoose?.healthy && anyLanUp && !showGooseDemo && (
                   <circle r="4" fill="#00F0FF" filter="url(#sasGlowCyan)">
                     <animateMotion dur={animDur(1.0)} repeatCount="indefinite"><mpath href="#cable-goose-direct" /></animateMotion>
                   </circle>
                 )}
 
                 {/* Clean Non-Overlapping Cable Tray Badges */}
-                <rect x={p.swa_in.x - 42} y={trayTop + 48} width="84" height="17" rx="4" fill="#0369A1" stroke="#38BDF8" strokeWidth="1" />
-                <text x={p.swa_in.x} y={trayTop + 59.5} textAnchor="middle" fill="#E0F2FE" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                <rect x={p.swa_in.x + (showGooseDemo ? -104 : 0) - 42} y={trayTop + 48} width="84" height="17" rx="4" fill="#0369A1" stroke="#38BDF8" strokeWidth="1" />
+                <text x={p.swa_in.x + (showGooseDemo ? -104 : 0)} y={trayTop + 59.5} textAnchor="middle" fill="#E0F2FE" fontSize="9" fontWeight="bold" fontFamily="monospace">
                   LAN A (PRP)
                 </text>
-                <rect x={p.swb_out.x - 42} y={trayTop + 48} width="84" height="17" rx="4" fill="#701A75" stroke="#E879F9" strokeWidth="1" />
-                <text x={p.swb_out.x} y={trayTop + 59.5} textAnchor="middle" fill="#FAE8FF" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                <rect x={p.swb_out.x + (showGooseDemo ? 104 : 0) - 42} y={trayTop + 48} width="84" height="17" rx="4" fill="#701A75" stroke="#E879F9" strokeWidth="1" />
+                <text x={p.swb_out.x + (showGooseDemo ? 104 : 0)} y={trayTop + 59.5} textAnchor="middle" fill="#FAE8FF" fontSize="9" fontWeight="bold" fontFamily="monospace">
                   LAN B (PRP)
                 </text>
-                <rect x={p.ied_a.x - 95} y={gooseY - 9} width="190" height="18" rx="4" fill="#04243B" stroke={gooseHealthy ? '#00DFFF' : '#EF4444'} strokeWidth="1" />
-                <text x={p.ied_a.x} y={gooseY + 3} textAnchor="middle" fill={gooseHealthy ? '#7DD3FC' : '#FCA5A5'} fontSize="8.5" fontWeight="bold" fontFamily="monospace">
-                  {primaryGoose ? `GOOSE L2 → ${primaryGoose.subscriberIedIds.join(', ')}` : 'GOOSE L2 → Peer IEDs (VLAN 20)'}
-                </text>
+                {gooseDemos.map(({ block, publisher, peers, mode, lans, enabled }) => {
+                  const isTripDataset = /\$dsProtTrip$/i.test(block.datSet);
+                  return (
+                    <GoosePositionDemo
+                      key={block.id}
+                      block={block}
+                      position={isTripDataset ? publisher.protectionTripActive ? 'ASSERTED' : 'RESET' : publisher.breakerState}
+                      showTrip={isTripDataset}
+                      visible={publisher.id === bay.id}
+                      inputHealthy={isTripDataset || (mode !== 'DI_INPUT_FAIL' && publisher.dcSupplyHealthy)}
+                      enabled={enabled}
+                      lanAUp={lans.A}
+                      lanBUp={lans.B && (isPrp || !lans.A)}
+                      isPrp={isPrp}
+                      playing={playing}
+                      speed={speed}
+                      transferLatencyMs={gooseDelayMs}
+                      switchOutputs={{
+                        A: { x: (p.swa_in.x + p.swa_out.x) / 2, y: p.swa_out.y },
+                        B: { x: (p.swb_in.x + p.swb_out.x) / 2, y: p.swb_out.y },
+                      }}
+                      branchY={trayTop + 100}
+                      peers={peers}
+                      onRxStatusChange={updateGooseRx}
+                    />
+                  );
+                })}
+
+                <SignalFlowOverlay
+                  key={[bay.id, activeChain.row.catalogNumber, bay.breakerState, chainFaultMode,
+                    isDiFailed, isIedFailed, lanAUp, lanBUp, networkRedundancyMode, flowRevision].join('/')}
+                  legs={flowLegs}
+                  playing={playing}
+                  speed={speed}
+                  lanAUp={lanAUp}
+                  lanBUp={lanBUp}
+                  isPrp={isPrp}
+                  tagMismatch={chainFaultMode === 'HMI_TAG_MISMATCH'}
+                  mappedValue={mappedValue}
+                  receiver={p.hmi_mms}
+                  receiverPorts={{ A: p.hmi_a, B: p.hmi_b }}
+                  trayBottom={trayTop + 44}
+                  width={W}
+                  allocateSequence={allocateSequence}
+                />
               </svg>
             );
           })()}
@@ -1153,7 +1797,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                   },
                   {
                     sig: `${activeChain.lnPart}.${activeChain.doPart}.q`,
-                    val: chainFaultMode === 'NONE' && anyLanUp ? '0x00 (Good)' : '0x0100 (Bad)',
+                    val: mmsDataGood ? '0x00 (Good)' : '0x0100 (Bad)',
                     q: qualityBadgeColor.label,
                     ds: activeChain.row.defaultDataset,
                     cb: activeChain.reportCbName.split(' ')[0],
@@ -1233,7 +1877,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                     proto: 'GOOSE (L2)',
                     dir: 'IED → Subscribed',
                     ok: gooseHealthy,
-                    status: gooseHealthy ? 'Active' : 'Blocked',
+                    status: gooseHealthy ? 'Active' : showGooseDemo ? 'Blocked' : 'Not configured',
                     pkts: simPackets.goose.toLocaleString(),
                     rate: gooseHealthy ? `${120 * speed} pkt/s` : '0 pkt/s',
                   },
@@ -1328,11 +1972,12 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
               },
               {
                 label: 'GOOSE Blocking (VLAN)',
+                disabled: !showGooseDemo,
                 checked: chainFaultMode === 'GOOSE_TIMEOUT',
                 onChange: (c: boolean) => setChainFaultMode(c ? 'GOOSE_TIMEOUT' : 'NONE'),
               },
               {
-                label: 'IED Failure (No Report)',
+                label: 'MMS Report Disabled',
                 checked: chainFaultMode === 'REPORT_DISABLED',
                 onChange: (c: boolean) => setChainFaultMode(c ? 'REPORT_DISABLED' : 'NONE'),
               },
@@ -1348,6 +1993,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                   type="button"
                   role="switch"
                   aria-checked={t.checked}
+                  disabled={t.disabled}
                   onClick={() => t.onChange(!t.checked)}
                   className={`w-9 h-5 rounded-full p-0.5 transition-colors border ${
                     t.checked ? 'bg-[#EF4444] border-[#FCA5A5]' : 'bg-[#1E293B] border-[#475569]'

@@ -3,6 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './styles/index.css';
+import './styles/luminous-cyan-theme.css';
 import { useSubstationStore } from './simulation/useSubstationStore';
 
 // Optional direct preview link; ordinary navigation still opens the original landing page.

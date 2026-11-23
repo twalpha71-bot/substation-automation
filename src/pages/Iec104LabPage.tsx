@@ -1,3 +1,4 @@
+import './ModbusTcpLabPage.css';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { buildIec104TelecontrolTable } from '../data/protocolRegistry';
@@ -5,6 +6,7 @@ import {
   Activity,
   AlertTriangle,
   Cpu,
+  Network,
   Database,
   Download,
   FileCode2,
@@ -364,8 +366,33 @@ export const Iec104LabPage: React.FC = () => {
   const [cycleProgress, setCycleProgress] = useState<number>(0.34);
 
   // Hover & Pin Popups
-  const [hoveredIedId, setHoveredIedId] = useState<Iec61850IedSpec['id'] | null>(null);
-  const [switchHovered, setSwitchHovered] = useState<boolean>(false);
+  const [iedPopup, setIedPopup] = useState<{ device: Iec61850IedSpec; top: number; rayY: number } | null>(null);
+  const [iedPopupPinned, setIedPopupPinned] = useState(false);
+  const iedPopupCloseTimer = useRef<ReturnType<typeof setTimeout>>();
+  const iedPopupTrigger = useRef<HTMLButtonElement | null>(null);
+  const iedPopupClose = useRef<HTMLButtonElement | null>(null);
+  const restoreIedFocus = useRef(false);
+
+  useEffect(() => () => clearTimeout(iedPopupCloseTimer.current), []);
+  useEffect(() => {
+    if (iedPopupPinned) iedPopupClose.current?.focus({ preventScroll: true });
+  }, [iedPopupPinned]);
+  const [switchHovered, setSwitchHovered] = useState(false);
+  const [switchPinned, setSwitchPinned] = useState(false);
+  const switchPopupCloseTimer = useRef<ReturnType<typeof setTimeout>>();
+  const showSwitchPopup = !iedPopup && (switchHovered || switchPinned);
+  useEffect(() => () => clearTimeout(switchPopupCloseTimer.current), []);
+
+  const closeSwitchPopup = () => {
+    clearTimeout(switchPopupCloseTimer.current);
+    setSwitchHovered(false);
+    setSwitchPinned(false);
+  };
+
+  const scheduleSwitchPopupClose = () => {
+    clearTimeout(switchPopupCloseTimer.current);
+    switchPopupCloseTimer.current = setTimeout(() => setSwitchHovered(false), 200);
+  };
   const [gatewayPinned, setGatewayPinned] = useState<boolean>(false);
   const [gatewayManuallyClosed, setGatewayManuallyClosed] = useState<boolean>(false);
 
@@ -424,7 +451,7 @@ export const Iec104LabPage: React.FC = () => {
     convFraction < 0.25 ? 1 : convFraction < 0.5 ? 2 : convFraction < 0.75 ? 3 : 4;
 
   // Auto-open Gateway Popup on MMS arrival, auto-close on IEC-104 departure (unless pinned)
-  const showGatewayPopup = gatewayPinned || (simPhase === 'CONVERT' && !gatewayManuallyClosed && mmsHealthy);
+  const showGatewayPopup = !iedPopup && !showSwitchPopup && (gatewayPinned || (simPhase === 'CONVERT' && !gatewayManuallyClosed && mmsHealthy));
 
   useEffect(() => {
     if (simPhase === 'MMS_IN') {
@@ -477,6 +504,42 @@ export const Iec104LabPage: React.FC = () => {
   // ResizeObserver Exact Port-to-Port Measurement
   const stageRef = useRef<HTMLDivElement | null>(null);
   const portRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+
+  const showIedPopup = (device: Iec61850IedSpec, trigger: HTMLButtonElement, pin = false) => {
+    clearTimeout(iedPopupCloseTimer.current);
+    if ((iedPopupPinned && !pin) || !stageRef.current) return;
+    closeSwitchPopup();
+    const stage = stageRef.current.getBoundingClientRect();
+    const source = trigger.getBoundingClientRect();
+    const sourceY = source.top - stage.top + source.height * .72;
+    const top = Math.max(34, Math.min(stage.height - 382, sourceY - 155));
+    iedPopupTrigger.current = trigger;
+    setIedPopup({ device, top, rayY: sourceY - top });
+    if (pin) setIedPopupPinned(true);
+  };
+
+  const scheduleIedPopupClose = () => {
+    if (iedPopupPinned) return;
+    clearTimeout(iedPopupCloseTimer.current);
+    iedPopupCloseTimer.current = setTimeout(() => setIedPopup(null), 225);
+  };
+
+  const dismissIedPopup = (returnFocus = false) => {
+    clearTimeout(iedPopupCloseTimer.current);
+    setIedPopupPinned(false);
+    setIedPopup(null);
+    if (returnFocus) {
+      restoreIedFocus.current = true;
+      iedPopupTrigger.current?.focus({ preventScroll: true });
+      restoreIedFocus.current = false;
+    }
+  };
+
+  const openIedPopupTab = (tab: Iec104LabTab) => {
+    dismissIedPopup();
+    closeSwitchPopup();
+    setActiveTab(tab);
+  };
   const setPortRef = (id: string) => (el: HTMLSpanElement | null) => {
     portRefs.current[id] = el;
   };
@@ -684,7 +747,7 @@ export const Iec104LabPage: React.FC = () => {
             <button
               key={id}
               type="button"
-              onClick={() => setActiveTab(id)}
+              onClick={() => openIedPopupTab(id)}
               className="rounded-lg border px-2.5 py-1 text-[11px] font-extrabold transition"
               style={
                 activeTab === id
@@ -755,7 +818,7 @@ export const Iec104LabPage: React.FC = () => {
               background:
                 'linear-gradient(rgba(56, 189, 248, 0.04) 1px, transparent 1px), ' +
                 'linear-gradient(90deg, rgba(56, 189, 248, 0.04) 1px, transparent 1px), ' +
-                'radial-gradient(ellipse at 50% 42%, #07203B 0%, #03101F 76%)',
+                'radial-gradient(ellipse 62% 44% at 50% 38%, rgba(28, 92, 126, 0.74) 0%, rgba(14, 52, 78, 0.86) 58%, rgba(10, 38, 58, 0.92) 100%)',
               backgroundSize: '28px 28px, 28px 28px, 100% 100%',
               boxShadow: '0 0 26px rgba(0, 212, 255, 0.14)',
             }}
@@ -783,7 +846,20 @@ export const Iec104LabPage: React.FC = () => {
               </div>
             </div>
 
-            <div ref={stageRef} className="min-w-[1120px] relative pt-2 pb-2">
+            <div
+              ref={stageRef}
+              className="min-w-[1120px] relative pt-2 pb-2"
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                if (iedPopup) {
+                  event.stopPropagation();
+                  dismissIedPopup(iedPopupPinned);
+                } else if (showSwitchPopup) {
+                  event.stopPropagation();
+                  closeSwitchPopup();
+                }
+              }}
+            >
               {/* 4 Zone Header Pills */}
               <div className="grid grid-cols-[1.05fr_1.15fr_1.15fr_1.05fr] gap-4 mb-3 relative z-10">
                 <div className="rounded-lg border border-[#2563EB]/60 bg-[#082240]/85 py-1.5 text-center font-mono text-[11px] font-extrabold text-[#93C5FD]">
@@ -800,153 +876,138 @@ export const Iec104LabPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* AUTO-OPENING / AUTO-CLOSING 495px LIVE IEC 61850 -> IEC-104 CONVERSION POPUP ABOVE GATEWAY */}
-              <div
-                className="absolute z-40 transition-all duration-300"
-                style={{
-                  left: '46.5%',
-                  top: '10px',
-                  width: '495px',
-                  opacity: showGatewayPopup ? 1 : 0,
-                  transform: showGatewayPopup ? 'translateY(0) scale(1)' : 'translateY(10px) scale(0.96)',
-                  pointerEvents: showGatewayPopup ? 'auto' : 'none',
-                }}
-              >
-                <div
-                  className="rounded-2xl border-[1.5px] p-4 relative"
-                  style={{
-                    background:
-                      'radial-gradient(ellipse 65% 45% at 20% 10%, rgba(255, 255, 255, 0.24) 0%, transparent 65%), ' +
-                      'linear-gradient(135deg, rgba(255, 255, 255, 0.19) 0%, rgba(190, 240, 255, 0.14) 50%, rgba(15, 44, 68, 0.74) 100%)',
-                    backdropFilter: 'blur(24px) saturate(165%)',
-                    WebkitBackdropFilter: 'blur(24px) saturate(165%)',
-                    borderColor: !convHealthy ? '#EF4444' : 'rgba(224, 252, 255, 0.86)',
-                    boxShadow: !convHealthy
-                      ? '0 0 28px rgba(239, 68, 68, 0.45)'
-                      : '0 0 34px rgba(103, 232, 249, 0.42), inset 0 1.5px 1px rgba(255, 255, 255, 0.78)',
-                  }}
+              {showGatewayPopup && (
+                <section
+                  id="lab-gateway-info"
+                  aria-labelledby="lab-gateway-title"
+                  className="lab-gateway-projection"
+                  data-pinned={gatewayPinned}
                 >
-                  <div className="flex items-center justify-between gap-2 pb-2 mb-2.5 border-b border-[#56EBFF]/25">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="w-1 h-4 rounded-full bg-[#38F3FF]" />
-                      <span className="text-[12.5px] font-extrabold text-white truncate">Live IEC 61850 → IEC-104 Conversion</span>
-                      <span className="rounded border border-[#F59E0B]/70 bg-[#3B2606] px-1.5 py-0.5 font-mono text-[9px] font-extrabold text-[#FDE047]">
-                        {activeIed.shortName}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span
-                        className="rounded-md border px-2 py-0.5 font-mono text-[9.5px] font-extrabold"
-                        style={
-                          !convHealthy
-                            ? { background: '#3B0D15', borderColor: '#EF4444', color: '#FCA5A5' }
-                            : { background: '#063326', borderColor: '#22C55E', color: '#4ADE80' }
-                        }
-                      >
-                        {!convHealthy
-                          ? 'CONV FAULT'
-                          : `STEP ${convStep}/4: ${convStep === 1 ? 'MMS RX' : convStep === 2 ? 'QUALITY/TIME' : convStep === 3 ? 'IOA MAP' : '104 I-FRAME'}`}
-                      </span>
-                      <button type="button" onClick={() => setGatewayPinned((p) => !p)} className="p-1 rounded hover:bg-white/10 text-[#7DD3FC]">
-                        {gatewayPinned ? <PinOff className="w-3.5 h-3.5 text-[#FDE047]" /> : <Pin className="w-3.5 h-3.5" />}
-                      </button>
-                      <button type="button" onClick={() => { setGatewayPinned(false); setGatewayManuallyClosed(true); }} className="p-1 rounded hover:bg-white/10 text-[#9BC0DF]">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 2x2 Multi-Color Conversion Cards */}
-                  <div className="grid grid-cols-2 gap-2.5 font-mono text-[10.5px]">
-                    <div
-                      className="rounded-lg border p-2.5 transition-all"
-                      style={{
-                        background: convStep === 1 ? 'rgba(0, 212, 255, 0.16)' : 'rgba(8, 28, 46, 0.74)',
-                        borderColor: convStep === 1 ? '#38F3FF' : 'rgba(90, 180, 220, 0.28)',
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-extrabold text-[#38F3FF]">1. MMS REPORT RX</span>
-                        <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 1 ? 'bg-white text-[#031829]' : convStep > 1 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                          {convStep === 1 ? 'ACTIVE' : convStep > 1 ? 'DONE' : 'WAIT'}
+                  <div className="lab-ied-panel lab-gateway-panel" data-fault={!convHealthy}>
+                    <div className="lab-gateway-bar">
+                      <div className="lab-gateway-heading">
+                        <span className="w-1 h-4 rounded-full bg-[#38F3FF]" />
+                        <span id="lab-gateway-title">Live IEC 61850 → IEC-104 Conversion</span>
+                        <span className="rounded border border-[#F59E0B]/70 bg-[#3B2606] px-1.5 py-0.5 font-mono text-[9px] font-extrabold text-[#FDE047]">
+                          {activeIed.shortName}
                         </span>
                       </div>
-                      <div className="text-[#E0F7FF] font-bold truncate">{activeIed.iedName} · {activeIed.rcbName}</div>
-                      <div className="text-[#FDE047] mt-0.5 truncate">{activeIed.lnRef}</div>
-                    </div>
-
-                    <div
-                      className="rounded-lg border p-2.5 transition-all"
-                      style={{
-                        background: convStep === 2 ? 'rgba(192, 132, 252, 0.18)' : 'rgba(8, 28, 46, 0.74)',
-                        borderColor: badQuality ? '#EF4444' : convStep === 2 ? '#C084FC' : 'rgba(90, 180, 220, 0.28)',
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-extrabold text-[#D8B4FE]">2. QUALITY &amp; CP56TIME</span>
-                        <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 2 ? 'bg-[#D8B4FE] text-[#1E0836]' : convStep > 2 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                          {convStep === 2 ? 'ACTIVE' : convStep > 2 ? 'DONE' : 'WAIT'}
+                      <div className="lab-gateway-controls">
+                        <span
+                          className="rounded-md border px-2 py-0.5 font-mono text-[9.5px] font-extrabold"
+                          style={
+                            !convHealthy
+                              ? { background: '#3B0D15', borderColor: '#EF4444', color: '#FCA5A5' }
+                              : { background: '#063326', borderColor: '#22C55E', color: '#4ADE80' }
+                          }
+                        >
+                          {!convHealthy
+                            ? 'CONV FAULT'
+                            : `STEP ${convStep}/4: ${convStep === 1 ? 'MMS RX' : convStep === 2 ? 'QUALITY/TIME' : convStep === 3 ? 'IOA MAP' : '104 I-FRAME'}`}
                         </span>
+                        <button type="button" onClick={() => setGatewayPinned((p) => !p)} aria-label={gatewayPinned ? 'Unpin conversion popup' : 'Pin conversion popup'} aria-pressed={gatewayPinned} className="p-1 rounded hover:bg-white/10 text-[#7DD3FC]">
+                          {gatewayPinned ? <PinOff className="w-3.5 h-3.5 text-[#FDE047]" /> : <Pin className="w-3.5 h-3.5" />}
+                        </button>
+                        <button type="button" onClick={() => { setGatewayPinned(false); setGatewayManuallyClosed(true); }} aria-label="Close conversion popup" className="p-1 rounded hover:bg-white/10 text-[#9BC0DF]">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                      <div className="text-[#F3E8FF] font-bold">q={badQuality ? '0x0100 INV' : '0x0000 GOOD'} → QDS={badQuality ? '0x80' : '0x00'}</div>
-                      <div className="text-[#4ADE80] mt-0.5 font-extrabold">Val: {activeIed.baseValue} {activeIed.unit} · CP56Time2a</div>
                     </div>
 
-                    <div
-                      className="rounded-lg border p-2.5 transition-all"
-                      style={{
-                        background: convStep === 3 ? 'rgba(250, 204, 21, 0.16)' : 'rgba(8, 28, 46, 0.74)',
-                        borderColor: missingIoa || coaMismatch ? '#EF4444' : convStep === 3 ? '#FACC15' : 'rgba(90, 180, 220, 0.28)',
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-extrabold text-[#FDE047]">3. COA / IOA MAPPING</span>
-                        <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 3 ? 'bg-[#FDE047] text-[#261802]' : convStep > 3 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                          {convStep === 3 ? 'ACTIVE' : convStep > 3 ? 'DONE' : 'WAIT'}
-                        </span>
-                      </div>
-                      <div className="text-[#FEF08A] font-bold">
-                        {missingIoa ? 'ERR: Unmapped LN!' : `COA:${coaMismatch ? 99 : 132} / IOA:${activeIed.ioa}`}
-                      </div>
-                      <div className="text-[#7DD3FC] mt-0.5">TypeID {activeIed.typeIdNum} ({activeIed.iec104Type}) · COT:3</div>
-                    </div>
-
-                    <div
-                      className="rounded-lg border p-2.5 transition-all"
-                      style={{
-                        background: convStep === 4 ? 'rgba(34, 197, 94, 0.18)' : 'rgba(8, 28, 46, 0.74)',
-                        borderColor: gtwOverload || !wanHealthy ? '#EF4444' : convStep === 4 ? '#4ADE80' : 'rgba(90, 180, 220, 0.28)',
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-extrabold text-[#4ADE80]">4. IEC-104 I-FRAME TX</span>
-                        <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 4 ? 'bg-[#4ADE80] text-[#032415]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                          {convStep === 4 ? 'READY' : 'WAIT'}
-                        </span>
-                      </div>
-                      <div className="text-[#DCFCE7] font-bold">APCI: 68 15 N(S)={nsSeq} N(R)={nrSeq}</div>
-                      <div className="text-[#A3E635] mt-0.5 font-extrabold">Out: ETH1 → RCC/SLDC (2404)</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-2.5 flex items-center gap-2">
-                    <div className="flex-1 h-2 rounded-full bg-[#061828] border border-[#1E4B6E] overflow-hidden">
+                    {/* 2x2 Multi-Color Conversion Cards */}
+                    <div className="lab-gateway-steps font-mono">
                       <div
-                        className="h-full rounded-full transition-all duration-100"
+                        className="rounded-lg border p-2.5 transition-all"
                         style={{
-                          width: `${convPct}%`,
-                          background: 'linear-gradient(90deg, #00E5FF 0%, #C084FC 40%, #FACC15 72%, #4ADE80 100%)',
-                          boxShadow: '0 0 10px rgba(0, 229, 255, 0.65)',
+                          background: convStep === 1 ? 'rgba(0, 212, 255, 0.16)' : 'rgba(8, 28, 46, 0.74)',
+                          borderColor: convStep === 1 ? '#38F3FF' : 'rgba(90, 180, 220, 0.28)',
                         }}
-                      />
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-extrabold text-[#38F3FF]">1. MMS REPORT RX</span>
+                          <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 1 ? 'bg-white text-[#031829]' : convStep > 1 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                            {convStep === 1 ? 'ACTIVE' : convStep > 1 ? 'DONE' : 'WAIT'}
+                          </span>
+                        </div>
+                        <div className="text-[#E0F7FF] font-bold truncate">{activeIed.iedName} · {activeIed.rcbName}</div>
+                        <div className="text-[#FDE047] mt-0.5 truncate">{activeIed.lnRef}</div>
+                      </div>
+
+                      <div
+                        className="rounded-lg border p-2.5 transition-all"
+                        style={{
+                          background: convStep === 2 ? 'rgba(192, 132, 252, 0.18)' : 'rgba(8, 28, 46, 0.74)',
+                          borderColor: badQuality ? '#EF4444' : convStep === 2 ? '#C084FC' : 'rgba(90, 180, 220, 0.28)',
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-extrabold text-[#D8B4FE]">2. QUALITY &amp; CP56TIME</span>
+                          <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 2 ? 'bg-[#D8B4FE] text-[#1E0836]' : convStep > 2 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                            {convStep === 2 ? 'ACTIVE' : convStep > 2 ? 'DONE' : 'WAIT'}
+                          </span>
+                        </div>
+                        <div className="text-[#F3E8FF] font-bold">q={badQuality ? '0x0100 INV' : '0x0000 GOOD'} → QDS={badQuality ? '0x80' : '0x00'}</div>
+                        <div className="text-[#4ADE80] mt-0.5 font-extrabold">Val: {activeIed.baseValue} {activeIed.unit} · CP56Time2a</div>
+                      </div>
+
+                      <div
+                        className="rounded-lg border p-2.5 transition-all"
+                        style={{
+                          background: convStep === 3 ? 'rgba(250, 204, 21, 0.16)' : 'rgba(8, 28, 46, 0.74)',
+                          borderColor: missingIoa || coaMismatch ? '#EF4444' : convStep === 3 ? '#FACC15' : 'rgba(90, 180, 220, 0.28)',
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-extrabold text-[#FDE047]">3. COA / IOA MAPPING</span>
+                          <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 3 ? 'bg-[#FDE047] text-[#261802]' : convStep > 3 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                            {convStep === 3 ? 'ACTIVE' : convStep > 3 ? 'DONE' : 'WAIT'}
+                          </span>
+                        </div>
+                        <div className="text-[#FEF08A] font-bold">
+                          {missingIoa ? 'ERR: Unmapped LN!' : `COA:${coaMismatch ? 99 : 132} / IOA:${activeIed.ioa}`}
+                        </div>
+                        <div className="text-[#7DD3FC] mt-0.5">TypeID {activeIed.typeIdNum} ({activeIed.iec104Type}) · COT:3</div>
+                      </div>
+
+                      <div
+                        className="rounded-lg border p-2.5 transition-all"
+                        style={{
+                          background: convStep === 4 ? 'rgba(34, 197, 94, 0.18)' : 'rgba(8, 28, 46, 0.74)',
+                          borderColor: gtwOverload || !wanHealthy ? '#EF4444' : convStep === 4 ? '#4ADE80' : 'rgba(90, 180, 220, 0.28)',
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-extrabold text-[#4ADE80]">4. IEC-104 I-FRAME TX</span>
+                          <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 4 ? 'bg-[#4ADE80] text-[#032415]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                            {convStep === 4 ? 'READY' : 'WAIT'}
+                          </span>
+                        </div>
+                        <div className="text-[#DCFCE7] font-bold">APCI: 68 15 N(S)={nsSeq} N(R)={nrSeq}</div>
+                        <div className="text-[#A3E635] mt-0.5 font-extrabold">Out: ETH1 → RCC/SLDC (2404)</div>
+                      </div>
                     </div>
-                    <span className="font-mono text-[10px] font-extrabold text-[#7DD3FC] w-9 text-right">{convPct}%</span>
+
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <div className="flex-1 h-2 rounded-full bg-[#061828] border border-[#1E4B6E] overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-100"
+                          style={{
+                            width: `${convPct}%`,
+                            background: 'linear-gradient(90deg, #00E5FF 0%, #C084FC 40%, #FACC15 72%, #4ADE80 100%)',
+                            boxShadow: '0 0 10px rgba(0, 229, 255, 0.65)',
+                          }}
+                        />
+                      </div>
+                      <span className="font-mono text-[10px] font-extrabold text-[#7DD3FC] w-9 text-right">{convPct}%</span>
+                    </div>
                   </div>
-                </div>
-                <svg viewBox="0 0 360 44" className="w-[330px] h-[44px] mx-auto block pointer-events-none">
-                  <polygon points="20,0 340,0 210,44 150,44" fill="rgba(56, 232, 255, 0.11)" stroke="rgba(56, 232, 255, 0.45)" strokeWidth="1" />
-                </svg>
-              </div>
+                  <svg viewBox="0 0 360 49" className="lab-gateway-rays" aria-hidden="true">
+                    <path d="M 15 0 L 180 48 L 345 0 Z" className="lab-ied-ray-fill" />
+                    <path d="M 15 0 L 180 48 L 345 0 M 180 0 V 48" className="lab-ied-ray-lines" />
+                    <circle cx="180" cy="46" r="2.8" className="lab-ied-ray-source" />
+                  </svg>
+                </section>
+              )}
 
               {/* 4 HARDWARE COLUMNS */}
               <div className="grid grid-cols-[1.05fr_1.15fr_1.15fr_1.05fr] gap-4 items-center relative z-10 min-h-[430px]">
@@ -954,24 +1015,32 @@ export const Iec104LabPage: React.FC = () => {
                 <div className="flex flex-col justify-between gap-2.5 pl-4">
                   {IEC61850_IEDS.map((dev, idx) => {
                     const isAct = idx === activeIedIdx;
-                    const isHov = hoveredIedId === dev.id;
+                    const isHov = iedPopup?.device.id === dev.id;
                     const isFault = (dev.id === 'P2' && p2Offline) || mmsLost;
                     return (
                       <div
                         key={dev.id}
                         className="flex items-center justify-start relative"
-                        onMouseEnter={() => setHoveredIedId(dev.id)}
-                        onMouseLeave={() => setHoveredIedId((cur) => (cur === dev.id ? null : cur))}
                       >
-                        <div
-                          className="relative group rounded-xl border p-1.5 transition-all cursor-pointer"
-                          style={{
-                            width: '126px',
-                            height: '92px',
-                            background: isAct || isHov ? 'linear-gradient(180deg, rgba(14, 54, 82, 0.94), rgba(6, 24, 42, 0.96))' : 'rgba(7, 24, 42, 0.86)',
-                            borderColor: isFault ? '#EF4444' : isHov ? '#FFFFFF' : isAct ? '#38F3FF' : 'rgba(56, 189, 248, 0.35)',
-                            boxShadow: isFault ? '0 0 14px rgba(239, 68, 68, 0.45)' : isHov ? '0 0 24px rgba(165, 243, 252, 0.72)' : isAct ? '0 0 18px rgba(0, 229, 255, 0.45)' : 'none',
+                        <button
+                          type="button"
+                          className="lab-ied-trigger relative group p-1.5 cursor-pointer"
+                          data-active={isAct}
+                          data-fault={isFault}
+                          aria-label={`Device info for ${dev.fullName}`}
+                          aria-expanded={isHov}
+                          aria-controls={isHov ? 'lab-ied-info' : undefined}
+                          onMouseEnter={(event) => {
+                            if (window.matchMedia('(hover: hover)').matches) showIedPopup(dev, event.currentTarget);
                           }}
+                          onMouseLeave={scheduleIedPopupClose}
+                          onFocus={(event) => {
+                            if (!restoreIedFocus.current && event.currentTarget.matches(':focus-visible')) {
+                              showIedPopup(dev, event.currentTarget);
+                            }
+                          }}
+                          onBlur={scheduleIedPopupClose}
+                          onClick={(event) => showIedPopup(dev, event.currentTarget, true)}
                         >
                           <span
                             className="absolute -top-2 left-2 rounded px-1.5 py-0.2 font-mono text-[9px] font-extrabold border z-20"
@@ -983,7 +1052,7 @@ export const Iec104LabPage: React.FC = () => {
                           >
                             {dev.id}
                           </span>
-                          <img src={dev.image} alt={dev.fullName} className="w-full h-full object-contain rounded drop-shadow-[0_6px_10px_rgba(0,0,0,0.8)] group-hover:scale-105 transition" />
+                          <img src={dev.image} alt={dev.fullName} className="lab-ied-photo h-full w-full object-contain group-hover:scale-105 transition-transform" />
                           <span
                             ref={setPortRef(`ied_${dev.id}`)}
                             className="absolute right-1 bottom-1.5 w-5 h-4 rounded-[3px] border-[1.5px] flex items-center justify-center font-mono text-[6.5px] font-extrabold text-[#E0F7FF] z-20"
@@ -995,7 +1064,7 @@ export const Iec104LabPage: React.FC = () => {
                           >
                             ETH
                           </span>
-                        </div>
+                        </button>
                       </div>
                     );
                   })}
@@ -1003,10 +1072,24 @@ export const Iec104LabPage: React.FC = () => {
 
                 {/* COLUMN 2: COMPACT HIRSCHMANN RSP35 SWITCH (DETAILS HIDDEN; HOVER OPENS HOLOGRAPHIC POPUP) */}
                 <div className="flex flex-col items-center justify-center pt-[125px]">
-                  <div
+                  <button
+                    type="button"
                     className="relative flex items-center justify-center cursor-pointer"
-                    onMouseEnter={() => setSwitchHovered(true)}
-                    onMouseLeave={() => setSwitchHovered(false)}
+                    aria-label="Hirschmann RSP35 switch details"
+                    aria-expanded={showSwitchPopup}
+                    aria-controls={showSwitchPopup ? 'lab-switch-info' : undefined}
+                    onMouseEnter={() => {
+                      if (window.matchMedia('(hover: hover)').matches) {
+                        clearTimeout(switchPopupCloseTimer.current);
+                        setSwitchHovered(true);
+                      }
+                    }}
+                    onMouseLeave={scheduleSwitchPopupClose}
+                    onClick={() => {
+                      dismissIedPopup();
+                      if (switchPinned) closeSwitchPopup();
+                      else setSwitchPinned(true);
+                    }}
                   >
                     <img
                       src="assets/devices/hirschmann-rsp35.png"
@@ -1050,7 +1133,7 @@ export const Iec104LabPage: React.FC = () => {
                     >
                       5
                     </span>
-                  </div>
+                  </button>
                 </div>
 
                 {/* COLUMN 3: IEC-104 GATEWAY GTW-01 */}
@@ -1059,8 +1142,13 @@ export const Iec104LabPage: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setGatewayPinned((p) => !p);
+                      dismissIedPopup();
+                      closeSwitchPopup();
                       setGatewayManuallyClosed(false);
                     }}
+                    aria-label="Gateway GTW-01 conversion"
+                    aria-pressed={gatewayPinned}
+                    aria-controls={showGatewayPopup ? 'lab-gateway-info' : undefined}
                     title="Click to Pin / Unpin Live IEC 61850 → IEC-104 Conversion Popup"
                     className="relative flex items-center justify-center group focus:outline-none"
                   >
@@ -1112,105 +1200,90 @@ export const Iec104LabPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* TOP-LAYER (z-[80]) HOLOGRAPHIC IED INFO POPUP ON HOVER */}
-              {(() => {
-                const hovIdx = IEC61850_IEDS.findIndex((d) => d.id === hoveredIedId);
-                if (hovIdx === -1) return null;
-                const dev = IEC61850_IEDS[hovIdx];
-                const topOffsets = [38, 102, 166, 192];
-                return (
-                  <div className="absolute z-[80] pointer-events-none transition-all duration-150" style={{ left: '164px', top: `${topOffsets[hovIdx]}px`, width: '540px' }}>
-                    <svg viewBox="0 0 42 250" className="absolute -left-[40px] top-4 w-[40px] h-[225px] pointer-events-none">
-                      <polygon points="0,112 42,6 42,244 0,126" fill="rgba(125, 249, 255, 0.14)" stroke="rgba(175, 248, 255, 0.58)" strokeWidth="1" />
-                      <line x1="0" y1="117" x2="42" y2="58" stroke="rgba(255,255,255,0.48)" strokeWidth="1" />
-                      <line x1="0" y1="121" x2="42" y2="188" stroke="rgba(103,232,249,0.48)" strokeWidth="1" />
-                    </svg>
-                    <div
-                      className="rounded-2xl border-[1.5px] p-4 relative overflow-hidden"
-                      style={{
-                        background:
-                          'radial-gradient(ellipse 68% 48% at 18% 12%, rgba(165, 243, 252, 0.24) 0%, transparent 65%), ' +
-                          'linear-gradient(145deg, rgba(16, 62, 92, 0.68) 0%, rgba(10, 42, 68, 0.76) 52%, rgba(8, 32, 54, 0.80) 100%)',
-                        backdropFilter: 'blur(36px) saturate(170%)',
-                        WebkitBackdropFilter: 'blur(36px) saturate(170%)',
-                        borderColor: 'rgba(182, 248, 255, 0.90)',
-                        boxShadow: '0 0 28px rgba(56, 232, 255, 0.52), inset 0 1.5px 2px rgba(255, 255, 255, 0.85)',
-                      }}
-                    >
-                      <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#A5F3FC]/35">
-                        <div className="flex items-center gap-2 text-[12.5px] font-bold text-[#E6FAFF]">
-                          <span className="w-0.5 h-4 bg-[#7DF9FF] shadow-[0_0_8px_#7DF9FF]" />
-                          <span>IEC 61850 Ed.2 — Device Info</span>
-                        </div>
-                        <div className="flex items-center gap-2.5 font-mono text-[12px] text-[#CFFAFE]/90"><span>–</span><span>□</span><span>×</span></div>
-                      </div>
-                      <div className="grid grid-cols-[140px_1fr] gap-4 items-center">
-                        <div className="flex flex-col items-center">
-                          <div className="w-[132px] h-[132px] rounded-xl border border-[#7DF9FF]/50 p-2.5 flex items-center justify-center" style={{ background: 'radial-gradient(circle, rgba(56,232,255,0.20), rgba(6,30,50,0.42))' }}>
-                            <img src={dev.image} alt={dev.fullName} className="max-h-[112px] w-auto object-contain" style={{ filter: 'drop-shadow(0 0 14px rgba(103,232,249,0.72))' }} />
-                          </div>
-                        </div>
-                        <div className="space-y-2.5 min-w-0">
-                          <div className="text-[16.5px] font-extrabold text-white truncate">{dev.fullName}</div>
-                          <div className="rounded-xl border border-[#A5F3FC]/42 divide-y divide-[#A5F3FC]/20 text-[11px]" style={{ background: 'rgba(8, 38, 62, 0.56)' }}>
-                            {[
-                              { icon: Cpu, label: 'IED Name', val: dev.iedName, col: '#FFFFFF' },
-                              { icon: Radio, label: 'IP Address', val: dev.ip, col: '#38F3FF' },
-                              { icon: Layers, label: 'Logical Node', val: dev.lnRef, col: '#FDE047' },
-                              { icon: Activity, label: 'Report CB', val: `${dev.rcbName} (${dev.dataset})`, col: '#4ADE80' },
-                              { icon: Database, label: 'IEC-104 Map', val: `COA:132 / IOA:${dev.ioa} (${dev.iec104Type})`, col: '#E879F9' },
-                              { icon: AlertTriangle, label: 'Signals', val: dev.signals, col: '#7DD3FC' },
-                            ].map(({ icon: Icon, label, val, col }) => (
-                              <div key={label} className="grid grid-cols-[106px_1fr] items-center px-3 py-1.5">
-                                <span className="inline-flex items-center gap-1.5 text-[#E0F7FF] font-semibold"><Icon className="w-3.5 h-3.5 text-[#7DF9FF] shrink-0" /> {label}</span>
-                                <span style={{ color: col }} className="font-mono font-extrabold truncate">: {val}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-4 gap-2.5 mt-3.5">
-                        {[['LN / DataSet', Layers], ['Live MMS', Activity], ['IOA Mapping', Settings], ['Device Info', Info]].map(([label, IconComp]) => {
-                          const Icon = IconComp as React.FC<{ className?: string }>;
-                          return (
-                            <div key={label as string} className="rounded-xl border border-[#A5F3FC]/65 py-2.5 px-1.5 flex flex-col items-center justify-center gap-1" style={{ background: 'linear-gradient(180deg, rgba(165,243,252,0.18), rgba(12,54,84,0.48))', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55)' }}>
-                              <Icon className="w-4 h-4 text-[#E6FAFF]" />
-                              <span className="text-[10.5px] font-bold text-white">{label as string}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
+              {iedPopup && (
+                <div
+                  className="lab-ied-projection"
+                  style={{ top: iedPopup.top }}
+                  onMouseEnter={() => clearTimeout(iedPopupCloseTimer.current)}
+                  onMouseLeave={scheduleIedPopupClose}
+                >
+                  <svg viewBox="0 0 54 390" className="lab-ied-rays" aria-hidden="true">
+                    <path d={`M 1 ${iedPopup.rayY} L 54 61 L 54 355 Z`} className="lab-ied-ray-fill" />
+                    <path d={`M 54 61 L 1 ${iedPopup.rayY} L 54 355 M 1 ${iedPopup.rayY} L 54 211`} className="lab-ied-ray-lines" />
+                    <circle cx="2" cy={iedPopup.rayY} r="3" className="lab-ied-ray-source" />
+                  </svg>
 
-              {/* TOP-LAYER (z-[80]) HOLOGRAPHIC SWITCH INFO POPUP */}
-              {switchHovered && (
-                <div className="absolute z-[80] pointer-events-none transition-all duration-150" style={{ left: '42%', top: '34px', width: '500px' }}>
-                  <div
-                    className="rounded-2xl border-[1.5px] p-4"
-                    style={{
-                      background: 'radial-gradient(ellipse 68% 48% at 18% 12%, rgba(165,243,252,0.24), transparent 65%), linear-gradient(145deg, rgba(16,62,92,0.70), rgba(10,42,68,0.78) 52%, rgba(8,32,54,0.82))',
-                      backdropFilter: 'blur(36px) saturate(170%)',
-                      borderColor: 'rgba(182, 248, 255, 0.90)',
-                      boxShadow: '0 0 28px rgba(56, 232, 255, 0.52), inset 0 1.5px 2px rgba(255, 255, 255, 0.85)',
-                    }}
-                  >
-                    <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#A5F3FC]/35">
-                      <div className="flex items-center gap-2 text-[12.5px] font-bold text-[#E6FAFF]">
-                        <span className="w-0.5 h-4 bg-[#7DF9FF]" />
-                        <span>Station Bus Switch — Device Info</span>
-                      </div>
-                      <span className="font-mono text-[12px] text-[#CFFAFE]/90 tracking-widest">– □ ×</span>
+                  <section id="lab-ied-info" className="lab-ied-panel" aria-labelledby="lab-ied-title">
+                    <div className="lab-ied-bar">
+                      <span>IEC 61850 Ed.2 — Device Info</span>
+                      <button
+                        ref={iedPopupClose}
+                        type="button"
+                        className="lab-ied-close"
+                        aria-label="Close device info"
+                        onClick={() => dismissIedPopup(true)}
+                      >
+                        <X size={20} />
+                      </button>
                     </div>
-                    <div className="grid grid-cols-[120px_1fr] gap-4 items-center">
-                      <div className="w-[114px] h-[114px] rounded-xl border border-[#7DF9FF]/50 p-2 flex items-center justify-center" style={{ background: 'radial-gradient(circle, rgba(56,232,255,0.20), rgba(6,30,50,0.42))' }}>
-                        <img src="assets/devices/hirschmann-rsp35.png" alt="Hirschmann RSP35" className="max-h-[96px] object-contain" />
+
+                    <div className="lab-ied-body">
+                      <div className="lab-ied-relay">
+                        <img src={iedPopup.device.image} alt="" />
                       </div>
-                      <div className="space-y-2">
-                        <div className="text-[16px] font-extrabold text-white">Hirschmann RSP35</div>
-                        <div className="rounded-xl border border-[#A5F3FC]/42 divide-y divide-[#A5F3FC]/20 text-[11px]" style={{ background: 'rgba(8, 38, 62, 0.56)' }}>
+                      <div className="lab-ied-details">
+                        <h2 id="lab-ied-title">{iedPopup.device.fullName}</h2>
+                        <dl>
+                          {[
+                            { icon: Cpu, label: 'IED Name', value: iedPopup.device.iedName },
+                            { icon: Network, label: 'IP Address', value: iedPopup.device.ip },
+                            { icon: Layers, label: 'Logical Node', value: iedPopup.device.lnRef },
+                            { icon: Activity, label: 'Report CB', value: `${iedPopup.device.rcbName} (${iedPopup.device.dataset})` },
+                            { icon: Database, label: 'IEC-104 Map', value: `COA:132 / IOA:${iedPopup.device.ioa} (${iedPopup.device.iec104Type})` },
+                            { icon: Activity, label: 'Signals', value: iedPopup.device.signals },
+                          ].map(({ icon: Icon, label, value }) => (
+                            <div key={label}>
+                              <dt><Icon size={19} aria-hidden="true" />{label}</dt>
+                              <dd>{value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </div>
+                    </div>
+
+                    <div className="lab-ied-actions">
+                      <button type="button" onClick={() => openIedPopupTab('IOA_MAPPING')}><Layers aria-hidden="true" />IOA Mapping</button>
+                      <button type="button" onClick={() => openIedPopupTab('APCI_ANALYZER')}><Activity aria-hidden="true" />Live MMS</button>
+                      <button type="button" onClick={() => openIedPopupTab('LOGS_DIAGNOSTICS')}><Terminal aria-hidden="true" />Diagnostics</button>
+                      <button type="button" aria-pressed={iedPopupPinned} onClick={() => setIedPopupPinned(true)}><Info aria-hidden="true" />Device Info</button>
+                    </div>
+                  </section>
+                </div>
+              )}
+
+              {showSwitchPopup && (
+                <section
+                  id="lab-switch-info"
+                  className="lab-switch-projection"
+                  aria-labelledby="lab-switch-title"
+                  data-pinned={switchPinned}
+                  onMouseEnter={() => clearTimeout(switchPopupCloseTimer.current)}
+                  onMouseLeave={scheduleSwitchPopupClose}
+                >
+                  <div className="lab-ied-panel lab-switch-panel" data-fault={!stationBusOk}>
+                    <div className="lab-ied-bar">
+                      <span>Station Bus Switch — Device Info</span>
+                      <button type="button" className="lab-ied-close" aria-label="Close switch details" onClick={closeSwitchPopup}>
+                        <X size={20} />
+                      </button>
+                    </div>
+                    <div className="lab-ied-body">
+                      <div className="lab-ied-relay">
+                        <img src="assets/devices/hirschmann-rsp35.png" alt="" />
+                      </div>
+                      <div className="lab-ied-details">
+                        <h2 id="lab-switch-title">Hirschmann RSP35</h2>
+                        <dl>
                           {[
                             { label: 'Mgmt IP', val: '10.132.10.10', col: '#38F3FF' },
                             { label: 'Station VLAN', val: 'VLAN 10 (IEC 61850 MMS)', col: '#FDE047' },
@@ -1218,16 +1291,20 @@ export const Iec104LabPage: React.FC = () => {
                             { label: 'Uplink Port', val: 'P5 (SFP) → IEC-104 GTW-01 ETH0', col: '#E879F9' },
                             { label: 'Link Status', val: stationBusOk ? 'HEALTHY · FORWARDING' : 'LINK FAULT / DOWN', col: stationBusOk ? '#4ADE80' : '#FCA5A5' },
                           ].map(({ label, val, col }) => (
-                            <div key={label} className="grid grid-cols-[100px_1fr] items-center px-3 py-1.5">
-                              <span className="text-[#E0F7FF] font-semibold">{label}</span>
-                              <span style={{ color: col }} className="font-mono font-extrabold truncate">: {val}</span>
+                            <div key={label}>
+                              <dt>{label}</dt>
+                              <dd style={{ color: col }}>{val}</dd>
                             </div>
                           ))}
-                        </div>
+                        </dl>
                       </div>
                     </div>
                   </div>
-                </div>
+                  <svg viewBox="0 0 360 49" className="lab-gateway-rays" aria-hidden="true">
+                    <path d="M 15 0 L 180 48 L 345 0 Z" className="lab-ied-ray-fill" />
+                    <path d="M 15 0 L 180 48 L 345 0 M 180 0 V 48" className="lab-ied-ray-lines" />
+                  </svg>
+                </section>
               )}
 
               {/* PORT-TO-PORT GLOWING SVG CABLES & MOVING PACKET BADGES */}
@@ -1397,8 +1474,8 @@ export const Iec104LabPage: React.FC = () => {
               .i104-glass-panel::before { content:''; position:absolute; top:0; left:10%; right:10%; height:2px; background:linear-gradient(90deg,transparent,rgba(160,250,255,.92),transparent); pointer-events:none; }
               .i104-glass-panel::after { content:''; position:absolute; bottom:0; left:12%; right:12%; height:2px; background:linear-gradient(90deg,transparent,rgba(0,232,255,.85),transparent); pointer-events:none; }
               .i104-glass-scroll::-webkit-scrollbar { width: 11px; height: 11px; }
-              .i104-glass-scroll::-webkit-scrollbar-track { background: rgba(10, 42, 64, 0.72); border-left: 1px solid rgba(90, 215, 245, 0.28); }
-              .i104-glass-scroll::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #42F8FF 0%, #00D8F5 100%); border-radius: 999px; border: 2px solid rgba(10, 42, 64, 0.85); box-shadow: 0 0 12px rgba(0, 240, 255, 0.9); }
+              .i104-glass-scroll::-webkit-scrollbar-track { background: #041024; border-left: 1px solid #1E4E8C; }
+              .i104-glass-scroll::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #3B82F6 0%, #1D4ED8 100%); border-radius: 999px; border: 2px solid #041024; }
             `}</style>
 
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1466,7 +1543,7 @@ export const Iec104LabPage: React.FC = () => {
               className="i104-glass-scroll overflow-x-auto max-h-[385px] overflow-y-auto rounded-xl"
             >
               <table className="w-full text-left border-collapse font-sans text-[12.5px]">
-                <thead style={{ background: 'linear-gradient(180deg, rgba(64,126,158,0.68), rgba(36,86,116,0.76))', borderBottom: '1px solid rgba(120,218,245,0.38)' }} className="sticky top-0 z-10 text-[#F0FAFF] font-bold">
+                <thead style={{ background: 'linear-gradient(180deg, #0C2854 0%, #081D3F 100%)', borderBottom: '1px solid #1E4E8C' }} className="sticky top-0 z-10 text-[#F0FAFF] font-bold">
                   <tr>
                     <th className="py-2.5 px-3.5 w-12">#</th>
                     <th className="py-2.5 px-3.5">Test Name</th>
@@ -1547,10 +1624,8 @@ export const Iec104LabPage: React.FC = () => {
                   <div
                     style={{
                       border: '1.5px solid rgba(125, 249, 255, 0.65)',
-                      background:
-                        'radial-gradient(ellipse 65% 40% at 50% 0%, rgba(56, 232, 255, 0.18), transparent 72%), ' +
-                        'linear-gradient(180deg, rgba(14, 52, 78, 0.78) 0%, rgba(8, 32, 52, 0.90) 100%)',
-                      boxShadow: 'inset 0 1px 0 rgba(210, 252, 255, 0.42), 0 0 22px rgba(0, 224, 255, 0.16)',
+                      background: 'radial-gradient(ellipse 65% 40% at 50% 0%, rgba(56, 232, 255, 0.18), transparent 72%), linear-gradient(180deg, rgba(18, 62, 90, 0.72) 0%, rgba(10, 38, 60, 0.86) 100%)',
+                      boxShadow: 'inset 0 1px 0 rgba(210, 252, 255, 0.42), 0 0 22px rgba(0, 224, 255, 0.18)',
                     }}
                     className="rounded-xl p-3.5 space-y-2.5 max-h-[385px] overflow-y-auto i104-glass-scroll"
                   >
@@ -1577,7 +1652,7 @@ export const Iec104LabPage: React.FC = () => {
                       </span>
                     </div>
 
-                    <div className="rounded-lg border border-[#56EBFF]/30 bg-[#051C30]/75 px-2.5 py-1.5 font-mono text-[10px]">
+                    <div className="rounded-lg border border-[#56EBFF]/30 bg-[#061630]/90 px-2.5 py-1.5 font-mono text-[10px]">
                       <span className="text-[#9BD3EC] font-bold">Affected Path: </span>
                       <span className="text-[#E0F7FF]">{info.path}</span>
                     </div>
@@ -1586,7 +1661,7 @@ export const Iec104LabPage: React.FC = () => {
                       {info.steps.map((st) => (
                         <div
                           key={st.num}
-                          className="rounded-lg border border-[#56EBFF]/25 bg-[#062138]/75 px-2.5 py-2 flex items-start gap-2.5"
+                          className="rounded-lg border border-[#56EBFF]/25 bg-[#081C3B]/90 px-2.5 py-2 flex items-start gap-2.5"
                         >
                           <span
                             style={{ backgroundColor: st.color, color: '#031829' }}

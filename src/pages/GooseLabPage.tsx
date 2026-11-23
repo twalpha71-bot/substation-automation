@@ -35,7 +35,7 @@ interface SubscriberNodeConfig {
   shortModel: string;
   vendorModel: string;
   imgSrc: string;
-  defaultSubscribed: boolean;
+
 }
 
 interface GooseEventEntry {
@@ -51,7 +51,7 @@ const DEFAULT_TOPOLOGY_NODES: SubscriberNodeConfig[] = [
     shortModel: 'MiCOM C264',
     vendorModel: 'Schneider MiCOM C264',
     imgSrc: 'assets/goose-lab/schneider-c264.png',
-    defaultSubscribed: true,
+
   },
   {
     iedId: 'IED-132-T1',
@@ -59,7 +59,7 @@ const DEFAULT_TOPOLOGY_NODES: SubscriberNodeConfig[] = [
     shortModel: '7UT86',
     vendorModel: 'SIPROTEC 7UT86',
     imgSrc: 'assets/goose-lab/siemens-7ut86.png',
-    defaultSubscribed: true,
+
   },
   {
     iedId: 'IED-33-F03',
@@ -67,7 +67,7 @@ const DEFAULT_TOPOLOGY_NODES: SubscriberNodeConfig[] = [
     shortModel: 'REF615',
     vendorModel: 'ABB REF615',
     imgSrc: 'assets/goose-lab/abb-ref615.png',
-    defaultSubscribed: false,
+
   },
   {
     iedId: 'IED-132-L2',
@@ -75,7 +75,7 @@ const DEFAULT_TOPOLOGY_NODES: SubscriberNodeConfig[] = [
     shortModel: 'D60',
     vendorModel: 'GE D60',
     imgSrc: 'assets/goose-lab/ge-d60.png',
-    defaultSubscribed: false,
+
   },
 ];
 
@@ -89,6 +89,7 @@ export const GooseLabPage: React.FC = () => {
   const {
     gooseControlBlocks,
     ieds,
+    bays,
     networkLinks,
     triggerGooseStateChangeBurst,
     setGooseMismatchFault,
@@ -102,36 +103,41 @@ export const GooseLabPage: React.FC = () => {
     [gooseControlBlocks, selectedGocbId]
   );
 
+  const publisherBay = bays.find(bay => bay.iedId === gocb?.publisherIedId);
+  const isStatusDataset = gocb?.datSet.endsWith('$dsStatus') ?? false;
+  const topologyNodes = useMemo<SubscriberNodeConfig[]>(() => {
+    if (gocb?.id === 'GOCB-132-L1-TRIP') return DEFAULT_TOPOLOGY_NODES;
+    return (gocb?.subscriberIedIds ?? []).flatMap(id => {
+      const ied = ieds.find(entry => entry.id === id);
+      if (!ied) return [];
+      return [{
+        iedId: id,
+        iedName: ied.name,
+        shortModel: ied.model,
+        vendorModel: `${ied.vendor} ${ied.model}`,
+        imgSrc: getIedImageByModel(ied.vendor, ied.model),
+
+      }];
+    });
+  }, [gocb?.id, gocb?.subscriberIedIds, ieds]);
+
   const [activeTab, setActiveTab] = useState<GooseLabTab>('NETWORK_TOPOLOGY');
   const [playing, setPlaying] = useState<boolean>(true);
-  const [speed, setSpeed] = useState<1 | 2 | 4>(2);
+  const [speed, setSpeed] = useState<0.1 | 0.25 | 0.5 | 1 | 2 | 4>(0.1);
   const [goEna, setGoEna] = useState<boolean>(true);
   const [lanAUp, setLanAUp] = useState<boolean>(true);
   const [lanBUp, setLanBUp] = useState<boolean>(true);
-  const [tripActive, setTripActive] = useState<boolean>(true);
+  const [payloadActive, setPayloadActive] = useState(!isStatusDataset || publisherBay?.breakerState === 'CLOSED');
   const [testModeSub, setTestModeSub] = useState<boolean>(false);
   const [inspectedDeviceId, setInspectedDeviceId] = useState<string | null>(null);
 
-  // Per-IED subscription enable map synchronized with configured GOCB subscribers
-  const [subEnabledMap, setSubEnabledMap] = useState<Record<string, boolean>>(() => {
-    const map: Record<string, boolean> = {};
-    DEFAULT_TOPOLOGY_NODES.forEach((n) => {
-      map[n.iedId] = n.defaultSubscribed;
-    });
-    return map;
-  });
+  // Overrides are scoped to one control block, even when publishers share an IED.
+  const [subscriptions, setSubscriptions] = useState<Record<string, Record<string, boolean>>>({});
+  const subEnabledMap = gocb ? subscriptions[gocb.id] : undefined;
 
-  // Update subscription defaults when switching GoCB
   useEffect(() => {
-    if (!gocb) return;
-    setSubEnabledMap(() => {
-      const next: Record<string, boolean> = {};
-      DEFAULT_TOPOLOGY_NODES.forEach((n) => {
-        next[n.iedId] = gocb.subscriberIedIds.includes(n.iedId);
-      });
-      return next;
-    });
-  }, [gocb?.id]);
+    setPayloadActive(!isStatusDataset || publisherBay?.breakerState === 'CLOSED');
+  }, [gocb?.id, isStatusDataset, publisherBay?.breakerState]);
 
   // Shared simulation clock for stNum/sqNum progression & per-IED frame counters
   const [simSqNum, setSimSqNum] = useState<number>(12);
@@ -144,9 +150,7 @@ export const GooseLabPage: React.FC = () => {
   });
   const [events, setEvents] = useState<GooseEventEntry[]>(() => [
     { time: nowTimeMs(), detail: 'GOOSE Lab V2 initialized — PRP LAN A & LAN B redundant', severity: 'INFO' },
-    { time: nowTimeMs(), detail: 'IED_132_L1 publishing gcbLine1ProtTrip (APPID 0x0001, VLAN 101)', severity: 'INFO' },
-    { time: nowTimeMs(), detail: 'IED_132_BC & IED_132_T1 ACCEPTED frame (ExtRef bound)', severity: 'INFO' },
-    { time: nowTimeMs(), detail: 'IED_33_F03 & IED_132_L2 received L2 multicast — IGNORED (Not Subscribed)', severity: 'INFO' },
+    ...(gocb ? [{ time: nowTimeMs(), detail: `${gocb.publisherIedId} publishing ${gocb.gocbName} (APPID ${gocb.appId}, VLAN ${gocb.vlanId})`, severity: 'INFO' as const }] : []),
   ]);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -177,7 +181,7 @@ export const GooseLabPage: React.FC = () => {
       setSimSqNum((q) => (q >= 999 ? 1 : q + 1));
       setRxCounts((prev) => {
         const next = { ...prev };
-        DEFAULT_TOPOLOGY_NODES.forEach((n) => {
+        topologyNodes.forEach((n) => {
           // VLAN mismatch drops frames at switch ingress before reaching IEDs
           if (faultMode !== 'VLAN_MISMATCH') {
             next[n.iedId] = (next[n.iedId] || 1200) + 1;
@@ -187,7 +191,7 @@ export const GooseLabPage: React.FC = () => {
       });
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [playing, speed, publishingActive, faultMode]);
+  }, [playing, speed, publishingActive, faultMode, topologyNodes]);
 
   const publisherIed = useMemo(
     () => ieds.find((x) => x.id === gocb?.publisherIedId) || ieds[0],
@@ -220,26 +224,26 @@ export const GooseLabPage: React.FC = () => {
     setEvents((prev) => [{ time: nowTimeMs(), detail, severity }, ...prev].slice(0, 18));
   };
 
-  const handlePublishTrip = () => {
+  const handlePublishState = () => {
     if (!gocb) return;
     setPrevStNum(gocb.stNum);
     triggerGooseStateChangeBurst(gocb.id);
     setSimSqNum(0);
-    setTripActive(true);
+    setPayloadActive(value => isStatusDataset ? !value : true);
     logEvent(
-      `Trip state change published by ${gocb.publisherIedId}: stNum=${gocb.stNum + 1}, sqNum=0 (MinTime ${gocb.minTimeMs} ms burst)`,
+      `${isStatusDataset ? 'Simulated breaker status' : 'Trip'} state change published by ${gocb.publisherIedId}: stNum=${gocb.stNum + 1}, sqNum=0 (MinTime ${gocb.minTimeMs} ms burst)`,
       'WARN'
     );
   };
 
   const handleReset = () => {
     setPlaying(true);
-    setSpeed(2);
+    setSpeed(0.1);
     setGoEna(true);
     setLanAUp(true);
     setLanBUp(true);
     setTestModeSub(false);
-    setTripActive(true);
+    setPayloadActive(!isStatusDataset || publisherBay?.breakerState === 'CLOSED');
     setSimSqNum(12);
     if (gocb && gocb.mismatchFault !== 'NONE') {
       setGooseMismatchFault(gocb.id, 'NONE');
@@ -248,25 +252,27 @@ export const GooseLabPage: React.FC = () => {
   };
 
   const toggleSubscriber = (node: SubscriberNodeConfig) => {
-    setSubEnabledMap((prev) => {
-      const nextVal = !prev[node.iedId];
-      logEvent(
-        `Subscriber ${node.iedName} (${node.shortModel}) subscription ${nextVal ? 'ENABLED (Accept)' : 'DISABLED (Ignore)'}`,
-        nextVal ? 'INFO' : 'WARN'
-      );
-      return { ...prev, [node.iedId]: nextVal };
-    });
+    if (!gocb) return;
+    const nextVal = !(subEnabledMap?.[node.iedId] ?? gocb.subscriberIedIds.includes(node.iedId));
+    setSubscriptions(previous => ({
+      ...previous,
+      [gocb.id]: { ...previous[gocb.id], [node.iedId]: nextVal },
+    }));
+    logEvent(
+      `Subscriber ${node.iedName} (${node.shortModel}) subscription ${nextVal ? 'ENABLED (Accept)' : 'DISABLED (Ignore)'}`,
+      nextVal ? 'INFO' : 'WARN'
+    );
   };
 
   // Evaluate each IED's exact frame delivery, subscription match, acceptance, and application input state
   const evaluatedNodes = useMemo(() => {
-    return DEFAULT_TOPOLOGY_NODES.map((node) => {
-      const subscribed = Boolean(subEnabledMap[node.iedId]);
+    return topologyNodes.map((node) => {
+      const subscribed = subEnabledMap?.[node.iedId] ?? gocb?.subscriberIedIds.includes(node.iedId) ?? false;
       const frameDelivered = publishingActive && faultMode !== 'VLAN_MISMATCH';
       const extRefBound =
         subscribed && faultMode !== 'DATASET_MISSING' && faultMode !== 'APPID_MISMATCH' && faultMode !== 'CONFREV_MISMATCH';
       const accepted = frameDelivered && subscribed && extRefBound && !testModeSub;
-      const inputTrip = accepted && tripActive;
+      const inputActive = accepted && payloadActive;
 
       let statusLabel = 'Ignored';
       if (!frameDelivered) {
@@ -286,17 +292,18 @@ export const GooseLabPage: React.FC = () => {
         subscribed,
         frameDelivered,
         accepted,
-        inputTrip,
+        inputActive,
         statusLabel,
         rxCount: rxCounts[node.iedId] || 0,
         portA: resolvePort(node.iedId, 'LAN_A'),
         portB: resolvePort(node.iedId, 'LAN_B'),
       };
     });
-  }, [subEnabledMap, publishingActive, faultMode, testModeSub, tripActive, anyLanUp, rxCounts, networkLinks]);
+  }, [subEnabledMap, publishingActive, faultMode, testModeSub, payloadActive, anyLanUp, rxCounts, networkLinks, topologyNodes, gocb?.subscriberIedIds]);
 
   const dur = (sec: number) => `${(sec / speed).toFixed(2)}s`;
   const currentStNum = gocb?.stNum ?? 5;
+  const datasetEntries = publisherIed?.datasets.find(dataset => dataset.name === gocb?.datSet.split('$').pop())?.fcdas.length;
   const goIdStr = gocb?.gocbName === 'gcbLine1ProtTrip' ? 'Line1_Trip' : gocb?.gocbName || 'Line1_Trip';
 
   const faultOptions: { value: GooseControlBlock['mismatchFault']; label: string }[] = [
@@ -714,16 +721,26 @@ export const GooseLabPage: React.FC = () => {
                     <path id="gl-pub-a" d={pathPubA} fill="none" stroke={lanAUp ? '#38BDF8' : '#EF4444'} strokeWidth="3.2" strokeDasharray={lanAUp ? undefined : '5 3'} />
                     <path id="gl-pub-b" d={pathPubB} fill="none" stroke={lanBUp ? '#C084FC' : '#EF4444'} strokeWidth="3.2" strokeDasharray={lanBUp ? undefined : '5 3'} />
 
-                    {/* Animated GOOSE Overlay Packets on Publisher -> Switch A & B */}
+                    {/* Animated GOOSE Overlay Packets + Live Data Flow Badges on Publisher -> Switch A & B */}
                     {publishingActive && lanAUp && (
-                      <circle r="4.2" fill="#00E5FF" filter="url(#gGlow)">
-                        <animateMotion dur={dur(1.1)} repeatCount="indefinite"><mpath href="#gl-pub-a" /></animateMotion>
-                      </circle>
+                      <g>
+                        <animateMotion dur={dur(2.2)} repeatCount="indefinite"><mpath href="#gl-pub-a" /></animateMotion>
+                        <circle r="4.5" fill="#00E5FF" stroke="#FFFFFF" strokeWidth="1.2" filter="url(#gGlow)" />
+                        <rect x="-54" y="-22" width="108" height="15" rx="7.5" fill={simSqNum === 0 ? '#3B0D15' : '#05253C'} fillOpacity="0.95" stroke={simSqNum === 0 ? '#F87171' : '#00E5FF'} strokeWidth="1.2" />
+                        <text x="0" y="-12" textAnchor="middle" fill={simSqNum === 0 ? '#FECACA' : '#E0FAFF'} fontSize="7" fontWeight="800" fontFamily="monospace">
+                          {simSqNum === 0 ? `TRIP BURST · st:${gocb?.stNum ?? 1}` : `GOOSE 0x88B8 · st:${gocb?.stNum ?? 1} sq:${simSqNum}`}
+                        </text>
+                      </g>
                     )}
                     {publishingActive && lanBUp && (
-                      <circle r="4.2" fill="#00E5FF" filter="url(#gGlow)">
-                        <animateMotion dur={dur(1.1)} begin="0.3s" repeatCount="indefinite"><mpath href="#gl-pub-b" /></animateMotion>
-                      </circle>
+                      <g>
+                        <animateMotion dur={dur(2.3)} begin="0.5s" repeatCount="indefinite"><mpath href="#gl-pub-b" /></animateMotion>
+                        <circle r="4.5" fill="#D8B4FE" stroke="#FFFFFF" strokeWidth="1.2" filter="url(#gGlow)" />
+                        <rect x="-54" y="7" width="108" height="15" rx="7.5" fill="#23103D" fillOpacity="0.95" stroke="#C084FC" strokeWidth="1.2" />
+                        <text x="0" y="17" textAnchor="middle" fill="#F3E8FF" fontSize="6.9" fontWeight="800" fontFamily="monospace">
+                          {`PRP-B · ${gocb?.appId || '0x0001'} · V${gocb?.vlanId ?? 101}`}
+                        </text>
+                      </g>
                     )}
 
                     {/* Switch A & Switch B -> 4 Bay IEDs */}
@@ -758,17 +775,36 @@ export const GooseLabPage: React.FC = () => {
                             opacity={node.subscribed ? 1 : 0.72}
                           />
 
-                          {/* Cyan/Green GOOSE Overlay Packets (Delivered on L2 Multicast; Green glow for Accepted Subscribers) */}
-                          {node.frameDelivered && lanAUp && (
-                            <circle r={node.accepted ? 4.2 : 3.2} fill={node.accepted ? '#4ADE80' : '#00E5FF'} filter="url(#gGlow)">
-                              <animateMotion dur={dur(1.4 + idx * 0.12)} repeatCount="indefinite">
-                                <mpath href={`#gl-a-${idx}`} />
-                              </animateMotion>
-                            </circle>
-                          )}
+                          {/* Cyan/Green/Red GOOSE Overlay Packets + Live Subscriber Decision Badges */}
+                          {node.frameDelivered && lanAUp && (() => {
+                            const isRejected = node.subscribed && !node.accepted;
+                            const badgeColor = node.accepted ? '#4ADE80' : isRejected ? '#F87171' : '#38BDF8';
+                            const badgeFill = node.accepted ? '#052E1E' : isRejected ? '#3B0D15' : '#06243A';
+                            const badgeTxt = node.accepted
+                              ? 'ACCEPT · ExtRef'
+                              : isRejected
+                                ? `DROP · ${faultMode.replace('_MISMATCH', '')}`
+                                : 'L2 MCAST · IGNORE';
+                            return (
+                              <g>
+                                <animateMotion dur={dur(2.4 + idx * 0.18)} repeatCount="indefinite">
+                                  <mpath href={`#gl-a-${idx}`} />
+                                </animateMotion>
+                                <circle r={node.accepted ? 4.2 : 3.4} fill={badgeColor} stroke="#FFFFFF" strokeWidth="1" filter="url(#gGlow)" />
+                                {(idx === 0 || idx === 2 || isRejected) && (
+                                  <>
+                                    <rect x="-41" y="-19" width="82" height="13.5" rx="6.8" fill={badgeFill} fillOpacity="0.94" stroke={badgeColor} strokeWidth="1.1" />
+                                    <text x="0" y="-10" textAnchor="middle" fill="#F0FAFF" fontSize="6.5" fontWeight="800" fontFamily="monospace">
+                                      {badgeTxt}
+                                    </text>
+                                  </>
+                                )}
+                              </g>
+                            );
+                          })()}
                           {node.frameDelivered && lanBUp && (
-                            <circle r={node.accepted ? 4.2 : 3.2} fill={node.accepted ? '#4ADE80' : '#00E5FF'} filter="url(#gGlow)">
-                              <animateMotion dur={dur(1.45 + idx * 0.12)} begin="0.35s" repeatCount="indefinite">
+                            <circle r={node.accepted ? 4.0 : 3.2} fill={node.accepted ? '#4ADE80' : '#C084FC'} filter="url(#gGlow)">
+                              <animateMotion dur={dur(2.45 + idx * 0.18)} begin="0.55s" repeatCount="indefinite">
                                 <mpath href={`#gl-b-${idx}`} />
                               </animateMotion>
                             </circle>
@@ -928,11 +964,11 @@ export const GooseLabPage: React.FC = () => {
                 <div className="p-3 space-y-2">
                   <button
                     type="button"
-                    onClick={handlePublishTrip}
+                    onClick={handlePublishState}
                     className="w-full py-1.5 rounded-lg border border-[#F59E0B] bg-[#332005] text-[#FDE68A] font-extrabold text-xs flex items-center justify-center gap-1.5 hover:brightness-110 transition"
                   >
                     <Zap className="w-3.5 h-3.5 text-[#FACC15]" />
-                    Publish Trip (stNum++)
+                    {isStatusDataset ? 'Publish Simulated CB Status (stNum++)' : 'Publish Trip (stNum++)'}
                   </button>
 
                   <div className="grid grid-cols-2 gap-2">
@@ -957,7 +993,7 @@ export const GooseLabPage: React.FC = () => {
                   <div className="flex items-center justify-between gap-1.5 pt-1">
                     <span className="text-[11px] text-[#9BC0DF] font-semibold">Speed :</span>
                     <div className="flex gap-1.5 flex-1 justify-end">
-                      {([1, 2, 4] as const).map((s) => (
+                      {([0.1, 0.25, 0.5, 1, 2, 4] as const).map((s) => (
                         <button
                           key={s}
                           type="button"
@@ -1045,7 +1081,7 @@ export const GooseLabPage: React.FC = () => {
                       {prevStNum}
                     </div>
                     <div className="rounded bg-[#063A22] border border-[#22C55E] px-2.5 py-1 text-[#4ADE80] font-extrabold">
-                      {currentStNum} (Trip)
+                      {currentStNum} ({isStatusDataset ? 'CB Status' : 'Trip'})
                     </div>
                   </div>
                 </div>
@@ -1119,7 +1155,7 @@ export const GooseLabPage: React.FC = () => {
                       <th className="py-1.5 px-2">Subscription</th>
                       <th className="py-1.5 px-2">Packet Rx</th>
                       <th className="py-1.5 px-2">Accept</th>
-                      <th className="py-1.5 px-2">Input (Trip)</th>
+                      <th className="py-1.5 px-2">{isStatusDataset ? 'Input (CB Status)' : 'Input (Trip)'}</th>
                       <th className="py-1.5 px-3">Status</th>
                     </tr>
                   </thead>
@@ -1139,8 +1175,8 @@ export const GooseLabPage: React.FC = () => {
                           </span>
                         </td>
                         <td className="py-2 px-2">
-                          <span className={n.inputTrip ? 'text-[#4ADE80] font-bold' : 'text-[#94A3B8]'}>
-                            {n.inputTrip ? 'TRUE (1)' : 'FALSE (0)'}
+                          <span className={n.inputActive ? 'text-[#4ADE80] font-bold' : 'text-[#94A3B8]'}>
+                            {isStatusDataset ? (n.accepted ? (n.inputActive ? 'CLOSED' : 'OPEN') : '—') : (n.inputActive ? 'TRUE (1)' : 'FALSE (0)')}
                           </span>
                         </td>
                         <td className="py-2 px-3">
@@ -1243,7 +1279,7 @@ goosePdu:
   goID: ${goIdStr}
   t: ${new Date().toISOString()}
   stNum: ${currentStNum} | sqNum: ${simSqNum} | simulation: ${testModeSub} | confRev: ${gocb?.confRev ?? 1} | ndsCom: ${faultMode === 'CONFREV_MISMATCH'}
-  numDatSetEntries: 5`}
+  numDatSetEntries: ${datasetEntries ?? '—'}`}
           </pre>
         </div>
       )}

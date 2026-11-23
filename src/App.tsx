@@ -1,32 +1,10 @@
-import { BayConfigurationManager } from './pages/BayConfigurationManager';
 import { ScadaAlarmAudio } from './components/ScadaAlarmAudio';
-import { AlarmsEventsPage } from './pages/AlarmsEventsPage';
-import { WiresharkAnalyzerPage } from './pages/WiresharkAnalyzerPage';
-import { OsiModelPage } from './pages/OsiModelPage';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useSubstationStore, ActiveWorkspaceTab } from './simulation/useSubstationStore';
 import { useAuthStore, computeUserInitials, ProfileSectionTab } from './auth/useAuthStore';
 import { useSimulationLoop } from './hooks/useSimulationLoop';
 import { HeroDashboardPage } from './pages/HeroDashboardPage';
-import { SldWorkspacePage } from './pages/SldWorkspacePage';
-import { ScadaHmiPage } from './pages/ScadaHmiPage';
-import { IedExplorerPage } from './pages/IedExplorerPage';
-import { NetworkTopologyPage } from './pages/NetworkTopologyPage';
-import { GooseLabPage } from './pages/GooseLabPage';
-import { MmsLabPage } from './pages/MmsLabPage';
-import { ModbusTcpLabPage } from './pages/ModbusTcpLabPage';
-import { Iec104LabPage } from './pages/Iec104LabPage';
-import { OpcUaLabPage } from './pages/OpcUaLabPage';
-import { SignalMappingSclPage } from './pages/SignalMappingSclPage';
-import { FaultTroubleshootingPage } from './pages/FaultTroubleshootingPage';
-import { FatSatLabPage } from './pages/FatSatLabPage';
-import { TestingGuidancePage } from './pages/TestingGuidancePage';
-import { LearningAcademyPage } from './pages/LearningAcademyPage';
-import { Iec61850AcademyPage } from './pages/Iec61850AcademyPage';
-import { InterviewPrepPage } from './pages/InterviewPrepPage';
-import { CcnaAcademyPage } from './pages/CcnaAcademyPage';
-import { AuthPortalPage, UserProfilePage, AdminDashboardPage } from './pages/AuthAndAdminPages';
 import {
   Activity,
   AlertOctagon,
@@ -66,6 +44,31 @@ import {
 
 
 import { UI_TRANSLATIONS, translateOfflineText, setOnlineLanguage, SUPPORTED_LANGUAGE_LIST, LANGUAGE_CODES, normalizeLanguageCode, SupportedLanguageCode } from './i18n/offlineTranslation';
+
+const BayConfigurationManager = React.lazy(() => import('./pages/BayConfigurationManager').then(module => ({ default: module.BayConfigurationManager })));
+const AlarmsEventsPage = React.lazy(() => import('./pages/AlarmsEventsPage').then(module => ({ default: module.AlarmsEventsPage })));
+const WiresharkAnalyzerPage = React.lazy(() => import('./pages/WiresharkAnalyzerPage').then(module => ({ default: module.WiresharkAnalyzerPage })));
+const OsiModelPage = React.lazy(() => import('./pages/OsiModelPage').then(module => ({ default: module.OsiModelPage })));
+const SldWorkspacePage = React.lazy(() => import('./pages/SldWorkspacePage').then(module => ({ default: module.SldWorkspacePage })));
+const ScadaHmiPage = React.lazy(() => import('./pages/ScadaHmiPage').then(module => ({ default: module.ScadaHmiPage })));
+const IedExplorerPage = React.lazy(() => import('./pages/IedExplorerPage').then(module => ({ default: module.IedExplorerPage })));
+const NetworkTopologyPage = React.lazy(() => import('./pages/NetworkTopologyPage').then(module => ({ default: module.NetworkTopologyPage })));
+const GooseLabPage = React.lazy(() => import('./pages/GooseLabPage').then(module => ({ default: module.GooseLabPage })));
+const MmsLabPage = React.lazy(() => import('./pages/MmsLabPage').then(module => ({ default: module.MmsLabPage })));
+const ModbusTcpLabPage = React.lazy(() => import('./pages/ModbusTcpLabPage').then(module => ({ default: module.ModbusTcpLabPage })));
+const Iec104LabPage = React.lazy(() => import('./pages/Iec104LabPage').then(module => ({ default: module.Iec104LabPage })));
+const OpcUaLabPage = React.lazy(() => import('./pages/OpcUaLabPage').then(module => ({ default: module.OpcUaLabPage })));
+const SignalMappingSclPage = React.lazy(() => import('./pages/SignalMappingSclPage').then(module => ({ default: module.SignalMappingSclPage })));
+const FaultTroubleshootingPage = React.lazy(() => import('./pages/FaultTroubleshootingPage').then(module => ({ default: module.FaultTroubleshootingPage })));
+const FatSatLabPage = React.lazy(() => import('./pages/FatSatLabPage').then(module => ({ default: module.FatSatLabPage })));
+const TestingGuidancePage = React.lazy(() => import('./pages/TestingGuidancePage').then(module => ({ default: module.TestingGuidancePage })));
+const LearningAcademyPage = React.lazy(() => import('./pages/LearningAcademyPage').then(module => ({ default: module.LearningAcademyPage })));
+const Iec61850AcademyPage = React.lazy(() => import('./pages/Iec61850AcademyPage').then(module => ({ default: module.Iec61850AcademyPage })));
+const InterviewPrepPage = React.lazy(() => import('./pages/InterviewPrepPage').then(module => ({ default: module.InterviewPrepPage })));
+const CcnaAcademyPage = React.lazy(() => import('./pages/CcnaAcademyPage').then(module => ({ default: module.CcnaAcademyPage })));
+const AuthPortalPage = React.lazy(() => import('./pages/AuthAndAdminPages').then(module => ({ default: module.AuthPortalPage })));
+const UserProfilePage = React.lazy(() => import('./pages/AuthAndAdminPages').then(module => ({ default: module.UserProfilePage })));
+const AdminDashboardPage = React.lazy(() => import('./pages/AuthAndAdminPages').then(module => ({ default: module.AdminDashboardPage })));
 
 export default function App() {
   useSimulationLoop();
@@ -346,12 +349,12 @@ export default function App() {
   ];
 
   const topNavGroups = [
-    { key: 'overview', title: t('Overview'), icon: Home, ids: ['HERO'] },
     { key: 'sld', title: t('SLD & Operation'), icon: GitBranch, ids: ['SLD', 'SCADA'] },
     { key: 'ied', title: t('IED & Signals'), icon: Cpu, ids: ['IED', 'IED_SIGNAL_CHAIN'] },
     { key: 'comms', title: t('Communication'), icon: Radio, ids: ['NETWORK', 'GOOSE', 'MMS', 'MODBUS_LAB', 'IEC104_LAB', 'OPCUA_LAB'] },
     { key: 'tools', title: t('Tools & Test'), icon: Settings, ids: ['SIGNALS', 'FAULTS', 'FATSAT', 'IEC61850_ACADEMY', 'TESTING_GUIDANCE', 'OSI_MODEL', 'INTERVIEW_PREP', 'CCNA_ACADEMY', 'LEARNING'] },
   ];
+  const isWorkspaceHome = activeTab === 'HERO' && !specialPage && !testingGuidanceOpen;
   const filteredNavItems = navItems.filter(item => item.label.toLowerCase().includes(navSearch.trim().toLowerCase()));
 
   const clearScadaVisitOnExit = () => {
@@ -475,7 +478,15 @@ export default function App() {
           </button>
           <nav id="sas-responsive-navigation" className={`sas-top-navigation ${mobileNavOpen ? 'sas-nav-expanded' : ''}`} aria-label="Engineering modules">
             <div className="sas-top-groups">
-              <button type="button" className="sas-top-home" title="Substation Workspace" onClick={() => navigate('HERO')}><Home className="h-4 w-4" /></button>
+              <button
+                type="button"
+                className={`sas-top-group-trigger ${isWorkspaceHome ? 'is-active' : ''}`}
+                aria-current={isWorkspaceHome ? 'page' : undefined}
+                onClick={() => navigate('HERO')}
+              >
+                <Home className="h-4 w-4" aria-hidden="true" />
+                <span>{t('Home')}</span>
+              </button>
               {topNavGroups.map(group => {
                 const Icon = group.icon;
                 const active = group.ids.includes(testingGuidanceOpen ? 'TESTING_GUIDANCE' : activeTab);
@@ -772,6 +783,7 @@ export default function App() {
 
         {/* Main Workspace Container */}
         <main className="sas-workspace-main flex-1 p-2.5 sm:p-5 xl:p-6 w-full min-w-0">
+          <React.Suspense fallback={<div role="status" className="rounded-xl border border-cyan-900 bg-[#061829] p-5 text-sm text-[#9bdcf3]">{t('Loading workspace…')}</div>}>
           {specialPage === 'BAY_MANAGER' ? <BayConfigurationManager /> : specialPage === 'ALARMS_EVENTS' ? <AlarmsEventsPage /> : specialPage === 'WIRESHARK' ? <WiresharkAnalyzerPage /> : testingGuidanceOpen ? <TestingGuidancePage /> : <>
           {activeTab === 'HERO' && <HeroDashboardPage />}
           {activeTab === 'OSI_MODEL' && <OsiModelPage />}
@@ -794,9 +806,10 @@ export default function App() {
           {activeTab === 'ADMIN_DASHBOARD' && <AdminDashboardPage />}
           {activeTab === 'USER_PROFILE' && <UserProfilePage />}
           </>}
+          </React.Suspense>
         </main>
 
-        <footer className="px-4 sm:px-6 py-3 pb-14 sm:pb-3 bg-[#061525] border-t border-[#18334B] text-[10px] text-[#829CB0] flex flex-wrap justify-between gap-2">
+        <footer className="sas-app-footer px-4 sm:px-6 py-3 pb-14 sm:pb-3 border-t border-cyan-300/40 text-[10px] text-[#bde3f5] flex flex-wrap justify-between gap-2">
           <span>SAS ENGINEERING HUB — 132/33/11 kV IEC 61850 Digital Twin & Unified Academies</span>
           <span>Educational simulation only — Not connected to physical substation equipment · © {new Date().getFullYear()} Substation Automation Engineering Hub</span>
         </footer>
@@ -811,12 +824,14 @@ export default function App() {
           onClick={() => setAuthPopupMode(null)}
           className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5"
         >
+          <React.Suspense fallback={<p role="status" className="text-sm text-cyan-100">{t('Loading…')}</p>}>
           <AuthPortalPage
             isModal
             initialMode={authPopupMode}
             onClose={() => setAuthPopupMode(null)}
             onSuccessRedirect={() => setAuthPopupMode(null)}
           />
+          </React.Suspense>
         </div>
       )}
 

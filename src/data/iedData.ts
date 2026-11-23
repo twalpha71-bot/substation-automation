@@ -8,6 +8,7 @@ import {
   NetworkLink,
 } from '../types/substation';
 import { getVendorForBay, getVendorLdPrefix } from './signalCatalogue';
+import { INITIAL_BAYS, INITIAL_TRANSFORMERS } from './substationData';
 
 export function buildMultiVendorIeds(bays: BayEquipment[]): MultiVendorIed[] {
   return bays.map((bay, idx) => {
@@ -486,7 +487,7 @@ export const INFRASTRUCTURE_DEVICES: InfrastructureDevice[] = [
   },
 ];
 
-export const INITIAL_GOOSE_CONTROL_BLOCKS: GooseControlBlock[] = [
+const existingGooseControlBlocks: GooseControlBlock[] = [
   {
     id: 'GOCB-132-L1-TRIP',
     gocbName: 'gcbLine1ProtTrip',
@@ -635,6 +636,130 @@ export const INITIAL_GOOSE_CONTROL_BLOCKS: GooseControlBlock[] = [
   },
 ];
 
+const existingGoosePublishers = new Set(existingGooseControlBlocks.map(block => block.publisherIedId));
+
+interface GooseBayProfile {
+  appId: string;
+  multicastMac: string;
+  vlanId: number;
+  intertrip: boolean;
+  subscribers: BayEquipment[];
+}
+
+const STATUS_VLAN_BY_VOLTAGE: Record<BayEquipment['voltageKv'], number> = {
+  132: 101,
+  33: 133,
+  11: 111,
+};
+
+// Fixed allocations keep new bay APPIDs and multicast addresses stable if the
+// equipment list is reordered. The previously configured blocks retain theirs.
+const additionalGooseAddresses: Readonly<Partial<Record<string, number>>> = {
+  'BAY-132-L2': 0x01,
+  'BAY-132-BC': 0x02,
+  'BAY-132-T2': 0x03,
+  'BAY-33-INC1': 0x04,
+  'BAY-33-INC2': 0x05,
+  'BAY-33-BC': 0x06,
+  'BAY-33-TF1': 0x07,
+  'BAY-33-TF2': 0x08,
+  'BAY-11-INC1': 0x09,
+  'BAY-11-INC2': 0x0a,
+  'BAY-11-BC': 0x0b,
+  'BAY-11-SP1': 0x0c,
+};
+
+const hexOctet = (value: number) => value.toString(16).toUpperCase().padStart(2, '0');
+
+function getStatusSubscribers(publisher: BayEquipment): BayEquipment[] {
+  return INITIAL_BAYS.filter(bay => {
+    if (bay.id === publisher.id || bay.voltageKv !== publisher.voltageKv) return false;
+    if (publisher.bayType === 'BUS_COUPLER') {
+      return bay.bayType === (publisher.voltageKv === 132 ? 'LINE_INCOMER' : 'TRANSFORMER_LV_INCOMER');
+    }
+    if (bay.bayType === 'BUS_COUPLER') return true;
+    if (bay.busSection !== publisher.busSection) return false;
+    if (publisher.bayType === 'LINE_INCOMER') return bay.bayType === 'TRANSFORMER_HV';
+    return (publisher.bayType === 'OUTGOING_FEEDER' || publisher.bayType === 'SPARE_FEEDER') &&
+      bay.bayType === 'TRANSFORMER_LV_INCOMER';
+  });
+}
+
+function buildMappedBayGoose(publisher: BayEquipment, profile: GooseBayProfile): GooseControlBlock {
+  const { vendor, iedModel } = getVendorForBay(publisher);
+  const { intertrip, subscribers } = profile;
+  const publisherName = publisher.iedId.replace(/-/g, '_');
+  const ldCategory = intertrip ? 'Protection Signals' : 'Circuit Breaker & Switchgear';
+  const ldName = publisherName + getVendorLdPrefix(vendor, ldCategory);
+  const gocbName = intertrip ? 'gcbTransformerIntertrip' : 'gcbFeederCbStatus';
+  const sourceData = intertrip ? 'PTRC1.Tr.general' : 'XCBR1.Pos.stVal';
+  const input = intertrip ? 'PTRC1.IntertripFrom' : 'FeederCBStatus';
+  return {
+    id: `GOCB-${publisher.id.replace(/^BAY-/, '')}-${intertrip ? 'INTERTRIP' : 'STATUS'}`,
+    gocbName,
+    appId: profile.appId,
+    gocbRef: `${ldName}/LLN0$GO$${gocbName}`,
+    datSet: `${ldName}/LLN0$${intertrip ? 'dsProtTrip' : 'dsStatus'}`,
+    publisherIedId: publisher.iedId,
+    publisherIedName: `${publisherName} (${iedModel})`,
+    subscriberIedIds: subscribers.map(bay => bay.iedId),
+    multicastMac: profile.multicastMac,
+    vlanId: profile.vlanId,
+    vlanPriority: 4,
+    confRev: 1,
+    stNum: 1,
+    sqNum: 0,
+    timeAllowedToLiveMs: 2000,
+    minTimeMs: 4,
+    maxTimeMs: 1000,
+    ndsCom: false,
+    testMode: false,
+    healthy: true,
+    mismatchFault: 'NONE',
+    lastTxTimestamp: publisher.lastUpdated,
+    extRefs: subscribers.map(bay => ({
+      subscriberIedId: bay.iedId,
+      intAddr: `${getVendorLdPrefix(getVendorForBay(bay).vendor, ldCategory)}/${input}/${publisher.bayCode}`,
+      srcRef: `${ldName}/${sourceData}`,
+      bound: true,
+    })),
+  };
+}
+
+export const INITIAL_GOOSE_CONTROL_BLOCKS: GooseControlBlock[] = [
+  ...existingGooseControlBlocks,
+  ...INITIAL_BAYS.flatMap(bay => {
+    if (existingGoosePublishers.has(bay.iedId)) return [];
+
+    if (bay.bayType === 'OUTGOING_FEEDER') {
+      const feederNumber = Number(bay.bayCode.match(/-F(\d+)$/)?.[1]);
+      if (!Number.isInteger(feederNumber) || (bay.voltageKv !== 33 && bay.voltageKv !== 11)) return [];
+      const is33kV = bay.voltageKv === 33;
+      return [buildMappedBayGoose(bay, {
+        appId: `0x${is33kV ? '33' : '11'}${hexOctet(feederNumber)}`,
+        multicastMac: `01-0C-CD-01-01-${hexOctet((is33kV ? 0x40 : 0x20) + feederNumber)}`,
+        vlanId: STATUS_VLAN_BY_VOLTAGE[bay.voltageKv],
+        intertrip: false,
+        subscribers: getStatusSubscribers(bay),
+      })];
+    }
+
+    const address = additionalGooseAddresses[bay.id];
+    if (address === undefined) return [];
+    const transformer = INITIAL_TRANSFORMERS.find(entry => entry.hvBayId === bay.id);
+    const subscribers = transformer
+      ? INITIAL_BAYS.filter(entry => entry.id === transformer.lvBayId)
+      : getStatusSubscribers(bay);
+    return [buildMappedBayGoose(bay, {
+      appId: `0x20${hexOctet(address)}`,
+      multicastMac: `01-0C-CD-01-01-${hexOctet(0x80 + address)}`,
+      vlanId: transformer ? 102 : STATUS_VLAN_BY_VOLTAGE[bay.voltageKv],
+      intertrip: !!transformer,
+      subscribers,
+    })];
+  }),
+];
+
 export function buildNetworkLinks(bays: BayEquipment[]): NetworkLink[] {
   const links: NetworkLink[] = [
     {
@@ -741,8 +866,13 @@ export function buildNetworkLinks(bays: BayEquipment[]): NetworkLink[] {
     },
   ];
 
-  bays.slice(0, 12).forEach((bay, i) => {
-    const portNum = i + 5;
+  const gooseEndpoints = new Set(INITIAL_GOOSE_CONTROL_BLOCKS.flatMap(block => [
+    block.publisherIedId, ...block.subscriberIedIds,
+  ]));
+  bays.filter((bay, index) => index < 12 || gooseEndpoints.has(bay.iedId)).forEach((bay, i) => {
+    // Keep the existing first 20 field port labels, then use the spare Fast Ethernet
+    // ports. Larger simulated topologies get separate virtual access ports.
+    const feederPort = i < 24 ? `Fa1/${(i + 4) % 24 + 1}` : `SimAccess/${i - 23}`;
     links.push(
       {
         id: `LNK-${bay.iedId}-A`,
@@ -751,7 +881,7 @@ export function buildNetworkLinks(bays: BayEquipment[]): NetworkLink[] {
         sourcePort: 'ChA (LC-FX)',
         targetId: 'SW-LAN-A1',
         targetName: 'Core Switch LAN-A',
-        targetPort: `Fa1/${portNum}`,
+        targetPort: feederPort,
         lanPlane: 'LAN_A',
         speedMbps: 100,
         mediaType: '100BASE-FX Multimode LC',
@@ -768,7 +898,7 @@ export function buildNetworkLinks(bays: BayEquipment[]): NetworkLink[] {
         sourcePort: 'ChB (LC-FX)',
         targetId: 'SW-LAN-B1',
         targetName: 'Core Switch LAN-B',
-        targetPort: `Fa1/${portNum}`,
+        targetPort: feederPort,
         lanPlane: 'LAN_B',
         speedMbps: 100,
         mediaType: '100BASE-FX Multimode LC',

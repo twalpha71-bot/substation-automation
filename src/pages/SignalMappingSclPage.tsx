@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useSubstationStore } from '../simulation/useSubstationStore';
+import { hasConfiguredFeederReclose, initialRecloseDemo, useSubstationStore } from '../simulation/useSubstationStore';
 import { FIFTY_SAS_SIGNAL_TEMPLATES, getVendorForBay } from '../data/signalCatalogue';
 import { SignalChainDashboard } from '../components/SignalChainDashboard';
 import { SCL_FILE_SAMPLES } from '../data/sclSamples';
@@ -212,6 +212,57 @@ function parseSclXmlString(fileName: string, fileType: string, xmlString: string
   };
 }
 
+function RecloseTrainingPanel({ bayId }: { bayId: string }) {
+  const {
+    bays, feederProtection, startRecloseDemo, clearRecloseDemoFault,
+    cancelRecloseDemo, resetRecloseDemo79, resetRecloseDemo86, resetProtectionTrip,
+  } = useSubstationStore();
+  const [now, setNow] = useState(Date.now);
+  const { deadline, faultActive, phase, reason, shots } = feederProtection[bayId] ?? initialRecloseDemo;
+
+  useEffect(() => {
+    if (deadline === null) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 100);
+    return () => window.clearInterval(timer);
+  }, [deadline]);
+
+  const bay = bays.find((entry) => entry.id === bayId);
+  if (!bay) return null;
+
+  const lockout86 = bay.masterTripLockout ?? bay.protectionTripActive;
+  const recloseConfigured = hasConfiguredFeederReclose(bay);
+  const canStart = bay.breakerState === 'CLOSED' && phase === 'READY' && !faultActive && !lockout86;
+  const canReset = bay.breakerState === 'OPEN' && !faultActive;
+  const buttonClass = 'rounded-md border border-[#26617A] bg-[#081F31] px-2.5 py-1.5 font-semibold text-[#B5ECFA] hover:border-cyan-400 disabled:opacity-40 disabled:hover:border-[#26617A]';
+  const phaseLabel = { READY: 'READY', DEAD_TIME: 'DEAD TIME', RETRIP_PENDING: 'RETRIP PENDING', RECLAIM: 'RECLAIM', LOCKOUT: 'LOCKOUT' }[phase];
+
+  return (
+    <section aria-label={`${bay.bayCode} protection training`} className="sas-feeder-simulation rounded-xl border border-[#26617A] bg-[#0A263A] px-3 py-2.5 text-xs text-[#B5ECFA]">
+      <h2 className="font-extrabold text-white">{bay.bayCode} Protection Simulation</h2>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono" data-testid="reclose-status">
+        <span className={phase === 'LOCKOUT' ? 'text-rose-300' : 'text-cyan-300'}>ANSI 79 · {recloseConfigured ? phaseLabel : 'DISABLED'}</span>
+        {deadline !== null && <span>{(Math.max(0, deadline - now) / 1000).toFixed(1)} s</span>}
+        {recloseConfigured && <span>Shots {shots}/1</span>}
+        <span className={lockout86 ? 'text-rose-300' : 'text-emerald-300'}>ANSI 86 · {lockout86 ? 'LATCHED' : 'RESET'}</span>
+        <span>CB · {bay.breakerState}</span>
+        <span className={faultActive ? 'text-amber-300' : ''}>Fault · {faultActive ? 'ACTIVE' : 'CLEAR'}</span>
+      </div>
+      <p className="mt-1.5 text-[11px]" aria-live="polite">{reason}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button type="button" className={buttonClass} disabled={!canStart} onClick={() => startRecloseDemo(bayId, 'TEMPORARY')}>Temporary fault</button>
+        <button type="button" className={buttonClass} disabled={!canStart} onClick={() => startRecloseDemo(bayId, 'PERMANENT')}>Permanent fault</button>
+        <button type="button" className={buttonClass} disabled={!canStart} onClick={() => startRecloseDemo(bayId, 'MASTER_TRIP')}>Master trip (86)</button>
+        <button type="button" className={buttonClass} disabled={!faultActive} onClick={() => clearRecloseDemoFault(bayId)}>Clear fault</button>
+        <button type="button" className={buttonClass} disabled={phase !== 'DEAD_TIME'} onClick={() => cancelRecloseDemo(bayId)}>Cancel 79</button>
+        <button type="button" className={buttonClass} disabled={!canReset || phase !== 'LOCKOUT'} onClick={() => resetRecloseDemo79(bayId)}>Reset 79 lockout</button>
+        <button type="button" className={buttonClass} disabled={!canReset || !lockout86} onClick={() => resetRecloseDemo86(bayId)}>Reset 86 lockout</button>
+        <button type="button" className={buttonClass} disabled={faultActive || !bay.protectionTripActive} onClick={() => resetProtectionTrip(bay.id)}>Reset trip indication</button>
+      </div>
+    </section>
+  );
+}
+
 export const SignalMappingSclPage: React.FC = () => {
   const {
     signals,
@@ -245,11 +296,6 @@ export const SignalMappingSclPage: React.FC = () => {
 
   // Interactive Signal-Chain Fault Simulation (Section 11)
   const [faultModeByBay, setFaultModeByBay] = useState<Record<string, SignalChainFaultMode>>({});
-  const activeBayKey = selectedBayId || bays[0]?.id || 'BAY-132-L1';
-  const chainFaultMode: SignalChainFaultMode = faultModeByBay[activeBayKey] || 'NONE';
-  const setChainFaultMode = (mode: SignalChainFaultMode) => {
-    setFaultModeByBay((prev) => ({ ...prev, [activeBayKey]: mode }));
-  };
   const [selectedStageIndex, setSelectedStageIndex] = useState<number | null>(null);
   const [selectedProtocolMapMode, setSelectedProtocolMapMode] = useState<'MMS' | 'GOOSE' | 'MODBUS' | 'IEC104' | 'OPCUA'>('MMS');
 
@@ -299,6 +345,12 @@ export const SignalMappingSclPage: React.FC = () => {
     }
     return bays.find((b) => b.id === selectedBayId) || bays.find((b) => b.id === 'BAY-132-L1') || bays[0];
   }, [viewMode, selectedPointId, selectedBayId, signals, bays, kpiBay]);
+
+  const activeBayKey = traceBay?.id ?? selectedBayId;
+  const chainFaultMode: SignalChainFaultMode = faultModeByBay[activeBayKey] || 'NONE';
+  const setChainFaultMode = (mode: SignalChainFaultMode) => {
+    setFaultModeByBay((prev) => ({ ...prev, [activeBayKey]: mode }));
+  };
 
   const selectedTemplate = useMemo(() => {
     return FIFTY_SAS_SIGNAL_TEMPLATES.find((t) => t.catalogNumber === selectedCatalogNo) || FIFTY_SAS_SIGNAL_TEMPLATES[0];
@@ -448,12 +500,8 @@ export const SignalMappingSclPage: React.FC = () => {
     const cdcShort = row.cdc.split(' ')[0];
 
     // Engineering-accurate GOOSE Control Block vs Report Control Block separation (Section 3 Stage 5)
-    const hasGoose = row.transportType === 'GOOSE_AND_MMS';
-    const gooseCbName = hasGoose
-      ? row.category === 'Protection Signals' || row.catalogNumber === 4
-        ? 'GoCB_Trip01 (0x88B8)'
-        : 'GoCB_St01 (0x88B8)'
-      : 'None (MMS Only)';
+    const gooseBlock = gooseControlBlocks.find(block => block.publisherIedId === bay.iedId && block.subscriberIedIds.length > 0);
+    const gooseCbName = gooseBlock ? `${gooseBlock.gocbName} (${gooseBlock.appId})` : 'Not configured';
     const reportCbName =
       row.transportType === 'MMS_URCB'
         ? 'URCB01 (urcbMeas01)'
@@ -546,7 +594,7 @@ export const SignalMappingSclPage: React.FC = () => {
       stageStates: [stage1State, stage2State, stage3State, stage4State, stage5State, stage6State],
       overallQuality,
     };
-  }, [catalogueDisplayRows, selectedCatalogNo, traceBay, tracedPoint, chainFaultMode]);
+  }, [catalogueDisplayRows, selectedCatalogNo, traceBay, tracedPoint, chainFaultMode, gooseControlBlocks]);
 
   // Consistent KPI Counts (Section 5)
   const kpiStats = useMemo(() => {
@@ -772,7 +820,7 @@ export const SignalMappingSclPage: React.FC = () => {
   };
 
   return (
-    <div style={{ backgroundColor: '#030B18', color: '#E9F3FF' }} className="space-y-2.5 text-xs select-none">
+    <div style={{ backgroundColor: '#030B18', color: '#E9F3FF' }} className="sas-signal-workspace space-y-2.5 text-xs select-none">
       {/* 1. TOP WORKSPACE TABS & ACTION BAR (Matching Reference Screenshot) */}
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
@@ -853,7 +901,7 @@ export const SignalMappingSclPage: React.FC = () => {
           </div>
 
           {/* Interactive Signal-Chain Fault Simulator Selector (Section 11) */}
-          <div className="flex items-center gap-2">
+          <div className="sas-signal-fault-control flex items-center gap-2">
             <span className="text-[11px] text-[#8BB3D4] font-semibold flex items-center gap-1">
               <Wrench className="w-3.5 h-3.5 text-[#00DFFF]" /> Signal Chain Test / Fault Sim:
             </span>
@@ -872,7 +920,7 @@ export const SignalMappingSclPage: React.FC = () => {
               <option value="WRONG_IEC_REF">Fault 2: Wrong IEC 61850 LN/DO Reference</option>
               <option value="DATASET_MISSING">Fault 3: FCDA Missing from LLN0 DataSet</option>
               <option value="REPORT_DISABLED">Fault 4: BRCB01 Report Disabled (RptEna=0)</option>
-              <option value="GOOSE_TIMEOUT">Fault 5: GOOSE Subscription TAL Timeout</option>
+              <option value="GOOSE_TIMEOUT" disabled={!gooseControlBlocks.some(block => block.publisherIedId === activeChain.bay.iedId && block.subscriberIedIds.length > 0)}>Fault 5: GOOSE Subscription TAL Timeout</option>
               <option value="MMS_DISCONNECT">Fault 6: SCADA MMS Association Lost</option>
               <option value="BAD_QUALITY">Fault 7: Questionable / Oscillatory Quality (0x0400)</option>
               <option value="HMI_TAG_MISMATCH">Fault 8: Incorrect SCADA / HMI Tag Mapping</option>
@@ -889,6 +937,8 @@ export const SignalMappingSclPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {activeChain.bay.bayType === 'OUTGOING_FEEDER' && <RecloseTrainingPanel key={activeChain.bay.id} bayId={activeChain.bay.id} />}
 
       {/* 2. MAIN END-TO-END SAS SIGNAL CHAIN TRACE PANEL */}
       <SignalChainDashboard
@@ -910,6 +960,7 @@ export const SignalMappingSclPage: React.FC = () => {
         networkRedundancyMode={networkRedundancyMode}
         tracedPoint={tracedPoint}
         chainFaultMode={chainFaultMode}
+        faultModeByBay={faultModeByBay}
         setChainFaultMode={setChainFaultMode}
         selectedStageIndex={selectedStageIndex}
         setSelectedStageIndex={setSelectedStageIndex}

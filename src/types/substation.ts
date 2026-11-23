@@ -40,6 +40,7 @@ export interface BayEquipment {
   interlockPermissive: boolean;
   interlockReason: string;
   protectionTripActive: boolean;
+  masterTripLockout?: boolean;
   activeTripFunctions: string[];
   autoRecloseStatus: 'READY' | 'IN_PROGRESS' | 'LOCKOUT' | 'DISABLED';
   iedId: string;

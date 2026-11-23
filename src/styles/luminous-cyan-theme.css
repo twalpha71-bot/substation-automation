@@ -1,0 +1,1428 @@
+/* SAS Engineering Hub — holographic backdrop and Midnight Glass surfaces. */
+
+:root {
+  --sas-bg: #082032;
+  --sas-panel: rgba(16, 56, 82, 0.84);
+  --sas-raised: rgba(24, 78, 108, 0.80);
+  --sas-cyan: #38f3ff;
+  --sas-cyan-border: rgba(86, 235, 255, 0.72);
+  --sas-cyan-glow: rgba(0, 224, 255, 0.28);
+  --sas-text: #eaf6ff;
+  --sas-workspace-art: url('../assets/backgrounds/substation-digital-twin.webp');
+  --sas-workspace-backdrop:
+    linear-gradient(180deg, rgba(1, 11, 23, .18), rgba(1, 11, 23, .26)),
+    var(--sas-workspace-art);
+}
+
+/* 1. Ambient Backlit Page Canvas */
+html,
+body,
+#root,
+.sas-app-shell {
+  background:
+    radial-gradient(ellipse 72% 48% at 50% 0%, rgba(34, 158, 200, 0.42) 0%, transparent 72%),
+    radial-gradient(ellipse 52% 42% at 14% 96%, rgba(16, 128, 168, 0.32) 0%, transparent 72%),
+    radial-gradient(ellipse 52% 42% at 86% 96%, rgba(16, 128, 168, 0.32) 0%, transparent 72%),
+    linear-gradient(180deg, #0c2b40 0%, #082032 52%, #061827 100%) !important;
+  background-attachment: fixed !important;
+  color: #eaf6ff;
+}
+
+/* Keep the approved artwork behind the workspace as long pages scroll. */
+.sas-workspace-main {
+  --sas-workspace-glass: linear-gradient(180deg, rgba(2, 17, 30, .28), rgba(2, 14, 26, .40));
+  --sas-workspace-inset-glass: rgba(2, 14, 26, .16);
+  --sas-workspace-frost: none;
+  background-color: #03111e;
+  background-image: var(--sas-workspace-backdrop);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  background-attachment: fixed;
+}
+
+/* iOS WebKit draws fixed element backgrounds as scroll backgrounds. Reuse
+   the same viewport-sized artwork down long pages on that engine. */
+@supports (-webkit-touch-callout: none) {
+  .sas-workspace-main {
+    background-attachment: scroll;
+    background-repeat: repeat-y;
+    background-position: center top;
+    background-size: 100% 100svh, auto 100svh;
+  }
+}
+
+.sas-auth-artwork {
+  background-color: #03111e;
+  background-image: var(--sas-workspace-backdrop);
+  background-position: 69% center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+/* Page wrappers expose the wallpaper. Their nested panels retain the glass theme. */
+.sas-workspace-main > :is(.sas-runtime-shell, .select-none, .sas-fat-sat-page):not(.fixed) {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Keep the wallpaper behind runtime/PRP panels in their full-screen views. */
+.sas-workspace-main > :is(.sas-runtime-shell, .select-none).fixed.inset-0 {
+  background-color: #03111e !important;
+  background-image: var(--sas-workspace-backdrop) !important;
+  background-position: center !important;
+  background-size: cover !important;
+  background-repeat: no-repeat !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* The labs' legacy inline surfaces also use the workspace glass. */
+.sas-workspace-main :is(.sas-glass-panel, .sas-wireshark-panel, .opcua-glass-panel, .i104-glass-panel, .mb-glass-panel) {
+  background: var(--sas-workspace-glass) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Insets sit inside glass panels, so use a lighter tint to avoid stacking dark layers. */
+.sas-workspace-main :is(.opcua-glass-scroll, .i104-glass-scroll, .mb-glass-scroll, .interview-prep-qa, .interview-prep-scenario) {
+  background: var(--sas-workspace-inset-glass) !important;
+}
+
+/* Per-surface overrides never cascade to the nested cards or controls. */
+.sas-workspace-main :where(*) {
+  --sas-surface-override: initial;
+  --sas-surface-blur: initial;
+}
+
+/* Give telemetry labels a dark backing while letting the artwork show on the right. */
+.sas-workspace-main .sas-dashboard .sas-kpi {
+  --sas-surface-override: linear-gradient(90deg, rgba(2, 15, 27, .94) 0%, rgba(2, 15, 27, .88) 74%, rgba(2, 15, 27, .40) 100%);
+}
+
+.sas-workspace-main .sas-dashboard .sas-kpi-copy span {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sas-workspace-main .sas-dashboard .sas-kpi-copy small {
+  font-size: 11px;
+  color: #d4e9f8;
+}
+
+.sas-workspace-main .sas-dashboard .sas-kpi-copy strong.sas-alert-value {
+  color: #ff7d89;
+}
+
+@media (max-width: 650px) {
+  .sas-workspace-main .sas-dashboard .sas-kpi {
+    --sas-surface-override: linear-gradient(90deg, rgba(2, 15, 27, .94), rgba(2, 15, 27, .82));
+  }
+}
+
+.sas-workspace-main .sas-signal-workspace {
+  --sas-surface-override: transparent;
+  --sas-surface-blur: none;
+}
+
+.sas-workspace-main :is(.sas-feeder-simulation, .sas-signal-chain-summary) {
+  --sas-surface-override: linear-gradient(90deg, rgba(2, 19, 34, .88), rgba(2, 19, 34, .65) 54%, rgba(2, 19, 34, .24));
+  --sas-surface-blur: none;
+}
+
+.sas-workspace-main .sas-signal-chain-scene {
+  --sas-surface-override: linear-gradient(180deg, rgba(2, 17, 30, .24), rgba(2, 17, 30, .10));
+  --sas-surface-blur: none;
+}
+
+@media (max-width: 767px) {
+  .sas-workspace-main {
+    background-position: 69% center;
+  }
+
+  @supports (-webkit-touch-callout: none) {
+    .sas-workspace-main {
+      background-position: 69% top;
+    }
+  }
+
+  .sas-workspace-main :is(.sas-feeder-simulation, .sas-signal-chain-summary) {
+    --sas-surface-override: linear-gradient(180deg, rgba(2, 19, 34, .80), rgba(2, 19, 34, .60));
+  }
+
+  .sas-workspace-main .sas-signal-chain-scene {
+    --sas-surface-override: rgba(2, 17, 30, .27);
+  }
+
+  .sas-workspace-main :is(.sas-signal-fault-control, .sas-signal-bay-control) {
+    flex-wrap: wrap;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .sas-workspace-main :is(.sas-signal-fault-control, .sas-signal-bay-control) select {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* 2. Global Glowing Neon-Cyan Scrollbar Everywhere */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: rgba(8, 36, 56, 0.80);
+  border-left: 1px solid rgba(90, 215, 245, 0.26);
+}
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #42f8ff 0%, #00d8f5 100%);
+  border-radius: 999px;
+  border: 2px solid rgba(8, 36, 56, 0.88);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.85);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #86fbff 0%, #22e5ff 100%);
+}
+*::-webkit-scrollbar-button:single-button:vertical:decrement {
+  height: 13px;
+  background: rgba(8, 36, 56, 0.88) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 2L9 7H1z' fill='%232EE8FF'/%3E%3C/svg%3E") center/7px no-repeat;
+}
+*::-webkit-scrollbar-button:single-button:vertical:increment {
+  height: 13px;
+  background: rgba(8, 36, 56, 0.88) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M5 8L1 3h8z' fill='%232EE8FF'/%3E%3C/svg%3E") center/7px no-repeat;
+}
+
+/* 3. Top Header Bar, Nav Buttons, Dropdowns, Profile Menu, Sidebar & Footer */
+.sas-app-header,
+.sas-app-footer {
+  background:
+    radial-gradient(ellipse 55% 85% at 50% 0%, rgba(56, 232, 255, 0.24) 0%, transparent 72%),
+    linear-gradient(180deg, rgba(22, 74, 104, 0.86) 0%, rgba(12, 46, 70, 0.92) 100%) !important;
+  backdrop-filter: blur(22px) saturate(145%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(145%) !important;
+  border-color: rgba(86, 235, 255, 0.72) !important;
+  box-shadow:
+    0 4px 26px rgba(0, 224, 255, 0.24),
+    inset 0 -1px 1px rgba(180, 250, 255, 0.42) !important;
+}
+
+.sas-app-header .sas-top-group-trigger {
+  background: linear-gradient(180deg, rgba(32, 86, 118, 0.58), rgba(16, 54, 80, 0.72)) !important;
+  border: 1px solid rgba(110, 220, 248, 0.52) !important;
+  box-shadow: inset 0 1px 0 rgba(210, 252, 255, 0.22) !important;
+  transition: all 0.18s ease !important;
+}
+.sas-app-header .sas-top-group-trigger:hover {
+  border-color: #3cf4ff !important;
+  box-shadow: 0 0 14px rgba(0, 232, 255, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+}
+.sas-app-header .sas-top-group-trigger.is-active {
+  background: linear-gradient(180deg, rgba(0, 224, 255, 0.34), rgba(12, 74, 108, 0.82)) !important;
+  border-color: #7df9ff !important;
+  box-shadow: 0 0 16px rgba(0, 232, 255, 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
+}
+
+.sas-top-dropdown,
+.sas-top-search-results,
+.sas-language-menu,
+.sas-profile-menu,
+.workspace-sidebar {
+  background:
+    radial-gradient(ellipse 70% 40% at 50% 0%, rgba(56, 232, 255, 0.24) 0%, transparent 72%),
+    linear-gradient(180deg, rgba(20, 68, 98, 0.94) 0%, rgba(10, 40, 62, 0.96) 100%) !important;
+  backdrop-filter: blur(22px) !important;
+  -webkit-backdrop-filter: blur(22px) !important;
+  border-color: rgba(86, 235, 255, 0.78) !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.58), 0 0 24px rgba(0, 224, 255, 0.28) !important;
+}
+.sas-profile-guest-header {
+  background: linear-gradient(110deg, rgba(24, 82, 114, 0.84), rgba(14, 52, 78, 0.90)) !important;
+  border-bottom-color: rgba(86, 235, 255, 0.42) !important;
+}
+
+/* 4. Named Page Containers: Overview, SCADA Runtime, OSI Model, Interview Prep, IEC Equipment */
+.interview-prep-page {
+  background: transparent !important;
+}
+
+.sas-dashboard .sas-kpi,
+.sas-twin-region,
+.sas-equipment-panel,
+.sas-quick-access,
+.sas-protocol-visualization,
+.sas-protocol-disclosure,
+.sas-engineering-console > .sas-feeder-details,
+.sas-engineering-console .sas-device-column,
+.sas-engineering-console .sas-sbo-column,
+.sas-engineering-console > .sas-rcc-panel,
+.sas-runtime-shell,
+.sas-runtime-shell .runtime-panel,
+.osi-hero,
+.osi-card,
+.osi-section,
+.osi-layer-detail,
+.osi-case-detail,
+.osi-example,
+.osi-note,
+.interview-prep-hero,
+.interview-prep-chapters,
+.interview-prep-selected,
+.iec-equipment,
+.iec-equipment-viewport,
+.iec-inspector {
+  background: var(--sas-surface-override, var(--sas-workspace-glass, radial-gradient(ellipse 68% 36% at 50% 0%, rgba(72, 238, 255, 0.24) 0%, transparent 72%),
+    radial-gradient(ellipse 52% 28% at 50% 100%, rgba(0, 225, 255, 0.16) 0%, transparent 72%),
+    linear-gradient(180deg, rgba(24, 78, 108, 0.78) 0%, rgba(16, 56, 82, 0.84) 52%, rgba(12, 46, 68, 0.88) 100%))) !important;
+  backdrop-filter: var(--sas-surface-blur, var(--sas-workspace-frost, blur(20px))) !important;
+  -webkit-backdrop-filter: var(--sas-surface-blur, var(--sas-workspace-frost, blur(20px))) !important;
+  border-color: rgba(86, 235, 255, 0.72) !important;
+  box-shadow:
+    0 0 24px rgba(0, 224, 255, 0.22),
+    inset 0 1px 1px rgba(190, 252, 255, 0.58),
+    inset 0 -1px 1px rgba(0, 232, 255, 0.40) !important;
+}
+
+.sas-protocol-neon-card,
+.sas-quick-grid button,
+.sas-equipment-hero,
+.sas-protocol-visualization-footer,
+.interview-prep-chapter,
+.iec-equipment-bar,
+.iec-media-legend {
+  background: linear-gradient(180deg, rgba(26, 78, 108, 0.68), rgba(14, 48, 72, 0.80)) !important;
+  border-color: rgba(96, 220, 248, 0.56) !important;
+  box-shadow: inset 0 1px 0 rgba(200, 250, 255, 0.28) !important;
+}
+.interview-prep-chapter:hover,
+.interview-prep-chapter.is-selected {
+  background: linear-gradient(180deg, rgba(0, 210, 245, 0.28), rgba(16, 66, 98, 0.86)) !important;
+  border-color: #42f5ff !important;
+  box-shadow: 0 0 16px rgba(0, 228, 255, 0.34), inset 0 1px 0 rgba(220, 252, 255, 0.42) !important;
+}
+
+.sas-engineering-console {
+  background: transparent !important;
+}
+
+/* 5. ALL Dark-Navy Tailwind Container Cards Across EVERY Header Dropdown Section (369 classes) */
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details):is(
+  .bg-\[\#001c30\],
+  .bg-\[\#010611\]\/88,
+  .bg-\[\#010713\]\/85,
+  .bg-\[\#020812\],
+  .bg-\[\#020A16\],
+  .bg-\[\#020C17\],
+  .bg-\[\#020D19\],
+  .bg-\[\#020E1B\],
+  .bg-\[\#020E1C\],
+  .bg-\[\#020b17\]\/70,
+  .bg-\[\#020b18\],
+  .bg-\[\#020b18\]\/55,
+  .bg-\[\#020d19\],
+  .bg-\[\#020e1b\],
+  .bg-\[\#020e1d\],
+  .bg-\[\#021410\],
+  .bg-\[\#030712\],
+  .bg-\[\#030712\]\/85,
+  .bg-\[\#030712\]\/90,
+  .bg-\[\#030712\]\/92,
+  .bg-\[\#030712\]\/95,
+  .bg-\[\#030914\],
+  .bg-\[\#030A14\],
+  .bg-\[\#030B16\],
+  .bg-\[\#030B17\],
+  .bg-\[\#030B18\],
+  .bg-\[\#030B18\]\/90,
+  .bg-\[\#030C18\],
+  .bg-\[\#030C1A\],
+  .bg-\[\#030D1B\],
+  .bg-\[\#030D1B\]\/90,
+  .bg-\[\#030d1c\],
+  .bg-\[\#030d1d\],
+  .bg-\[\#03101F\],
+  .bg-\[\#03101e\],
+  .bg-\[\#031220\],
+  .bg-\[\#031222\],
+  .bg-\[\#031324\],
+  .bg-\[\#031423\],
+  .bg-\[\#031424\],
+  .bg-\[\#031426\],
+  .bg-\[\#031b2d\],
+  .bg-\[\#040B14\],
+  .bg-\[\#040B16\],
+  .bg-\[\#040C18\],
+  .bg-\[\#040E1C\],
+  .bg-\[\#04101E\],
+  .bg-\[\#04101E\]\/90,
+  .bg-\[\#041024\],
+  .bg-\[\#04111E\],
+  .bg-\[\#041120\],
+  .bg-\[\#041220\],
+  .bg-\[\#041222\],
+  .bg-\[\#041224\],
+  .bg-\[\#041224\]\/90,
+  .bg-\[\#041324\]\/95,
+  .bg-\[\#041421\],
+  .bg-\[\#041424\]\/90,
+  .bg-\[\#041424\]\/95,
+  .bg-\[\#041428\]\/92,
+  .bg-\[\#041525\]\/95,
+  .bg-\[\#041526\],
+  .bg-\[\#041626\],
+  .bg-\[\#041627\],
+  .bg-\[\#041628\],
+  .bg-\[\#041729\],
+  .bg-\[\#041729\]\/90,
+  .bg-\[\#04182B\],
+  .bg-\[\#04182B\]\/90,
+  .bg-\[\#041B2E\],
+  .bg-\[\#041E19\],
+  .bg-\[\#041a2b\],
+  .bg-\[\#04243B\],
+  .bg-\[\#050A12\],
+  .bg-\[\#050B14\],
+  .bg-\[\#050C1A\],
+  .bg-\[\#050e1c\],
+  .bg-\[\#051120\],
+  .bg-\[\#051120\]\/90,
+  .bg-\[\#051221\],
+  .bg-\[\#051323\],
+  .bg-\[\#051324\],
+  .bg-\[\#051425\],
+  .bg-\[\#051527\],
+  .bg-\[\#051527\]\/90,
+  .bg-\[\#051628\],
+  .bg-\[\#051629\],
+  .bg-\[\#051a2c\],
+  .bg-\[\#052035\]\/90,
+  .bg-\[\#05243a\],
+  .bg-\[\#05263c\],
+  .bg-\[\#060B14\],
+  .bg-\[\#060C14\],
+  .bg-\[\#061325\],
+  .bg-\[\#061426\],
+  .bg-\[\#061427\],
+  .bg-\[\#061524\],
+  .bg-\[\#061525\],
+  .bg-\[\#061525\]\/95,
+  .bg-\[\#061526\],
+  .bg-\[\#061628\]\/90,
+  .bg-\[\#061628\]\/95,
+  .bg-\[\#061629\],
+  .bg-\[\#061630\]\/90,
+  .bg-\[\#061725\],
+  .bg-\[\#061726\]\/90,
+  .bg-\[\#061727\],
+  .bg-\[\#061728\],
+  .bg-\[\#061729\],
+  .bg-\[\#061828\],
+  .bg-\[\#06182B\],
+  .bg-\[\#06182C\],
+  .bg-\[\#06182a\],
+  .bg-\[\#061929\],
+  .bg-\[\#06192b\],
+  .bg-\[\#06192c\]\/95,
+  .bg-\[\#061B2E\],
+  .bg-\[\#061a30\],
+  .bg-\[\#061b2c\],
+  .bg-\[\#061b2d\],
+  .bg-\[\#061c30\],
+  .bg-\[\#062036\],
+  .bg-\[\#062038\],
+  .bg-\[\#062238\],
+  .bg-\[\#06223A\],
+  .bg-\[\#06243b\],
+  .bg-\[\#06252c\],
+  .bg-\[\#06263f\],
+  .bg-\[\#062934\]\/85,
+  .bg-\[\#062F3E\],
+  .bg-\[\#062c45\],
+  .bg-\[\#063444\],
+  .bg-\[\#06516b\],
+  .bg-\[\#070B10\],
+  .bg-\[\#070D14\]\/90,
+  .bg-\[\#070E1A\],
+  .bg-\[\#07101B\],
+  .bg-\[\#07111F\],
+  .bg-\[\#07111f\],
+  .bg-\[\#071525\],
+  .bg-\[\#071526\],
+  .bg-\[\#071628\],
+  .bg-\[\#07162B\]\/90,
+  .bg-\[\#071726\],
+  .bg-\[\#071727\],
+  .bg-\[\#071728\],
+  .bg-\[\#07182B\]\/95,
+  .bg-\[\#07192E\],
+  .bg-\[\#07192E\]\/95,
+  .bg-\[\#07192c\],
+  .bg-\[\#071A2E\],
+  .bg-\[\#071D32\],
+  .bg-\[\#071D34\],
+  .bg-\[\#071E2E\],
+  .bg-\[\#071F36\],
+  .bg-\[\#071c30\],
+  .bg-\[\#071c35\],
+  .bg-\[\#071d30\],
+  .bg-\[\#071d38\],
+  .bg-\[\#07202B\],
+  .bg-\[\#072035\],
+  .bg-\[\#072038\],
+  .bg-\[\#072138\],
+  .bg-\[\#072238\],
+  .bg-\[\#07243D\],
+  .bg-\[\#072624\],
+  .bg-\[\#072923\]\/85,
+  .bg-\[\#072924\],
+  .bg-\[\#07332D\]\/50,
+  .bg-\[\#07506A\],
+  .bg-\[\#07516A\],
+  .bg-\[\#081629\],
+  .bg-\[\#08182B\],
+  .bg-\[\#081A30\],
+  .bg-\[\#081C32\],
+  .bg-\[\#081C33\],
+  .bg-\[\#081C3B\]\/90,
+  .bg-\[\#081E35\],
+  .bg-\[\#081E36\],
+  .bg-\[\#081F36\],
+  .bg-\[\#081b2d\],
+  .bg-\[\#081d32\]\/90,
+  .bg-\[\#081e33\],
+  .bg-\[\#082038\],
+  .bg-\[\#082238\],
+  .bg-\[\#08223A\],
+  .bg-\[\#08223C\],
+  .bg-\[\#082240\]\/85,
+  .bg-\[\#08233a\],
+  .bg-\[\#082742\],
+  .bg-\[\#082747\],
+  .bg-\[\#08283b\],
+  .bg-\[\#082B47\],
+  .bg-\[\#082F49\],
+  .bg-\[\#082e46\],
+  .bg-\[\#08324F\],
+  .bg-\[\#08334a\],
+  .bg-\[\#083B5E\],
+  .bg-\[\#083e55\],
+  .bg-\[\#090D16\],
+  .bg-\[\#090E17\],
+  .bg-\[\#091326\],
+  .bg-\[\#091C34\],
+  .bg-\[\#091F34\],
+  .bg-\[\#091F38\],
+  .bg-\[\#091c32\]\/95,
+  .bg-\[\#091d31\],
+  .bg-\[\#091f34\],
+  .bg-\[\#092137\],
+  .bg-\[\#092139\],
+  .bg-\[\#09213A\],
+  .bg-\[\#09213b\],
+  .bg-\[\#09223A\],
+  .bg-\[\#09223C\],
+  .bg-\[\#09243E\],
+  .bg-\[\#092440\],
+  .bg-\[\#092740\],
+  .bg-\[\#092a2a\],
+  .bg-\[\#092a46\],
+  .bg-\[\#092b28\],
+  .bg-\[\#093252\],
+  .bg-\[\#095079\],
+  .bg-\[\#0A1729\],
+  .bg-\[\#0A2246\],
+  .bg-\[\#0A2540\],
+  .bg-\[\#0A4454\],
+  .bg-\[\#0B1119\],
+  .bg-\[\#0B1D30\],
+  .bg-\[\#0B2038\],
+  .bg-\[\#0B2138\],
+  .bg-\[\#0B2239\],
+  .bg-\[\#0B2440\],
+  .bg-\[\#0B2540\],
+  .bg-\[\#0B2948\],
+  .bg-\[\#0B2A42\],
+  .bg-\[\#0B2A46\],
+  .bg-\[\#0B2A46\]\/60,
+  .bg-\[\#0B2D3E\],
+  .bg-\[\#0B3558\],
+  .bg-\[\#0B3B5B\],
+  .bg-\[\#0C2B4B\],
+  .bg-\[\#0D2640\],
+  .bg-\[\#0D2840\],
+  .bg-\[\#0D3156\],
+  .bg-\[\#0D3556\],
+  .bg-\[\#0D3B5E\],
+  .bg-\[\#0E1622\],
+  .bg-\[\#0E294B\],
+  .bg-\[\#0E2B48\],
+  .bg-\[\#0F172A\],
+  .bg-\[\#0F3152\],
+  .bg-\[\#0a2237\],
+  .bg-\[\#0a253a\],
+  .bg-\[\#0a2542\],
+  .bg-\[\#0a273b\],
+  .bg-\[\#0a2b42\],
+  .bg-\[\#0a2d43\],
+  .bg-\[\#0a3247\],
+  .bg-\[\#0a3655\],
+  .bg-\[\#0a4c66\],
+  .bg-\[\#0b2033\],
+  .bg-\[\#0b2038\],
+  .bg-\[\#0b2338\],
+  .bg-\[\#0b2439\],
+  .bg-\[\#0b2539\],
+  .bg-\[\#0b253a\],
+  .bg-\[\#0b263e\],
+  .bg-\[\#0b2b40\],
+  .bg-\[\#0b2b41\],
+  .bg-\[\#0b2b42\],
+  .bg-\[\#0b2b45\],
+  .bg-\[\#0b2c30\],
+  .bg-\[\#0b2d2b\],
+  .bg-\[\#0b302c\],
+  .bg-\[\#0b302e\],
+  .bg-\[\#0b3048\],
+  .bg-\[\#0b3952\],
+  .bg-\[\#0c293e\],
+  .bg-\[\#0c2944\],
+  .bg-\[\#0c2a3f\],
+  .bg-\[\#0c2a49\],
+  .bg-\[\#0c302b\],
+  .bg-\[\#0c3157\],
+  .bg-\[\#0c3451\],
+  .bg-\[\#0d2a49\],
+  .bg-\[\#0d302a\],
+  .bg-\[\#0d3953\],
+  .bg-\[\#10243A\],
+  .bg-\[\#10243A\]\/70,
+  .bg-\[\#10253B\],
+  .bg-\[\#10253B\]\/50,
+  .bg-\[\#10253B\]\/60,
+  .bg-\[\#10283D\],
+  .bg-\[\#102944\],
+  .bg-\[\#102A45\],
+  .bg-\[\#102b4b\],
+  .bg-\[\#103049\],
+  .bg-\[\#10334a\],
+  .bg-\[\#10334c\],
+  .bg-\[\#10344a\],
+  .bg-\[\#103654\],
+  .bg-\[\#103c54\],
+  .bg-\[\#103e55\],
+  .bg-\[\#104E78\],
+  .bg-\[\#113c56\],
+  .bg-\[\#121633\],
+  .bg-\[\#122B40\],
+  .bg-\[\#123247\],
+  .bg-\[\#12334C\],
+  .bg-\[\#12344a\],
+  .bg-\[\#12385d\],
+  .bg-\[\#123B60\],
+  .bg-\[\#123a51\],
+  .bg-\[\#123a52\],
+  .bg-\[\#123b62\],
+  .bg-\[\#123d52\],
+  .bg-\[\#123d54\],
+  .bg-\[\#133558\],
+  .bg-\[\#13425b\],
+  .bg-\[\#13506a\],
+  .bg-\[\#141D28\],
+  .bg-\[\#142244\],
+  .bg-\[\#142A3C\],
+  .bg-\[\#142A3C\]\/40,
+  .bg-\[\#142A3C\]\/50,
+  .bg-\[\#151332\],
+  .bg-\[\#15334A\],
+  .bg-\[\#15546d\],
+  .bg-\[\#163350\],
+  .bg-\[\#164674\],
+  .bg-\[\#173c53\],
+  .bg-\[\#17425a\],
+  .bg-\[\#175371\],
+  .bg-\[\#18132e\],
+  .bg-\[\#181534\],
+  .bg-\[\#182230\],
+  .bg-\[\#183c58\],
+  .bg-\[\#185473\],
+  .bg-\[\#19446c\],
+  .bg-\[\#1A1438\],
+  .bg-\[\#1A2432\],
+  .bg-\[\#1A334B\],
+  .bg-\[\#1E293B\],
+  .bg-\[\#1a4960\],
+  .bg-\[\#244667\],
+  .bg-\[\#25445F\],
+  .bg-\[\#34202c\],
+  .bg-\[\#351e2c\],
+  .bg-\[\#35536C\],
+  .bg-\[\#39212e\],
+  .bg-\[\#475569\],
+  .bg-slate-950,
+  .bg-slate-950\/80,
+  .bg-slate-950\/90,
+  .bg-slate-950\/95,
+  .bg-slate-900,
+  .bg-slate-900\/80,
+  .bg-slate-900\/90,
+  .bg-slate-900\/95,
+  .bg-slate-800,
+  .bg-slate-800\/80,
+  .bg-slate-800\/90,
+  .bg-gray-950,
+  .bg-gray-900,
+  .bg-zinc-950,
+  .bg-zinc-900,
+  .bg-blue-950,
+  .bg-sky-950,
+  .bg-indigo-950
+):not(.sas-landing):not(.sas-landing *) {
+  background: var(--sas-surface-override, var(--sas-workspace-glass, radial-gradient(ellipse 66% 36% at 50% 0%, rgba(72, 238, 255, 0.18) 0%, transparent 72%),
+    linear-gradient(180deg, rgba(22, 74, 104, 0.74) 0%, rgba(14, 52, 78, 0.82) 55%, rgba(10, 42, 64, 0.88) 100%))) !important;
+  backdrop-filter: var(--sas-surface-blur, var(--sas-workspace-frost, blur(18px))) !important;
+  -webkit-backdrop-filter: var(--sas-surface-blur, var(--sas-workspace-frost, blur(18px))) !important;
+  border-color: rgba(86, 235, 255, 0.60) !important;
+  box-shadow:
+    0 0 20px rgba(0, 224, 255, 0.16),
+    inset 0 1px 1px rgba(190, 252, 255, 0.46),
+    inset 0 -1px 1px rgba(0, 232, 255, 0.30) !important;
+}
+
+/* 6. ALL Dark-Navy Tailwind Gradient Containers (45 from-* classes) */
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details):is(
+  .from-\[\#030C1A\]\/80,
+  .from-\[\#051527\],
+  .from-\[\#051a31\],
+  .from-\[\#061325\],
+  .from-\[\#061529\],
+  .from-\[\#06182C\],
+  .from-\[\#062440\],
+  .from-\[\#071629\],
+  .from-\[\#071C30\],
+  .from-\[\#071E2E\],
+  .from-\[\#071b30\],
+  .from-\[\#07263b\],
+  .from-\[\#07304A\],
+  .from-\[\#073b58\],
+  .from-\[\#081A30\],
+  .from-\[\#081D34\],
+  .from-\[\#091526\],
+  .from-\[\#09213A\],
+  .from-\[\#092B43\],
+  .from-\[\#092E50\],
+  .from-\[\#0A2542\],
+  .from-\[\#0E1622\],
+  .from-\[\#0E1A35\],
+  .from-\[\#0E2B48\],
+  .from-\[\#0E2F52\],
+  .from-\[\#0E3A5A\],
+  .from-\[\#0E3F60\],
+  .from-\[\#0F2D69\],
+  .from-\[\#0b3553\],
+  .from-\[\#102E6B\],
+  .from-\[\#104A73\],
+  .from-\[\#131C29\],
+  .from-\[\#141E2B\],
+  .from-\[\#171b23\],
+  .from-\[\#172130\],
+  .from-\[\#1A1438\],
+  .from-\[\#1F2C3D\],
+  .from-\[\#263241\],
+  .from-\[\#2A3748\],
+  .from-\[\#475569\],
+  .from-slate-950,
+  .from-slate-900,
+  .from-slate-800,
+  .from-blue-950,
+  .from-sky-950
+):not(.sas-landing):not(.sas-landing *) {
+  background: var(--sas-surface-override, var(--sas-workspace-glass, radial-gradient(ellipse 66% 36% at 50% 0%, rgba(72, 238, 255, 0.22) 0%, transparent 72%),
+    linear-gradient(180deg, rgba(24, 78, 108, 0.78) 0%, rgba(14, 54, 80, 0.85) 55%, rgba(10, 44, 66, 0.90) 100%))) !important;
+  backdrop-filter: var(--sas-surface-blur, var(--sas-workspace-frost, blur(18px))) !important;
+  -webkit-backdrop-filter: var(--sas-surface-blur, var(--sas-workspace-frost, blur(18px))) !important;
+  border-color: rgba(86, 235, 255, 0.66) !important;
+  box-shadow:
+    0 0 22px rgba(0, 224, 255, 0.18),
+    inset 0 1px 1px rgba(190, 252, 255, 0.50),
+    inset 0 -1px 1px rgba(0, 232, 255, 0.34) !important;
+}
+
+/* 7. ALL Inline-Styled Dark-Navy Panels Across All 91 Files (88 rgb values) */
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(10, 37, 64)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(10, 41, 66)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(10, 44, 71)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(10, 51, 82)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(10, 55, 86)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(11, 30, 51)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(11, 43, 64)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(11, 45, 72)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(11, 49, 80)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(11, 52, 77)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(11, 53, 76)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(12, 40, 84)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(13, 56, 89)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(14, 35, 65)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(14, 61, 96)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(16, 51, 75)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(16, 60, 84)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(2, 11, 22)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(2, 11, 23)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(2, 11, 24)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(3, 11, 24)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(3, 12, 24)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(3, 15, 29)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(3, 16, 31)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(3, 18, 34)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(3, 9, 20)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 16, 30)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 18, 32)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 18, 34)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 19, 34)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 20, 35)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 21, 37)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 21, 38)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 22, 40)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 24, 43)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 25, 45)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 25, 46)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 28, 22)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(4, 40, 61)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(5, 11, 20)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(5, 19, 36)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(5, 20, 38)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(5, 22, 38)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(5, 27, 46)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(5, 36, 58)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 21, 38)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 22, 39)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 22, 40)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 23, 42)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 24, 43)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 24, 44)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 26, 43)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 26, 44)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 26, 46)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 26, 52)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 27, 43)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 27, 48)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 28, 48)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 29, 48)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 34, 56)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 36, 58)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 38, 62)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(6, 40, 66)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(7, 19, 36)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(7, 25, 44)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(7, 26, 46)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(7, 26, 48)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(7, 27, 51)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(7, 30, 50)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(7, 32, 54)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(7, 32, 56)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(7, 34, 56)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(7, 34, 59)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(7, 42, 66)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(8, 26, 48)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(8, 28, 48)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(8, 28, 50)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(8, 29, 63)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(8, 32, 56)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(8, 32, 60)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(8, 34, 56)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(8, 34, 58)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(8, 35, 59)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(8, 39, 66)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(8, 40, 61)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(9, 36, 62)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(9, 42, 64)"],
+.sas-workspace-main :is(div, section, article, aside, header, nav, form, details)[style*="rgb(9, 44, 72)"] {
+  background: var(--sas-surface-override, var(--sas-workspace-glass, radial-gradient(ellipse 66% 36% at 50% 0%, rgba(72, 238, 255, 0.20) 0%, transparent 72%),
+    linear-gradient(180deg, rgba(22, 74, 104, 0.76) 0%, rgba(14, 52, 78, 0.84) 55%, rgba(10, 42, 64, 0.88) 100%))) !important;
+  backdrop-filter: var(--sas-surface-blur, var(--sas-workspace-frost, blur(18px))) !important;
+  -webkit-backdrop-filter: var(--sas-surface-blur, var(--sas-workspace-frost, blur(18px))) !important;
+  border-color: rgba(86, 235, 255, 0.64) !important;
+  box-shadow:
+    0 0 22px rgba(0, 224, 255, 0.18),
+    inset 0 1px 1px rgba(190, 252, 255, 0.48),
+    inset 0 -1px 1px rgba(0, 232, 255, 0.34) !important;
+}
+
+/* 8. Universal Coverage for Rounded Bordered Cards (Fixed chained :not without whitespace!) */
+.sas-workspace-main :is(div, section, article, aside, header, form, details):is(.rounded-2xl.border, .rounded-2xl.border-2, .rounded-xl.border, .rounded-xl.border-2):not([class*="border-[#22C55E]"]):not([class*="border-[#EF4444]"]):not([class*="border-[#F59E0B]"]):not([class*="border-[#FF"]):not([class*="border-red"]):not([class*="border-emerald"]):not([class*="border-green"]):not([class*="border-amber"]):not([class*="border-yellow"]):not([class*="bg-[#06291E]"]):not([class*="bg-[#062E20]"]):not([class*="bg-[#062C1E]"]):not([class*="bg-[#3B0D15]"]):not([class*="bg-[#330C17]"]):not([class*="bg-[#2B1F08]"]):not([class*="bg-[#2B1D06]"]):not([class*="bg-[#2D1D06]"]):not([class*="bg-[#2E1065]"]):not([class*="bg-emerald"]):not([class*="bg-green"]):not([class*="bg-red"]):not([class*="bg-amber"]):not([class*="bg-yellow"]) {
+  background: var(--sas-surface-override, var(--sas-workspace-glass, radial-gradient(ellipse 66% 36% at 50% 0%, rgba(72, 238, 255, 0.18) 0%, transparent 72%),
+    linear-gradient(180deg, rgba(22, 74, 104, 0.74) 0%, rgba(14, 52, 78, 0.82) 55%, rgba(10, 42, 64, 0.88) 100%))) !important;
+  backdrop-filter: var(--sas-surface-blur, var(--sas-workspace-frost, blur(18px))) !important;
+  -webkit-backdrop-filter: var(--sas-surface-blur, var(--sas-workspace-frost, blur(18px))) !important;
+  border-color: rgba(86, 235, 255, 0.62) !important;
+  box-shadow:
+    0 0 20px rgba(0, 224, 255, 0.16),
+    inset 0 1px 1px rgba(190, 252, 255, 0.46),
+    inset 0 -1px 1px rgba(0, 232, 255, 0.30) !important;
+}
+
+/* 9. Global Frosted Glass Tables & Sticky Headers Across All Pages */
+.sas-workspace-main table thead th {
+  background: linear-gradient(180deg, rgba(8, 34, 53, .76), rgba(4, 21, 38, .80)) !important;
+  color: #f0faff !important;
+  border-bottom: 1px solid rgba(120, 218, 245, 0.44) !important;
+}
+.sas-workspace-main table tbody tr {
+  border-color: rgba(130, 210, 238, 0.20) !important;
+}
+.sas-workspace-main table tbody tr:hover {
+  background: rgba(25, 100, 136, 0.44) !important;
+}
+
+/* 10. Global Frosted Glass Inputs, Selects & Textareas */
+.sas-workspace-main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.sas-workspace-main select,
+.sas-workspace-main textarea,
+.sas-top-search input {
+  background: rgba(10, 42, 64, 0.80) !important;
+  border-color: rgba(100, 224, 248, 0.56) !important;
+  color: #f0faff !important;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.35) !important;
+}
+.sas-workspace-main input:focus,
+.sas-workspace-main select:focus,
+.sas-workspace-main textarea:focus {
+  border-color: #3cf4ff !important;
+  box-shadow: 0 0 0 2px rgba(56, 243, 255, 0.28) !important;
+  outline: none !important;
+}
+
+/* 11. Unify Dark SVG Diagram Backdrops Across SLD, SCADA, Labs & Signal Chain (107 fills) */
+.sas-workspace-main svg rect[fill="#002239"],
+.sas-workspace-main svg rect[fill="#030A12"],
+.sas-workspace-main svg rect[fill="#030B16"],
+.sas-workspace-main svg rect[fill="#030a12"],
+.sas-workspace-main svg rect[fill="#030b16"],
+.sas-workspace-main svg rect[fill="#031221"],
+.sas-workspace-main svg rect[fill="#04111E"],
+.sas-workspace-main svg rect[fill="#04111e"],
+.sas-workspace-main svg rect[fill="#041423"],
+.sas-workspace-main svg rect[fill="#041525"],
+.sas-workspace-main svg rect[fill="#041526"],
+.sas-workspace-main svg rect[fill="#04192C"],
+.sas-workspace-main svg rect[fill="#04192c"],
+.sas-workspace-main svg rect[fill="#04243B"],
+.sas-workspace-main svg rect[fill="#04243b"],
+.sas-workspace-main svg rect[fill="#050D17"],
+.sas-workspace-main svg rect[fill="#050d17"],
+.sas-workspace-main svg rect[fill="#051321"],
+.sas-workspace-main svg rect[fill="#052138"],
+.sas-workspace-main svg rect[fill="#052338"],
+.sas-workspace-main svg rect[fill="#052C32"],
+.sas-workspace-main svg rect[fill="#052c32"],
+.sas-workspace-main svg rect[fill="#061B2E"],
+.sas-workspace-main svg rect[fill="#061D2E"],
+.sas-workspace-main svg rect[fill="#061D30"],
+.sas-workspace-main svg rect[fill="#061b2e"],
+.sas-workspace-main svg rect[fill="#061d2e"],
+.sas-workspace-main svg rect[fill="#061d30"],
+.sas-workspace-main svg rect[fill="#062236"],
+.sas-workspace-main svg rect[fill="#062238"],
+.sas-workspace-main svg rect[fill="#071525"],
+.sas-workspace-main svg rect[fill="#071726"],
+.sas-workspace-main svg rect[fill="#071B33"],
+.sas-workspace-main svg rect[fill="#071b33"],
+.sas-workspace-main svg rect[fill="#080E18"],
+.sas-workspace-main svg rect[fill="#080e18"],
+.sas-workspace-main svg rect[fill="#08101A"],
+.sas-workspace-main svg rect[fill="#08101a"],
+.sas-workspace-main svg rect[fill="#081629"],
+.sas-workspace-main svg rect[fill="#081A2A"],
+.sas-workspace-main svg rect[fill="#081A30"],
+.sas-workspace-main svg rect[fill="#081a2a"],
+.sas-workspace-main svg rect[fill="#081a30"],
+.sas-workspace-main svg rect[fill="#082038"],
+.sas-workspace-main svg rect[fill="#08233D"],
+.sas-workspace-main svg rect[fill="#08233d"],
+.sas-workspace-main svg rect[fill="#08243B"],
+.sas-workspace-main svg rect[fill="#08243b"],
+.sas-workspace-main svg rect[fill="#08283D"],
+.sas-workspace-main svg rect[fill="#08283d"],
+.sas-workspace-main svg rect[fill="#091728"],
+.sas-workspace-main svg rect[fill="#091A2B"],
+.sas-workspace-main svg rect[fill="#091E34"],
+.sas-workspace-main svg rect[fill="#091a2b"],
+.sas-workspace-main svg rect[fill="#091e34"],
+.sas-workspace-main svg rect[fill="#0A2740"],
+.sas-workspace-main svg rect[fill="#0A2842"],
+.sas-workspace-main svg rect[fill="#0A3352"],
+.sas-workspace-main svg rect[fill="#0A335C"],
+.sas-workspace-main svg rect[fill="#0B192C"],
+.sas-workspace-main svg rect[fill="#0B1D33"],
+.sas-workspace-main svg rect[fill="#0B3B68"],
+.sas-workspace-main svg rect[fill="#0C4261"],
+.sas-workspace-main svg rect[fill="#0D2335"],
+.sas-workspace-main svg rect[fill="#0D2844"],
+.sas-workspace-main svg rect[fill="#0D2A47"],
+.sas-workspace-main svg rect[fill="#0D3154"],
+.sas-workspace-main svg rect[fill="#0F172A"],
+.sas-workspace-main svg rect[fill="#0F1E30"],
+.sas-workspace-main svg rect[fill="#0a2740"],
+.sas-workspace-main svg rect[fill="#0a2842"],
+.sas-workspace-main svg rect[fill="#0a3352"],
+.sas-workspace-main svg rect[fill="#0a335c"],
+.sas-workspace-main svg rect[fill="#0b192c"],
+.sas-workspace-main svg rect[fill="#0b1d33"],
+.sas-workspace-main svg rect[fill="#0b3b68"],
+.sas-workspace-main svg rect[fill="#0c4261"],
+.sas-workspace-main svg rect[fill="#0d2335"],
+.sas-workspace-main svg rect[fill="#0d2844"],
+.sas-workspace-main svg rect[fill="#0d2a47"],
+.sas-workspace-main svg rect[fill="#0d3154"],
+.sas-workspace-main svg rect[fill="#0f172a"],
+.sas-workspace-main svg rect[fill="#0f1e30"],
+.sas-workspace-main svg rect[fill="#101E2C"],
+.sas-workspace-main svg rect[fill="#101E33"],
+.sas-workspace-main svg rect[fill="#101e2c"],
+.sas-workspace-main svg rect[fill="#101e33"],
+.sas-workspace-main svg rect[fill="#102238"],
+.sas-workspace-main svg rect[fill="#102B47"],
+.sas-workspace-main svg rect[fill="#102b47"],
+.sas-workspace-main svg rect[fill="#1E293B"],
+.sas-workspace-main svg rect[fill="#1F2E3D"],
+.sas-workspace-main svg rect[fill="#1e293b"],
+.sas-workspace-main svg rect[fill="#1f2e3d"],
+.sas-workspace-main svg rect[fill="#263847"],
+.sas-workspace-main svg rect[fill="#2B3944"],
+.sas-workspace-main svg rect[fill="#2b3944"],
+.sas-workspace-main svg rect[fill="#334155"],
+.sas-workspace-main svg rect[fill="#384A58"],
+.sas-workspace-main svg rect[fill="#384a58"],
+.sas-workspace-main svg rect[fill="#3B4D5E"],
+.sas-workspace-main svg rect[fill="#3b4d5e"],
+.sas-workspace-main svg rect[fill="#41677C"],
+.sas-workspace-main svg rect[fill="#41677c"],
+.sas-workspace-main svg rect[fill="#475569"],
+.sas-workspace-main svg rect[fill="#4C6370"],
+.sas-workspace-main svg rect[fill="#4c6370"] {
+  fill: rgba(12, 46, 70, 0.72) !important;
+}
+
+/* 12. High-Contrast Crisp Readability — Upgrade ALL Dim Grey & Muted Slate Text Across Every Page & Dropdown */
+.sas-app-shell :is(
+  .text-\[\#0EA5E9\],
+  .text-\[\#168BFF\],
+  .text-\[\#386186\],
+  .text-\[\#38BDF8\],
+  .text-\[\#60A5FA\],
+  .text-\[\#6C92B4\],
+  .text-\[\#7B9BB8\],
+  .text-\[\#7FA6C4\],
+  .text-\[\#84ACC8\],
+  .text-\[\#84B2D6\],
+  .text-\[\#8AB4D4\],
+  .text-\[\#8BB3D4\],
+  .text-\[\#8BBCE0\],
+  .text-\[\#8CA9BD\],
+  .text-\[\#8CC5E8\],
+  .text-\[\#8CD5F7\],
+  .text-\[\#8FAFC8\],
+  .text-\[\#8FB6D6\],
+  .text-\[\#91AFC5\],
+  .text-\[\#93C5FD\],
+  .text-\[\#94A3B8\],
+  .text-\[\#94B8D7\],
+  .text-\[\#9BB8D3\],
+  .text-\[\#9BC0DF\],
+  .text-\[\#9BD3EC\],
+  .text-\[\#9BD8F4\],
+  .text-\[\#9CC2E3\],
+  .text-\[\#9CC4E4\],
+  .text-\[\#9ED8F6\],
+  .text-\[\#9bbdd2\],
+  .text-\[\#9fe8f6\],
+  .text-\[\#A6C5D9\],
+  .text-\[\#A8C6DF\],
+  .text-\[\#A9C6D9\],
+  .text-\[\#A9C7DF\],
+  .text-\[\#B5CDDF\],
+  .text-\[\#B8D4EA\],
+  .text-\[\#B8D7F0\],
+  .text-\[\#B8D8EA\],
+  .text-\[\#BAE6FD\],
+  .text-\[\#C4DDF2\],
+  .text-\[\#C4E2F2\],
+  .text-\[\#C8E0F4\],
+  .text-\[\#a3c2d8\],
+  .text-\[\#a5c1d7\],
+  .text-\[\#a5c7d9\],
+  .text-\[\#a6c6dd\],
+  .text-\[\#a9d3e4\],
+  .text-\[\#aac8da\],
+  .text-\[\#b5d2e9\],
+  .text-\[\#b5d5e7\],
+  .text-\[\#b5d6ed\],
+  .text-\[\#b9d4e7\],
+  .text-\[\#bcd9e9\],
+  .text-\[\#bdd5e8\],
+  .text-\[\#bdd6e8\],
+  .text-\[\#bde3f5\],
+  .text-\[\#bed7eb\],
+  .text-\[\#c2d9ed\],
+  .text-\[\#c2daec\],
+  .text-\[\#c3daed\],
+  .text-\[\#c4daeb\],
+  .text-\[\#c4dced\],
+  .text-\[\#c5ddeb\],
+  .text-\[\#c5e2f1\],
+  .text-\[\#c7dced\],
+  .text-\[\#c9deec\],
+  .text-slate-300,
+  .text-slate-400,
+  .text-slate-500,
+  .text-slate-600,
+  .text-slate-300\/80,
+  .text-slate-300\/90,
+  .text-slate-400\/80,
+  .text-slate-400\/90,
+  .text-gray-300,
+  .text-gray-400,
+  .text-gray-500,
+  .text-gray-600,
+  .text-zinc-300,
+  .text-zinc-400,
+  .text-zinc-500,
+  .text-neutral-300,
+  .text-neutral-400,
+  .text-neutral-500,
+  .text-white\/60,
+  .text-white\/70,
+  .text-white\/75,
+  .text-white\/80
+):not(.sas-landing):not(.sas-landing *) {
+  color: #e6f5ff !important;
+  text-shadow: 0 1px 2px rgba(2, 16, 28, 0.50);
+}
+
+.sas-app-shell [style*="color: rgb(104, 168, 200)"],
+.sas-app-shell [style*="color: rgb(122, 178, 208)"],
+.sas-app-shell [style*="color: rgb(134, 167, 185)"],
+.sas-app-shell [style*="color: rgb(137, 199, 232)"],
+.sas-app-shell [style*="color: rgb(138, 169, 188)"],
+.sas-app-shell [style*="color: rgb(145, 178, 196)"],
+.sas-app-shell [style*="color: rgb(145, 184, 202)"],
+.sas-app-shell [style*="color: rgb(145, 185, 207)"],
+.sas-app-shell [style*="color: rgb(146, 184, 205)"],
+.sas-app-shell [style*="color: rgb(147, 180, 201)"],
+.sas-app-shell [style*="color: rgb(155, 186, 208)"],
+.sas-app-shell [style*="color: rgb(155, 208, 238)"],
+.sas-app-shell [style*="color: rgb(155, 216, 237)"],
+.sas-app-shell [style*="color: rgb(156, 203, 228)"],
+.sas-app-shell [style*="color: rgb(157, 187, 207)"],
+.sas-app-shell [style*="color: rgb(159, 199, 216)"],
+.sas-app-shell [style*="color: rgb(161, 184, 200)"],
+.sas-app-shell [style*="color: rgb(168, 203, 224)"],
+.sas-app-shell [style*="color: rgb(180, 217, 233)"],
+.sas-app-shell [style*="color: rgb(184, 213, 228)"],
+.sas-app-shell [style*="color: rgb(186, 230, 253)"],
+.sas-app-shell [style*="color: rgb(187, 230, 255)"],
+.sas-app-shell [style*="color: rgb(191, 219, 254)"],
+.sas-app-shell [style*="color: rgb(192, 217, 233)"],
+.sas-app-shell [style*="color: rgb(59, 130, 246)"] {
+  color: #e6f5ff !important;
+  text-shadow: 0 1px 2px rgba(2, 16, 28, 0.50);
+}
+
+/* Upgrade muted labels, paragraphs, captions, placeholders, table cells & named CSS page text */
+.sas-app-shell .sas-kpi span,
+.sas-app-shell .sas-panel-details,
+.sas-app-shell .sas-panel-details p,
+.sas-app-shell .sas-app-footer,
+.sas-app-shell .sas-app-footer span,
+.sas-app-shell .sas-top-dropdown-item,
+.sas-app-shell .osi-page,
+.sas-app-shell .osi-hero p,
+.sas-app-shell .osi-hero h1 span,
+.sas-app-shell .osi-caption,
+.sas-app-shell .osi-note,
+.sas-app-shell .interview-prep-hero p,
+.sas-app-shell .interview-prep-chapter,
+.sas-app-shell .iec-media-legend span,
+.sas-app-shell .sas-profile-menu p {
+  color: #e8f6ff !important;
+}
+
+/* Crisp default readable base color for paragraphs & table cells without overriding green/red/amber/cyan semantic badges */
+.sas-app-shell .sas-workspace-main table td,
+.sas-app-shell .sas-workspace-main p {
+  color: #e8f6ff;
+}
+
+.sas-app-shell .osi-page {
+  --osi-muted: #dcf2ff !important;
+}
+
+.sas-app-shell input::placeholder,
+.sas-app-shell textarea::placeholder {
+  color: #bfe4f7 !important;
+  opacity: 1 !important;
+}
+
+/* SVG subtle grey text labels inside diagrams (preserve bright colored labels) */
+.sas-workspace-main svg text[fill="#64748b"],
+.sas-workspace-main svg text[fill="#64748B"],
+.sas-workspace-main svg text[fill="#7a94a8"],
+.sas-workspace-main svg text[fill="#7A94A8"],
+.sas-workspace-main svg text[fill="#829cb0"],
+.sas-workspace-main svg text[fill="#829CB0"],
+.sas-workspace-main svg text[fill="#8bb3d4"],
+.sas-workspace-main svg text[fill="#8BB3D4"],
+.sas-workspace-main svg text[fill="#8fafc8"],
+.sas-workspace-main svg text[fill="#8FAFC8"],
+.sas-workspace-main svg text[fill="#94a3b8"],
+.sas-workspace-main svg text[fill="#94A3B8"],
+.sas-workspace-main svg text[fill="#94b8d7"],
+.sas-workspace-main svg text[fill="#94B8D7"] {
+  fill: #e8f6ff !important;
+}
+
+/* Substation panorama and angled trim for the application header. */
+.sas-app-shell .sas-app-header {
+  --sas-header-logo-area: 12.5%;
+  --sas-header-tools-area: 18%;
+  isolation: isolate;
+  background: linear-gradient(180deg, #073253, #02182c) !important;
+  border-bottom: 1px solid #00ddf7 !important;
+  border-radius: 0 0 13px 13px;
+  box-shadow: 0 3px 14px #00cbe128, inset 0 -1px 0 #00e7ff58 !important;
+}
+
+.sas-app-shell .sas-app-header::before,
+.sas-app-shell .sas-app-header::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.sas-app-shell .sas-app-header::before {
+  inset: 0 var(--sas-header-tools-area) 0 var(--sas-header-logo-area);
+  clip-path: polygon(48px 0, 100% 0, calc(100% - 48px) 100%, 0 100%);
+  background:
+    linear-gradient(90deg, #1687b345, #032842d9 19%, #032842e6 80%, #dd72251c 98%),
+    linear-gradient(0deg, #02182c77, transparent 72%),
+    url("/assets/academy/module01-banner.jpg") center 59% / cover no-repeat;
+}
+
+.sas-app-shell .sas-app-header::after {
+  inset: 0 calc(var(--sas-header-tools-area) + 24px) 0 calc(var(--sas-header-logo-area) + 24px);
+  transform: skewX(-32deg);
+  background: linear-gradient(90deg,
+    #078fbc 0 11px, #00e6ff 11px 19px, #00c8ed66 19px 22px, transparent 22px,
+    transparent calc(100% - 3px), #35ecff calc(100% - 3px));
+}
+
+.sas-app-shell .sas-app-header .sas-top-brand .sas-shared-brand-title {
+  font-family: system-ui, sans-serif;
+  font-size: clamp(14px, 1.34vw, 22px);
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: -.027em;
+  color: #8ef5dc;
+  filter: drop-shadow(0 0 5px #35e7be54);
+  animation: none !important;
+}
+
+@supports (background-clip: text) {
+  .sas-app-shell .sas-app-header .sas-top-brand .sas-shared-brand-title {
+    background: linear-gradient(105deg, #d6fcff, #48e8f0 26%, #60ffc5 58%, #ddff8a);
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+.sas-app-shell .sas-app-header .sas-top-brand > span:nth-child(2) > span:last-child {
+  color: #8ef5dc;
+  font-size: 9px;
+  letter-spacing: .34em;
+}
+
+.sas-app-shell .sas-app-header .sas-top-brand .sas-shared-brand-icon {
+  border-color: #91f7e0;
+  background: radial-gradient(ellipse at 80% 90%, #14b39275, transparent 72%), #071c34;
+  box-shadow: inset 0 0 9px #10d1c453, 0 0 14px #2adabd52, 3px 2px 12px #63ffd24d;
+}
+
+.sas-app-shell .sas-app-header .sas-top-brand .sas-shared-brand-icon svg {
+  color: #dfffee;
+  filter: drop-shadow(0 0 4px #3dfadc) drop-shadow(2px 1px 6px #1a9fe5);
+  transform: scaleX(.76);
+}
+
+@media (max-width: 700px) {
+  .sas-app-shell .sas-app-header .sas-top-brand > span:nth-child(2) > span:last-child {
+    font-size: 7px;
+    letter-spacing: .23em;
+  }
+}
+
+.sas-app-shell .sas-app-header .sas-top-group-trigger {
+  color: #f1f9ff;
+  background: linear-gradient(180deg, #164b6cdb, #042238ed) !important;
+  border-color: #5ba5c58a !important;
+  box-shadow: inset 0 1px 0 #d0f8ff20, 0 2px 5px #00152455 !important;
+  border-radius: 10px;
+}
+
+.sas-app-shell .sas-app-header .sas-top-group-trigger.is-active,
+.sas-app-shell .sas-app-header .sas-top-group-trigger:hover {
+  color: #f1fcff !important;
+  background: linear-gradient(180deg, #0a6083, #07344f) !important;
+  border-color: #20e0fc !important;
+  box-shadow: 0 0 11px #00dcfa39, inset 0 1px 0 #b2faff38 !important;
+}
+
+.sas-app-shell .sas-app-header :is(button, input):focus-visible {
+  outline: 2px solid #66f0ff;
+  outline-offset: 2px;
+}
+
+.sas-app-shell .sas-app-header .sas-top-search input {
+  height: 35px;
+  border-color: #4287a8;
+  background: #041c30ed;
+  font-size: 11px;
+}
+
+@media (min-width: 1280px) {
+  .sas-app-shell .sas-app-header {
+    --sas-header-logo-area: 11.8%;
+  }
+
+  .sas-app-shell .sas-app-header::before {
+    /* Light the artwork at the edges while leaving the navigation readable. */
+    background:
+      linear-gradient(90deg, transparent 4%, #063554 13%, #042b47 47%, #06324f 83%, transparent 100%),
+      linear-gradient(0deg, #031629a3, transparent 32%),
+      radial-gradient(ellipse at 97% 72%, #ffc653e0, #f8a73879 26%, transparent 63%) right / 168px 100% no-repeat,
+      radial-gradient(ellipse at 64% 35%, #3396c8, #12567d 58%, #083653 92%) left / 193px 100% no-repeat,
+      url("/assets/academy/module01-banner.jpg") right -15px bottom / 410px 94% no-repeat,
+      #042c49;
+  }
+
+  .sas-app-shell .sas-app-header .sas-header-single-row::before {
+    /* The transparent tower asset provides a full-height silhouette at the brand edge. */
+    content: "";
+    position: absolute;
+    z-index: -1;
+    pointer-events: none;
+    inset: 0 auto 4px calc(var(--sas-header-logo-area) + 37px);
+    width: 96px;
+    background: #001a2c;
+    mask:
+      url("/assets/iec/tower.png") left 11px bottom / 54px auto no-repeat,
+      url("/assets/iec/tower.png") right 7px bottom / 34px auto no-repeat;
+  }
+
+  .sas-app-shell .sas-app-header .sas-header-single-row {
+    min-height: 72px;
+    gap: clamp(8px, .75vw, 13px);
+    padding-inline: clamp(14px, 1.17vw, 22px);
+  }
+
+  .sas-app-shell .sas-app-header .sas-top-navigation {
+    padding-left: clamp(8px, calc((100vw - 1280px) * .346), 126px);
+    border: 0;
+    background: transparent;
+  }
+
+  .sas-app-shell .sas-app-header .sas-top-groups {
+    gap: clamp(5px, .61vw, 10px);
+  }
+
+  .sas-app-shell .sas-app-header .sas-top-group-trigger {
+    min-height: 36px;
+    padding: 7px clamp(4px, .43vw, 8px);
+    font-size: clamp(9.5px, .63vw, 11px);
+    gap: 4px;
+  }
+
+  .sas-app-shell .sas-app-header .sas-top-group-trigger > svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .sas-app-shell .sas-app-header .sas-top-group-trigger > svg:last-child:not(:first-child) {
+    width: 11px;
+    height: 11px;
+  }
+
+  .sas-app-shell .sas-app-header .sas-top-search {
+    flex: 0 1 clamp(108px, 9.6vw, 165px);
+    width: clamp(108px, 9.6vw, 165px);
+  }
+
+  .sas-app-shell .sas-app-header .sas-header-actions {
+    gap: clamp(3px, .3vw, 6px);
+  }
+
+  .sas-app-shell .sas-app-header .sas-header-actions > div > button:is(
+    [aria-label="Notifications and announcements"], [aria-label="Open settings"]
+  ) {
+    padding: 5px;
+  }
+
+  .sas-app-shell .sas-app-header .sas-header-actions > div > button[aria-label="Account options"] {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1399px) {
+  .sas-app-shell .sas-app-header .sas-top-groups {
+    gap: 4px;
+  }
+
+  .sas-app-shell .sas-app-header .sas-top-group-trigger {
+    padding-inline: 4px;
+    gap: 4px;
+  }
+
+  .sas-app-shell .sas-app-header .sas-top-group-trigger > svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .sas-app-shell .sas-app-header .sas-top-group-trigger > svg:last-child:not(:first-child) {
+    width: 9px;
+    height: 9px;
+  }
+}
+
+@media (max-width: 1279px) {
+  .sas-app-shell .sas-app-header {
+    --sas-header-logo-area: 23%;
+    --sas-header-tools-area: 11%;
+  }
+
+  .sas-app-shell .sas-app-header .sas-header-single-row {
+    gap: clamp(5px, 1vw, 12px);
+  }
+
+  .sas-app-shell .sas-app-header .sas-top-navigation {
+    padding-inline: 10px;
+  }
+
+  .sas-app-shell .sas-app-header::before {
+    opacity: .55;
+  }
+
+  .sas-app-shell .sas-app-header::after {
+    opacity: .4;
+  }
+}
+
+@media (max-width: 520px) {
+  .sas-app-shell .sas-app-header::before {
+    opacity: .22;
+  }
+
+  .sas-app-shell .sas-app-header::after {
+    display: none;
+  }
+}

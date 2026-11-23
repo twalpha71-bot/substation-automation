@@ -33,77 +33,6 @@ import {
   Zap,
 } from 'lucide-react';
 
-// Embedded twilight 132/33/11 kV substation switchyard SVG backdrop so the photorealistic substation
-// scene renders reliably in both local Vite dev/build and sandboxed Canvas environments.
-const SUBSTATION_BG_SVG = `data:image/svg+xml;utf8,` + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
-  <defs>
-    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#020916"/>
-      <stop offset="42%" stop-color="#071d3b"/>
-      <stop offset="68%" stop-color="#14385c"/>
-      <stop offset="84%" stop-color="#4e3848"/>
-      <stop offset="93%" stop-color="#9e5a3c"/>
-      <stop offset="100%" stop-color="#051324"/>
-    </linearGradient>
-    <radialGradient id="sunGlow" cx="0.32" cy="0.82" r="0.38">
-      <stop offset="0%" stop-color="#ffb347" stop-opacity="0.72"/>
-      <stop offset="45%" stop-color="#ff6b22" stop-opacity="0.28"/>
-      <stop offset="100%" stop-color="#030d1b" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="lampGlow" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0%" stop-color="#fff4c2" stop-opacity="0.95"/>
-      <stop offset="35%" stop-color="#00d9ff" stop-opacity="0.45"/>
-      <stop offset="100%" stop-color="#00d9ff" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <rect width="1600" height="900" fill="url(#sky)"/>
-  <rect width="1600" height="900" fill="url(#sunGlow)"/>
-  <!-- Ground horizon -->
-  <rect x="0" y="740" width="1600" height="160" fill="#030b16"/>
-  <line x1="0" y1="740" x2="1600" y2="740" stroke="#00cfff" stroke-opacity="0.35" stroke-width="2"/>
-  <!-- High-voltage transmission lines -->
-  <g stroke="#77e7ff" stroke-opacity="0.28" stroke-width="1.5" fill="none">
-    <path d="M 80 280 Q 420 355 780 300 T 1480 270"/>
-    <path d="M 80 340 Q 420 410 780 355 T 1480 325"/>
-    <path d="M 80 400 Q 420 465 780 410 T 1480 380"/>
-  </g>
-  <!-- Left 132 kV Lattice Tower -->
-  <g stroke="#061526" stroke-width="4" fill="none">
-    <polygon points="150,740 230,210 260,210 340,740" stroke="#102c48" stroke-width="5"/>
-    <line x1="175" y1="580" x2="315" y2="580" stroke="#153a5e" stroke-width="4"/>
-    <line x1="190" y1="450" x2="300" y2="450" stroke="#153a5e" stroke-width="4"/>
-    <line x1="205" y1="330" x2="285" y2="330" stroke="#153a5e" stroke-width="4"/>
-    <line x1="130" y1="275" x2="360" y2="275" stroke="#19466f" stroke-width="5"/>
-    <line x1="115" y1="345" x2="375" y2="345" stroke="#19466f" stroke-width="5"/>
-    <line x1="135" y1="415" x2="355" y2="415" stroke="#19466f" stroke-width="5"/>
-    <line x1="150" y1="740" x2="315" y2="580" stroke="#123252" stroke-width="2.5"/>
-    <line x1="340" y1="740" x2="175" y2="580" stroke="#123252" stroke-width="2.5"/>
-    <line x1="175" y1="580" x2="300" y2="450" stroke="#123252" stroke-width="2.5"/>
-    <line x1="315" y1="580" x2="190" y2="450" stroke="#123252" stroke-width="2.5"/>
-  </g>
-  <!-- Right 132 kV Portal Gantry & Transformers -->
-  <g stroke="#143a5c" stroke-width="4" fill="none">
-    <rect x="1160" y="340" width="28" height="400" fill="#091e34"/>
-    <rect x="1420" y="340" width="28" height="400" fill="#091e34"/>
-    <rect x="1130" y="340" width="350" height="24" fill="#0d2a47"/>
-  </g>
-  <!-- Illuminated Substation Transformers & Switchgear Cubicles -->
-  <g>
-    <rect x="160" y="610" width="190" height="130" rx="6" fill="#082038" stroke="#00cfff" stroke-opacity="0.55" stroke-width="2"/>
-    <rect x="180" y="628" width="38" height="95" fill="#0d3154" stroke="#38bdf8" stroke-opacity="0.5"/>
-    <rect x="232" y="628" width="38" height="95" fill="#0d3154" stroke="#38bdf8" stroke-opacity="0.5"/>
-    <rect x="284" y="628" width="38" height="95" fill="#0d3154" stroke="#38bdf8" stroke-opacity="0.5"/>
-    <rect x="1180" y="595" width="230" height="145" rx="6" fill="#082038" stroke="#00cfff" stroke-opacity="0.55" stroke-width="2"/>
-    <rect x="1205" y="615" width="52" height="105" fill="#0d3154" stroke="#38bdf8" stroke-opacity="0.5"/>
-    <rect x="1272" y="615" width="52" height="105" fill="#0d3154" stroke="#38bdf8" stroke-opacity="0.5"/>
-    <rect x="1339" y="615" width="52" height="105" fill="#0d3154" stroke="#38bdf8" stroke-opacity="0.5"/>
-  </g>
-  <!-- Floodlight Halos -->
-  <circle cx="255" cy="590" r="85" fill="url(#lampGlow)"/>
-  <circle cx="1295" cy="575" r="95" fill="url(#lampGlow)"/>
-  <circle cx="490" cy="650" r="65" fill="url(#lampGlow)"/>
-</svg>`);
-
 export const AuthPortalPage: React.FC<{
   initialMode?: 'SIGN_IN' | 'SIGN_UP' | 'FORGOT_PASSWORD';
   isModal?: boolean;
@@ -229,21 +158,7 @@ export const AuthPortalPage: React.FC<{
           <X className="w-4 h-4" />
         </button>
       )}
-      {/* Photorealistic electrical substation background with SVG fallback */}
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{ backgroundImage: `url("${SUBSTATION_BG_SVG}")` }}
-      />
-      <img
-        src="assets/substation/substation_hero_opt.jpg"
-        alt=""
-        aria-hidden="true"
-        onError={(e) => {
-          (e.currentTarget as HTMLImageElement).style.display = 'none';
-        }}
-        className="absolute inset-0 h-full w-full object-cover object-center opacity-65 pointer-events-none"
-      />
-      <div className="absolute inset-0 bg-gradient-to-b from-[#030C1A]/80 via-[#041428]/70 to-[#020914]/90 pointer-events-none" />
+      <div className="sas-auth-artwork absolute inset-0 pointer-events-none" aria-hidden="true" />
 
       {/* Centered Dark Navy Login / Registration / Forgot Password Panel matching reference image */}
       <div className="relative z-10 w-full max-w-[440px] rounded-2xl border border-[#00CFFF]/60 bg-[#051527]/90 backdrop-blur-md px-6 py-7 sm:px-8 sm:py-8 shadow-[0_0_40px_rgba(0,207,255,0.22)] space-y-5">

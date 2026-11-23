@@ -6,7 +6,6 @@ import { useSubstationStore } from '../simulation/useSubstationStore';
 import { getBayProtocolBreakdown } from '../data/protocolRegistry';
 import { BayEquipment, VendorName } from '../types/substation';
 import { BreakerControlDrawer } from '../components/BreakerControlDrawer';
-import { Substation3DScene } from '../components/Substation3DScene';
 import { createPortal } from 'react-dom';
 import {
   Filter,
@@ -29,6 +28,8 @@ import {
   Box,
   X,
 } from 'lucide-react';
+
+const Substation3DScene = React.lazy(() => import('../components/Substation3DScene').then(module => ({ default: module.Substation3DScene })));
 
 export const SldWorkspacePage: React.FC = () => {
   const [bayManagerOpen, setBayManagerOpen] = useState(false);
@@ -548,7 +549,7 @@ export const SldWorkspacePage: React.FC = () => {
     }
     if (sldTheme === 'HIGH_CONTRAST_HMI') {
       return {
-        canvasBg: '#05080F',
+        canvasBg: 'rgba(12, 46, 70, 0.72)',
         gridMinor: '#111C2D',
         gridMajor: '#1B2D48',
         textPrimary: '#FFFFFF',
@@ -561,7 +562,7 @@ export const SldWorkspacePage: React.FC = () => {
       };
     }
     return {
-      canvasBg: '#071b33',
+      canvasBg: 'rgba(12, 46, 70, 0.72)',
       gridMinor: '#101D30',
       gridMajor: '#162840',
       textPrimary: '#E8F3FF',
@@ -1136,10 +1137,19 @@ export const SldWorkspacePage: React.FC = () => {
         , document.body
       )}
       {show3DModel && createPortal(
-        <Substation3DScene
-          initialFullscreen
-          onCloseFullscreen={() => setShow3DModel(false)}
-        />,
+        <React.Suspense fallback={
+          <div role="dialog" aria-modal="true" aria-label="3D Digital Twin" className="fixed inset-0 z-[9999] grid place-items-center bg-[#010611]/90">
+            <div className="rounded-xl border border-cyan-900 bg-[#061829] p-6 text-center text-cyan-100">
+              <p role="status">Loading 3D view…</p>
+              <button type="button" className="mt-4 rounded border border-cyan-600 px-3 py-1.5" onClick={() => setShow3DModel(false)}>Close</button>
+            </div>
+          </div>
+        }>
+          <Substation3DScene
+            initialFullscreen
+            onCloseFullscreen={() => setShow3DModel(false)}
+          />
+        </React.Suspense>,
         document.body
       )}
 
@@ -1595,7 +1605,7 @@ export const SldWorkspacePage: React.FC = () => {
       <div
         className="w-full min-w-0 rounded-2xl border-2 border-[#1E3B5E] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.85),inset_0_0_40px_rgba(0,210,255,0.05)] relative"
         style={{
-          background: 'linear-gradient(180deg, #080E18 0%, #0D1625 50%, #080E18 100%)',
+          background: 'radial-gradient(ellipse 62% 44% at 50% 38%, rgba(28, 92, 126, 0.74) 0%, rgba(14, 52, 78, 0.86) 58%, rgba(10, 38, 58, 0.92) 100%)',
         }}
       >
         {/* 1. TOP NAVIGATION & TELEMETRY HEADER BAR */}

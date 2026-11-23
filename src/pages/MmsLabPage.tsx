@@ -124,7 +124,7 @@ export const MmsLabPage: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<MmsLabTab>('PROTOCOL_CONVERSION');
   // Mandatory default animation speed = 0.5x
-  const [speed, setSpeed] = useState<0.5 | 1 | 2 | 4>(0.5);
+  const [speed, setSpeed] = useState<0.1 | 0.25 | 0.5 | 1 | 2 | 4>(0.1);
   const [playing, setPlaying] = useState<boolean>(true);
   const [manualDisconnect, setManualDisconnect] = useState<boolean>(false);
   const [lanAUp, setLanAUp] = useState<boolean>(true);
@@ -559,7 +559,7 @@ export const MmsLabPage: React.FC = () => {
   };
 
   const handleReset = () => {
-    setSpeed(0.5);
+    setSpeed(0.1);
     setPlaying(true);
     setManualDisconnect(false);
     setLanAUp(true);
@@ -707,7 +707,7 @@ export const MmsLabPage: React.FC = () => {
             {playing ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
             {playing ? 'Pause' : 'Resume'}
           </button>
-          {([0.5, 1, 2, 4] as const).map((s) => (
+          {([0.1, 0.25, 0.5, 1, 2, 4] as const).map((s) => (
             <button
               key={s}
               type="button"
@@ -990,21 +990,48 @@ export const MmsLabPage: React.FC = () => {
                     <rect x="255" y="194" width="6" height="8" rx="1" fill={lanBUp ? '#C084FC' : '#EF4444'} />
                     <rect x="311" y="194" width="6" height="8" rx="1" fill={lanBUp ? '#C084FC' : '#EF4444'} />
 
-                    {/* ANIMATED MMS PACKETS (TCP/102, 0.5x Default Speed!) */}
+                    {/* ANIMATED MMS PACKETS + LIVE PROTOCOL DATA FLOW BADGES (TCP/102) */}
                     {mmsConnected && lanAUp && (
                       <>
-                        <circle r="4.5" fill="#00E5FF" filter="url(#mmsGl)">
-                          <animateMotion dur={dur(3.2)} repeatCount="indefinite" path="M 146 120 L 182 120 L 182 114 L 392 114 L 392 120 L 444 120" />
-                        </circle>
-                        <circle r="3.8" fill="#7DD3FC">
-                          <animateMotion dur={dur(3.2)} begin="1.6s" repeatCount="indefinite" path="M 444 120 L 392 120 L 392 114 L 182 114 L 182 120 L 146 120" />
-                        </circle>
+                        <g>
+                          <animateMotion dur={dur(4.0)} repeatCount="indefinite" path="M 146 120 L 182 120 L 182 114 L 392 114 L 392 120 L 444 120" />
+                          <circle r="4.8" fill="#00E5FF" stroke="#FFFFFF" strokeWidth="1.2" filter="url(#mmsGl)" />
+                          <rect x="-46" y="-22" width="92" height="15" rx="7.5" fill="#05243A" fillOpacity="0.95" stroke="#00E5FF" strokeWidth="1.2" />
+                          <text x="0" y="-12" textAnchor="middle" fill="#E0FAFF" fontSize="6.9" fontWeight="800" fontFamily="monospace">
+                            MMS BRCB · TCP/102
+                          </text>
+                        </g>
+                        <g>
+                          <animateMotion dur={dur(4.0)} begin="2.0s" repeatCount="indefinite" path="M 444 120 L 392 120 L 392 114 L 182 114 L 182 120 L 146 120" />
+                          <circle r="4.0" fill="#7DD3FC" stroke="#FFFFFF" strokeWidth="1" />
+                          <rect x="-42" y="7" width="84" height="14.5" rx="7.2" fill="#062238" fillOpacity="0.94" stroke="#7DD3FC" strokeWidth="1.1" />
+                          <text x="0" y="16.5" textAnchor="middle" fill="#BAE6FD" fontSize="6.7" fontWeight="800" fontFamily="monospace">
+                            MMS Read / ACK
+                          </text>
+                        </g>
                       </>
                     )}
                     {mmsConnected && lanBUp && (
-                      <circle r="4.2" fill="#00E5FF" filter="url(#mmsGl)">
-                        <animateMotion dur={dur(3.4)} begin="0.8s" repeatCount="indefinite" path="M 146 140 L 182 140 L 182 198 L 392 198 L 392 140 L 444 140" />
-                      </circle>
+                      <g>
+                        <animateMotion dur={dur(4.2)} begin="1.0s" repeatCount="indefinite" path="M 146 140 L 182 140 L 182 198 L 392 198 L 392 140 L 444 140" />
+                        <circle r="4.4" fill="#D8B4FE" stroke="#FFFFFF" strokeWidth="1.1" filter="url(#mmsGl)" />
+                        <rect x="-46" y="7" width="92" height="15" rx="7.5" fill="#23103D" fillOpacity="0.95" stroke="#C084FC" strokeWidth="1.2" />
+                        <text x="0" y="17" textAnchor="middle" fill="#F3E8FF" fontSize="6.8" fontWeight="800" fontFamily="monospace">
+                          PRP-B · URCB Report
+                        </text>
+                      </g>
+                    )}
+
+                    {/* STEADY WAN LINK BADGE WHEN IDLE BETWEEN EVENT-DRIVEN ASDU BURSTS */}
+                    {!inFlight104 && iec104Connected && (
+                      <g>
+                        <animateMotion dur={dur(3.6)} repeatCount="indefinite" path="M 554 130 L 640 130" />
+                        <circle r="4.5" fill="#4ADE80" stroke="#ECFDF5" strokeWidth="1.1" filter="url(#mmsGl)" />
+                        <rect x="-44" y="-22" width="88" height="15" rx="7.5" fill="#052E16" fillOpacity="0.95" stroke="#22C55E" strokeWidth="1.2" />
+                        <text x="0" y="-12" textAnchor="middle" fill="#DCFCE7" fontSize="6.8" fontWeight="800" fontFamily="monospace">
+                          IEC-104 · TCP/2404
+                        </text>
+                      </g>
                     )}
 
                     {/* EVENT-DRIVEN ANIMATED IEC-104 PACKET WITH LIVE LABEL (Gateway -> RCC, NEVER on LAN A/B) */}

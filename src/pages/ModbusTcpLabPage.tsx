@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { buildModbusRegistersForBay } from '../data/protocolRegistry';
+import './ModbusTcpLabPage.css';
 import {
   Activity,
   AlertTriangle,
+  BarChart3,
   Cpu,
   Database,
   Download,
@@ -11,6 +13,7 @@ import {
   History,
   Info,
   Layers,
+  Network,
   Pause,
   Pin,
   PinOff,
@@ -19,6 +22,7 @@ import {
   RotateCcw,
   Settings,
   Sliders,
+  Tag,
   Terminal,
   X,
 } from 'lucide-react';
@@ -290,6 +294,32 @@ function roundedOrthPath(pts: { x: number; y: number }[], r = 12): string {
   return d;
 }
 
+function buildModbusTestSteps(t: ModbusTestDef, r: ModbusTestRuntime, tidHex: string, order: WordOrder) {
+  const active = r.enabled;
+  const isF = t.isFault;
+  const frameHex =
+    t.id === 'T12_EX01_ILLEGAL_FC' ? `${tidHex.slice(2)} 00 00 00 03 02 84 01  (Exception 0x01 Illegal Function)` :
+    t.id === 'T13_EX02_ILLEGAL_ADDR' ? `${tidHex.slice(2)} 00 00 00 03 02 84 02  (Exception 0x02 Illegal Data Address)` :
+    t.id === 'T14_EX03_ILLEGAL_VAL' ? `${tidHex.slice(2)} 00 00 00 03 02 86 03  (Exception 0x03 Illegal Data Value)` :
+    `${tidHex.slice(2)} 00 00 00 07 02 04 04 3F 73 33 33  →  IEC-104: 68 0E 0E 00 00 00 0D 01 03 00 84 00 ...`;
+  return {
+    path:
+      t.cat === 'A_CONN' ? 'GTW-01 (ETH0 · 10.132.30.200) ↔ RSP35 (VLAN 10) ↔ IEDs P1–P4 (TCP/502)' :
+      t.cat === 'B_FC' ? 'Modbus TCP Master (GTW-01) ↔ IED Register Bank (FC01/02/03/04/06/16)' :
+      t.cat === 'C_FRAME' ? `MBAP Header (${tidHex}) → IEEE-754 FLOAT32 (${order}) Decoder Engine` :
+      t.cat === 'D_CONV' ? 'GTW-01 Conversion Engine → Scaling / QDS → IEC-104 IOA Table (CA 132)' :
+      'GTW-01 (ETH1 · 10.132.20.200) ↔ WAN TCP/2404 ↔ RCC/SCADA (10.132.20.201)',
+    frameHex,
+    steps: [
+      { num: 1, title: 'Test Trigger & Precondition', color: '#38F3FF', detail: active ? `Test #${t.num} (${t.name}) toggled ON at ${r.timestamp}. Live state injected.` : `Test #${t.num} (${t.name}) is IDLE. Toggle ON to run live trace.` },
+      { num: 2, title: 'Station Bus Modbus TCP Polling (TCP/502)', color: '#7DD3FC', detail: (t.cat === 'A_CONN' || t.cat === 'B_FC') && isF && active ? `Modbus fault active: ${t.expectedResult}` : 'GTW-01 polls ION7650, P3F30, RET615 & 7SJ85 via Hirschmann RSP35.' },
+      { num: 3, title: `Byte Order & Framing Decode (${order})`, color: '#D8B4FE', detail: t.cat === 'C_FRAME' && isF && active ? `Framing/Word-order anomaly: ${t.expectedResult}` : `MBAP TID (${tidHex}) verified; 2×16-bit words decoded as valid IEEE-754 FLOAT32.` },
+      { num: 4, title: 'Gateway GTW-01 → IEC-104 IOA Conversion', color: '#FDE047', detail: t.cat === 'D_CONV' && isF && active ? `Conversion fault: ${t.expectedResult}` : 'Scaled value mapped to CA:132 / IOA (2101–2107) and encoded as M_ME_NC_1 (COT=3).' },
+      { num: 5, title: isF ? 'RCC/SCADA Impact & Recovery' : 'RCC/SCADA Delivery Verification', color: isF && active ? '#FCA5A5' : '#4ADE80', detail: active ? `${t.expectedResult}${isF ? ' — Toggle OFF or enable Test #32 (Full Recovery) to restore.' : ' — Verified PASS on RCC/SCADA.'}` : 'Toggle ON to observe live end-to-end topology & packet verification.' },
+    ],
+  };
+}
+
 export const ModbusTcpLabPage: React.FC = () => {
   const { bays } = useSubstationStore();
   const activeBay = useMemo(
@@ -311,8 +341,33 @@ export const ModbusTcpLabPage: React.FC = () => {
   const [cycleProgress, setCycleProgress] = useState<number>(0.48);
 
   // Interactive Popups (Instant Hover-Above-Device IED Popup + Auto-Opening Gateway Popup)
-  const [selectedIedPopup, setSelectedIedPopup] = useState<IedDeviceSpec['id'] | null>(null);
-  const [switchHovered, setSwitchHovered] = useState<boolean>(false);
+  const [iedPopup, setIedPopup] = useState<{ device: IedDeviceSpec; top: number; rayY: number } | null>(null);
+  const [iedPopupPinned, setIedPopupPinned] = useState(false);
+  const iedPopupCloseTimer = useRef<ReturnType<typeof setTimeout>>();
+  const iedPopupTrigger = useRef<HTMLButtonElement | null>(null);
+  const iedPopupClose = useRef<HTMLButtonElement | null>(null);
+  const restoreIedFocus = useRef(false);
+
+  useEffect(() => () => clearTimeout(iedPopupCloseTimer.current), []);
+  useEffect(() => {
+    if (iedPopupPinned) iedPopupClose.current?.focus({ preventScroll: true });
+  }, [iedPopupPinned]);
+  const [switchHovered, setSwitchHovered] = useState(false);
+  const [switchPinned, setSwitchPinned] = useState(false);
+  const switchPopupCloseTimer = useRef<ReturnType<typeof setTimeout>>();
+  const showSwitchPopup = !iedPopup && (switchHovered || switchPinned);
+  useEffect(() => () => clearTimeout(switchPopupCloseTimer.current), []);
+
+  const closeSwitchPopup = () => {
+    clearTimeout(switchPopupCloseTimer.current);
+    setSwitchHovered(false);
+    setSwitchPinned(false);
+  };
+
+  const scheduleSwitchPopupClose = () => {
+    clearTimeout(switchPopupCloseTimer.current);
+    switchPopupCloseTimer.current = setTimeout(() => setSwitchHovered(false), 200);
+  };
   const [gatewayPinned, setGatewayPinned] = useState<boolean>(false);
   const [gatewayManuallyClosed, setGatewayManuallyClosed] = useState<boolean>(false);
 
@@ -380,7 +435,7 @@ export const ModbusTcpLabPage: React.FC = () => {
     convFraction < 0.25 ? 1 : convFraction < 0.5 ? 2 : convFraction < 0.75 ? 3 : 4;
 
   // Auto-open Gateway Popup ONLY when packet arrives at Gateway (CONVERT phase), auto-close when packet departs (WAN_TX / REQ / RESP) unless pinned!
-  const showGatewayPopup = gatewayPinned || (simPhase === 'CONVERT' && !gatewayManuallyClosed && stationBusOk && !iedOfflineNow && !respTimeout);
+  const showGatewayPopup = !iedPopup && !showSwitchPopup && (gatewayPinned || (simPhase === 'CONVERT' && !gatewayManuallyClosed && stationBusOk && !iedOfflineNow && !respTimeout));
 
   // Reset manual close lock when a new conversion cycle starts
   useEffect(() => {
@@ -435,6 +490,42 @@ export const ModbusTcpLabPage: React.FC = () => {
   // ResizeObserver exact port-to-port SVG coordinate measurement
   const stageRef = useRef<HTMLDivElement | null>(null);
   const portRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+
+  const showIedPopup = (device: IedDeviceSpec, trigger: HTMLButtonElement, pin = false) => {
+    clearTimeout(iedPopupCloseTimer.current);
+    if ((iedPopupPinned && !pin) || !stageRef.current) return;
+    closeSwitchPopup();
+    const stage = stageRef.current.getBoundingClientRect();
+    const source = trigger.getBoundingClientRect();
+    const sourceY = source.top - stage.top + source.height * .72;
+    const top = Math.max(34, Math.min(stage.height - 382, sourceY - 155));
+    iedPopupTrigger.current = trigger;
+    setIedPopup({ device, top, rayY: sourceY - top });
+    if (pin) setIedPopupPinned(true);
+  };
+
+  const scheduleIedPopupClose = () => {
+    if (iedPopupPinned) return;
+    clearTimeout(iedPopupCloseTimer.current);
+    iedPopupCloseTimer.current = setTimeout(() => setIedPopup(null), 225);
+  };
+
+  const dismissIedPopup = (returnFocus = false) => {
+    clearTimeout(iedPopupCloseTimer.current);
+    setIedPopupPinned(false);
+    setIedPopup(null);
+    if (returnFocus) {
+      restoreIedFocus.current = true;
+      iedPopupTrigger.current?.focus({ preventScroll: true });
+      restoreIedFocus.current = false;
+    }
+  };
+
+  const openIedPopupTab = (tab: ModbusLabTab) => {
+    dismissIedPopup();
+    closeSwitchPopup();
+    setActiveTab(tab);
+  };
   const setPortRef = (id: string) => (el: HTMLSpanElement | null) => {
     portRefs.current[id] = el;
   };
@@ -658,7 +749,7 @@ export const ModbusTcpLabPage: React.FC = () => {
             <button
               key={id}
               type="button"
-              onClick={() => setActiveTab(id)}
+              onClick={() => openIedPopupTab(id)}
               className="rounded-lg border px-2.5 py-1 text-[11px] font-extrabold transition"
               style={
                 activeTab === id
@@ -722,7 +813,7 @@ export const ModbusTcpLabPage: React.FC = () => {
               background:
                 'linear-gradient(rgba(56, 189, 248, 0.04) 1px, transparent 1px), ' +
                 'linear-gradient(90deg, rgba(56, 189, 248, 0.04) 1px, transparent 1px), ' +
-                'radial-gradient(ellipse at 50% 42%, #07203B 0%, #03101F 76%)',
+                'radial-gradient(ellipse 62% 44% at 50% 38%, rgba(28, 92, 126, 0.74) 0%, rgba(14, 52, 78, 0.86) 58%, rgba(10, 38, 58, 0.92) 100%)',
               backgroundSize: '28px 28px, 28px 28px, 100% 100%',
               boxShadow: '0 0 26px rgba(0, 212, 255, 0.14)',
             }}
@@ -755,7 +846,20 @@ export const ModbusTcpLabPage: React.FC = () => {
             </div>
 
             {/* 4-COLUMN HARDWARE STAGE WITH RESIZE-OBSERVER PORT-TO-PORT SVG */}
-            <div ref={stageRef} className="min-w-[1120px] relative pt-2 pb-2">
+            <div
+              ref={stageRef}
+              className="min-w-[1120px] relative pt-2 pb-2"
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                if (iedPopup) {
+                  event.stopPropagation();
+                  dismissIedPopup(iedPopupPinned);
+                } else if (showSwitchPopup) {
+                  event.stopPropagation();
+                  closeSwitchPopup();
+                }
+              }}
+            >
               {/* Zone Column Header Pills */}
               <div className="grid grid-cols-[1.05fr_1.1fr_1.2fr_1.05fr] gap-4 mb-3 relative z-10">
                 <div className="rounded-lg border border-[#2563EB]/60 bg-[#082240]/85 py-1.5 text-center font-mono text-[11px] font-extrabold text-[#93C5FD]">
@@ -772,229 +876,207 @@ export const ModbusTcpLabPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* AUTO-OPENING / AUTO-CLOSING LIVE PROTOCOL CONVERSION POPUP ABOVE GATEWAY (EXACT REFERENCE image_0eab44.jpg) */}
-              <div
-                className="absolute z-40 transition-all duration-300"
-                style={{
-                  left: '46.5%',
-                  top: '10px',
-                  width: '495px',
-                  opacity: showGatewayPopup ? 1 : 0,
-                  transform: showGatewayPopup ? 'translateY(0) scale(1)' : 'translateY(10px) scale(0.96)',
-                  pointerEvents: showGatewayPopup ? 'auto' : 'none',
-                }}
-              >
-                <div
-                  className="rounded-2xl border-[1.5px] p-4 relative"
-                  style={{
-                    background:
-                      'radial-gradient(ellipse 65% 45% at 20% 10%, rgba(255, 255, 255, 0.24) 0%, transparent 65%), ' +
-                      'linear-gradient(135deg, rgba(255, 255, 255, 0.19) 0%, rgba(190, 240, 255, 0.14) 50%, rgba(15, 44, 68, 0.72) 100%)',
-                    backdropFilter: 'blur(22px) saturate(160%)',
-                    WebkitBackdropFilter: 'blur(22px) saturate(160%)',
-                    borderColor: !conversionHealthy ? '#EF4444' : 'rgba(224, 252, 255, 0.85)',
-                    boxShadow: !conversionHealthy
-                      ? '0 0 28px rgba(239, 68, 68, 0.45)'
-                      : '0 0 34px rgba(103, 232, 249, 0.42), inset 0 1.5px 1px rgba(255, 255, 255, 0.78), inset 0 -1px 1px rgba(125, 249, 255, 0.5)',
-                  }}
+              {showGatewayPopup && (
+                <section
+                  id="lab-gateway-info"
+                  aria-labelledby="lab-gateway-title"
+                  className="lab-gateway-projection"
+                  data-pinned={gatewayPinned}
                 >
-                  {/* Popup Header */}
-                  <div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-[#56EBFF]/25">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="w-1 h-4 rounded-full bg-[#38F3FF]" />
-                      <span className="text-[12px] font-extrabold text-white truncate">Live Protocol Conversion &amp; Mapping</span>
-                      <span className="rounded border border-[#F59E0B]/70 bg-[#3B2606] px-1.5 py-0.5 font-mono text-[9px] font-extrabold text-[#FDE047]">
-                        {activeIed.shortName}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span
-                        className="rounded-md border px-2 py-0.5 font-mono text-[9px] font-extrabold"
-                        style={
-                          !conversionHealthy
-                            ? { background: '#3B0D15', borderColor: '#EF4444', color: '#FCA5A5' }
-                            : { background: '#063326', borderColor: '#22C55E', color: '#4ADE80' }
-                        }
-                      >
-                        {!conversionHealthy
-                          ? 'CONV FAULT'
-                          : `STEP ${convStep}/4: ${convStep === 1 ? 'PAYLOAD' : convStep === 2 ? 'DECODE' : convStep === 3 ? 'IOA MAP' : 'ASDU READY'}`}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setGatewayPinned((p) => !p)}
-                        title={gatewayPinned ? 'Unpin Popup' : 'Pin Popup Open'}
-                        className="p-1 rounded hover:bg-white/10 text-[#7DD3FC]"
-                      >
-                        {gatewayPinned ? <PinOff className="w-3.5 h-3.5 text-[#FDE047]" /> : <Pin className="w-3.5 h-3.5" />}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setGatewayPinned(false);
-                          setGatewayManuallyClosed(true);
-                        }}
-                        title="Close Popup"
-                        className="p-1 rounded hover:bg-white/10 text-[#9BC0DF]"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 2x2 Multi-Color Step Cards */}
-                  <div className="grid grid-cols-2 gap-2.5 font-mono text-[10.5px]">
-                    {/* Step 1: Payload Capture (Cyan) */}
-                    <div
-                      className="rounded-lg border p-2 transition-all"
-                      style={{
-                        background: convStep === 1 ? 'rgba(0, 212, 255, 0.16)' : 'rgba(8, 28, 46, 0.72)',
-                        borderColor: ex01 || ex02 || ex03 || tidMismatch ? '#EF4444' : convStep === 1 ? '#38F3FF' : 'rgba(90, 180, 220, 0.28)',
-                        boxShadow: convStep === 1 ? '0 0 14px rgba(0, 229, 255, 0.30)' : undefined,
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-extrabold text-[#38F3FF]">1. PAYLOAD CAPTURE</span>
-                        <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 1 ? 'bg-white text-[#031829]' : convStep > 1 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                          {convStep === 1 ? 'ACTIVE' : convStep > 1 ? 'DONE' : 'WAIT'}
+                  <div className="lab-ied-panel lab-gateway-panel" data-fault={!conversionHealthy}>
+                    <div className="lab-gateway-bar">
+                      <div className="lab-gateway-heading">
+                        <span className="w-1 h-4 rounded-full bg-[#38F3FF]" />
+                        <span id="lab-gateway-title">Live Protocol Conversion &amp; Mapping</span>
+                        <span className="rounded border border-[#F59E0B]/70 bg-[#3B2606] px-1.5 py-0.5 font-mono text-[9px] font-extrabold text-[#FDE047]">
+                          {activeIed.shortName}
                         </span>
                       </div>
-                      <div className="text-[#E0F7FF] font-bold">
-                        {activeIed.shortName} (UID {unitIdMismatch ? 250 : activeIed.unitId}) · TID {tidHex} FC{selectedFc}
-                      </div>
-                      <div className="text-[#FDE047] mt-0.5 truncate">
-                        {ex01 ? 'ERR: EX 0x01 Illegal FC' : ex02 ? 'ERR: EX 0x02 Illegal Addr' : ex03 ? 'ERR: EX 0x03 Illegal Val' : `Hex: ${activeIed.sampleReg} → 0x${hexWords.hi} 0x${hexWords.lo}`}
-                      </div>
-                    </div>
-
-                    {/* Step 2: Byte/Word Decode (Violet) */}
-                    <div
-                      className="rounded-lg border p-2 transition-all"
-                      style={{
-                        background: convStep === 2 ? 'rgba(192, 132, 252, 0.18)' : 'rgba(8, 28, 46, 0.72)',
-                        borderColor: wordSwapFault ? '#F59E0B' : convStep === 2 ? '#C084FC' : 'rgba(90, 180, 220, 0.28)',
-                        boxShadow: convStep === 2 ? '0 0 14px rgba(192, 132, 252, 0.32)' : undefined,
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-extrabold text-[#D8B4FE]">2. BYTE/WORD DECODE</span>
-                        <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 2 ? 'bg-[#D8B4FE] text-[#1E0836]' : convStep > 2 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                          {convStep === 2 ? 'ACTIVE' : convStep > 2 ? 'DONE' : 'WAIT'}
+                      <div className="lab-gateway-controls">
+                        <span
+                          className="rounded-md border px-2 py-0.5 font-mono text-[9px] font-extrabold"
+                          style={
+                            !conversionHealthy
+                              ? { background: '#3B0D15', borderColor: '#EF4444', color: '#FCA5A5' }
+                              : { background: '#063326', borderColor: '#22C55E', color: '#4ADE80' }
+                          }
+                        >
+                          {!conversionHealthy
+                            ? 'CONV FAULT'
+                            : `STEP ${convStep}/4: ${convStep === 1 ? 'PAYLOAD' : convStep === 2 ? 'DECODE' : convStep === 3 ? 'IOA MAP' : 'ASDU READY'}`}
                         </span>
-                      </div>
-                      <div className="text-[#F3E8FF] font-bold">
-                        FLOAT32 ({effectiveOrder}) · {wordSwapFault ? 'SWAP ERR' : 'IEEE-754 Valid'}
-                      </div>
-                      <div className={`mt-0.5 font-extrabold ${wordSwapFault ? 'text-[#FCA5A5]' : 'text-[#4ADE80]'}`}>
-                        Val: {liveValue} {activeIed.sampleUnit}
-                      </div>
-                    </div>
-
-                    {/* Step 3: Scaling & IOA Map (Amber) */}
-                    <div
-                      className="rounded-lg border p-2 transition-all"
-                      style={{
-                        background: convStep === 3 ? 'rgba(250, 204, 21, 0.16)' : 'rgba(8, 28, 46, 0.72)',
-                        borderColor: missingIoa || badQds ? '#EF4444' : convStep === 3 ? '#FACC15' : 'rgba(90, 180, 220, 0.28)',
-                        boxShadow: convStep === 3 ? '0 0 14px rgba(250, 204, 21, 0.28)' : undefined,
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-extrabold text-[#FDE047]">3. SCALING &amp; IOA MAP</span>
-                        <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 3 ? 'bg-[#FDE047] text-[#261802]' : convStep > 3 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                          {convStep === 3 ? 'ACTIVE' : convStep > 3 ? 'DONE' : 'WAIT'}
-                        </span>
-                      </div>
-                      <div className="text-[#FEF08A] font-bold">
-                        {missingIoa ? 'ERR: IOA Unmapped!' : `Map: CA:132 / IOA:${activeIed.ioa}`}
-                      </div>
-                      <div className="text-[#7DD3FC] mt-0.5">
-                        {liveValue} {activeIed.sampleUnit} (×1.0) · QDS: {badQds ? 'IV (0x81)' : 'GOOD (0x00)'}
+                        <button
+                          type="button"
+                          onClick={() => setGatewayPinned((p) => !p)}
+                          aria-label={gatewayPinned ? 'Unpin conversion popup' : 'Pin conversion popup'} aria-pressed={gatewayPinned}
+                          className="p-1 rounded hover:bg-white/10 text-[#7DD3FC]"
+                        >
+                          {gatewayPinned ? <PinOff className="w-3.5 h-3.5 text-[#FDE047]" /> : <Pin className="w-3.5 h-3.5" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setGatewayPinned(false);
+                            setGatewayManuallyClosed(true);
+                          }}
+                          aria-label="Close conversion popup"
+                          className="p-1 rounded hover:bg-white/10 text-[#9BC0DF]"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
 
-                    {/* Step 4: IEC-104 ASDU Ready (Emerald) */}
-                    <div
-                      className="rounded-lg border p-2 transition-all"
-                      style={{
-                        background: convStep === 4 ? 'rgba(34, 197, 94, 0.18)' : 'rgba(8, 28, 46, 0.72)',
-                        borderColor: gtwOverload || !wanHealthy ? '#EF4444' : convStep === 4 ? '#4ADE80' : 'rgba(90, 180, 220, 0.28)',
-                        boxShadow: convStep === 4 ? '0 0 14px rgba(34, 197, 94, 0.34)' : undefined,
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-extrabold text-[#4ADE80]">4. IEC-104 ASDU READY</span>
-                        <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 4 ? 'bg-[#4ADE80] text-[#032415]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                          {convStep === 4 ? 'READY' : 'WAIT'}
-                        </span>
-                      </div>
-                      <div className="text-[#DCFCE7] font-bold truncate">
-                        {activeIed.iecType} / COT:3 · 68 0E {hexWords.rawBytes}
-                      </div>
-                      <div className="text-[#A3E635] mt-0.5 font-extrabold">
-                        Out: ETH1 → RCC ({liveValue} {activeIed.sampleUnit})
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Multi-Color Progress Bar */}
-                  <div className="mt-2.5 flex items-center gap-2">
-                    <div className="flex-1 h-2 rounded-full bg-[#061828] border border-[#1E4B6E] overflow-hidden">
+                    {/* 2x2 Multi-Color Step Cards */}
+                    <div className="lab-gateway-steps font-mono">
+                      {/* Step 1: Payload Capture (Cyan) */}
                       <div
-                        className="h-full rounded-full transition-all duration-100"
+                        className="rounded-lg border p-2 transition-all"
                         style={{
-                          width: `${convPct}%`,
-                          background: 'linear-gradient(90deg, #00E5FF 0%, #C084FC 40%, #FACC15 72%, #4ADE80 100%)',
-                          boxShadow: '0 0 10px rgba(0, 229, 255, 0.65)',
+                          background: convStep === 1 ? 'rgba(0, 212, 255, 0.16)' : 'rgba(8, 28, 46, 0.72)',
+                          borderColor: ex01 || ex02 || ex03 || tidMismatch ? '#EF4444' : convStep === 1 ? '#38F3FF' : 'rgba(90, 180, 220, 0.28)',
+                          boxShadow: convStep === 1 ? '0 0 14px rgba(0, 229, 255, 0.30)' : undefined,
                         }}
-                      />
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-extrabold text-[#38F3FF]">1. PAYLOAD CAPTURE</span>
+                          <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 1 ? 'bg-white text-[#031829]' : convStep > 1 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                            {convStep === 1 ? 'ACTIVE' : convStep > 1 ? 'DONE' : 'WAIT'}
+                          </span>
+                        </div>
+                        <div className="text-[#E0F7FF] font-bold">
+                          {activeIed.shortName} (UID {unitIdMismatch ? 250 : activeIed.unitId}) · TID {tidHex} FC{selectedFc}
+                        </div>
+                        <div className="text-[#FDE047] mt-0.5 truncate">
+                          {ex01 ? 'ERR: EX 0x01 Illegal FC' : ex02 ? 'ERR: EX 0x02 Illegal Addr' : ex03 ? 'ERR: EX 0x03 Illegal Val' : `Hex: ${activeIed.sampleReg} → 0x${hexWords.hi} 0x${hexWords.lo}`}
+                        </div>
+                      </div>
+
+                      {/* Step 2: Byte/Word Decode (Violet) */}
+                      <div
+                        className="rounded-lg border p-2 transition-all"
+                        style={{
+                          background: convStep === 2 ? 'rgba(192, 132, 252, 0.18)' : 'rgba(8, 28, 46, 0.72)',
+                          borderColor: wordSwapFault ? '#F59E0B' : convStep === 2 ? '#C084FC' : 'rgba(90, 180, 220, 0.28)',
+                          boxShadow: convStep === 2 ? '0 0 14px rgba(192, 132, 252, 0.32)' : undefined,
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-extrabold text-[#D8B4FE]">2. BYTE/WORD DECODE</span>
+                          <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 2 ? 'bg-[#D8B4FE] text-[#1E0836]' : convStep > 2 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                            {convStep === 2 ? 'ACTIVE' : convStep > 2 ? 'DONE' : 'WAIT'}
+                          </span>
+                        </div>
+                        <div className="text-[#F3E8FF] font-bold">
+                          FLOAT32 ({effectiveOrder}) · {wordSwapFault ? 'SWAP ERR' : 'IEEE-754 Valid'}
+                        </div>
+                        <div className={`mt-0.5 font-extrabold ${wordSwapFault ? 'text-[#FCA5A5]' : 'text-[#4ADE80]'}`}>
+                          Val: {liveValue} {activeIed.sampleUnit}
+                        </div>
+                      </div>
+
+                      {/* Step 3: Scaling & IOA Map (Amber) */}
+                      <div
+                        className="rounded-lg border p-2 transition-all"
+                        style={{
+                          background: convStep === 3 ? 'rgba(250, 204, 21, 0.16)' : 'rgba(8, 28, 46, 0.72)',
+                          borderColor: missingIoa || badQds ? '#EF4444' : convStep === 3 ? '#FACC15' : 'rgba(90, 180, 220, 0.28)',
+                          boxShadow: convStep === 3 ? '0 0 14px rgba(250, 204, 21, 0.28)' : undefined,
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-extrabold text-[#FDE047]">3. SCALING &amp; IOA MAP</span>
+                          <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 3 ? 'bg-[#FDE047] text-[#261802]' : convStep > 3 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                            {convStep === 3 ? 'ACTIVE' : convStep > 3 ? 'DONE' : 'WAIT'}
+                          </span>
+                        </div>
+                        <div className="text-[#FEF08A] font-bold">
+                          {missingIoa ? 'ERR: IOA Unmapped!' : `Map: CA:132 / IOA:${activeIed.ioa}`}
+                        </div>
+                        <div className="text-[#7DD3FC] mt-0.5">
+                          {liveValue} {activeIed.sampleUnit} (×1.0) · QDS: {badQds ? 'IV (0x81)' : 'GOOD (0x00)'}
+                        </div>
+                      </div>
+
+                      {/* Step 4: IEC-104 ASDU Ready (Emerald) */}
+                      <div
+                        className="rounded-lg border p-2 transition-all"
+                        style={{
+                          background: convStep === 4 ? 'rgba(34, 197, 94, 0.18)' : 'rgba(8, 28, 46, 0.72)',
+                          borderColor: gtwOverload || !wanHealthy ? '#EF4444' : convStep === 4 ? '#4ADE80' : 'rgba(90, 180, 220, 0.28)',
+                          boxShadow: convStep === 4 ? '0 0 14px rgba(34, 197, 94, 0.34)' : undefined,
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-extrabold text-[#4ADE80]">4. IEC-104 ASDU READY</span>
+                          <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 4 ? 'bg-[#4ADE80] text-[#032415]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
+                            {convStep === 4 ? 'READY' : 'WAIT'}
+                          </span>
+                        </div>
+                        <div className="text-[#DCFCE7] font-bold truncate">
+                          {activeIed.iecType} / COT:3 · 68 0E {hexWords.rawBytes}
+                        </div>
+                        <div className="text-[#A3E635] mt-0.5 font-extrabold">
+                          Out: ETH1 → RCC ({liveValue} {activeIed.sampleUnit})
+                        </div>
+                      </div>
                     </div>
-                    <span className="font-mono text-[10px] font-extrabold text-[#7DD3FC] w-9 text-right">{convPct}%</span>
+
+                    {/* Multi-Color Progress Bar */}
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <div className="flex-1 h-2 rounded-full bg-[#061828] border border-[#1E4B6E] overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-100"
+                          style={{
+                            width: `${convPct}%`,
+                            background: 'linear-gradient(90deg, #00E5FF 0%, #C084FC 40%, #FACC15 72%, #4ADE80 100%)',
+                            boxShadow: '0 0 10px rgba(0, 229, 255, 0.65)',
+                          }}
+                        />
+                      </div>
+                      <span className="font-mono text-[10px] font-extrabold text-[#7DD3FC] w-9 text-right">{convPct}%</span>
+                    </div>
                   </div>
-                </div>
-                {/* Holographic Trapezoidal Beam Connector down to SAS Gateway GTW-01 */}
-                <svg viewBox="0 0 360 44" className="w-[320px] h-[44px] mx-auto block pointer-events-none">
-                  <polygon
-                    points="20,0 340,0 210,44 150,44"
-                    fill="rgba(56, 232, 255, 0.11)"
-                    stroke="rgba(56, 232, 255, 0.45)"
-                    strokeWidth="1"
-                  />
-                </svg>
-              </div>
+                  <svg viewBox="0 0 360 49" className="lab-gateway-rays" aria-hidden="true">
+                    <path d="M 15 0 L 180 48 L 345 0 Z" className="lab-ied-ray-fill" />
+                    <path d="M 15 0 L 180 48 L 345 0 M 180 0 V 48" className="lab-ied-ray-lines" />
+                    <circle cx="180" cy="46" r="2.8" className="lab-ied-ray-source" />
+                  </svg>
+                </section>
+              )}
 
               {/* 4 HARDWARE COLUMNS — EXACT PORT-TO-PORT RJ45 ALIGNMENT */}
               <div className="grid grid-cols-[1.05fr_1.15fr_1.15fr_1.05fr] gap-4 items-center relative z-10 min-h-[430px]">
-                {/* COLUMN 1: 4 STACKED REALISTIC IEDs (DETAILS HIDDEN; HOVER SHOWS WHITE-FROSTED POPUP BESIDE DEVICE) */}
+                {/* COLUMN 1: Station bus IEDs */}
                 <div className="flex flex-col justify-between gap-2.5 pl-4">
                   {IED_DEVICES.map((dev, idx) => {
                     const isAct = idx === activeIedIdx;
-                    const isHov = selectedIedPopup === dev.id;
+                    const isHov = iedPopup?.device.id === dev.id;
                     const isFault = (dev.id === 'P2' && p2Offline) || port502Closed;
                     return (
                       <div
                         key={dev.id}
                         className="flex items-center justify-start relative"
-                        onMouseEnter={() => setSelectedIedPopup(dev.id)}
-                        onMouseLeave={() => setSelectedIedPopup((cur) => (cur === dev.id ? null : cur))}
                       >
-                        <div
-                          className="relative group rounded-xl border p-1.5 transition-all cursor-pointer"
-                          style={{
-                            width: '126px',
-                            height: '92px',
-                            background: isAct || isHov
-                              ? 'linear-gradient(180deg, rgba(14, 54, 82, 0.94), rgba(6, 24, 42, 0.96))'
-                              : 'rgba(7, 24, 42, 0.86)',
-                            borderColor: isFault ? '#EF4444' : isHov ? '#FFFFFF' : isAct ? '#38F3FF' : 'rgba(56, 189, 248, 0.35)',
-                            boxShadow: isFault
-                              ? '0 0 14px rgba(239, 68, 68, 0.45)'
-                              : isHov
-                              ? '0 0 24px rgba(255, 255, 255, 0.72)'
-                              : isAct
-                              ? '0 0 18px rgba(0, 229, 255, 0.45)'
-                              : 'none',
+                        <button
+                          type="button"
+                          className="lab-ied-trigger relative group p-1.5 cursor-pointer"
+                          data-active={isAct}
+                          data-fault={isFault}
+                          aria-label={`Device info for ${dev.fullName}`}
+                          aria-expanded={isHov}
+                          aria-controls={isHov ? 'lab-ied-info' : undefined}
+                          onMouseEnter={(event) => {
+                            if (window.matchMedia('(hover: hover)').matches) showIedPopup(dev, event.currentTarget);
                           }}
+                          onMouseLeave={scheduleIedPopupClose}
+                          onFocus={(event) => {
+                            if (!restoreIedFocus.current && event.currentTarget.matches(':focus-visible')) {
+                              showIedPopup(dev, event.currentTarget);
+                            }
+                          }}
+                          onBlur={scheduleIedPopupClose}
+                          onClick={(event) => showIedPopup(dev, event.currentTarget, true)}
                         >
                           <span
                             className="absolute -top-2 left-2 rounded px-1.5 py-0.2 font-mono text-[9px] font-extrabold border z-20"
@@ -1009,7 +1091,7 @@ export const ModbusTcpLabPage: React.FC = () => {
                           <img
                             src={dev.image}
                             alt={dev.fullName}
-                            className="w-full h-full object-contain rounded drop-shadow-[0_6px_10px_rgba(0,0,0,0.8)] group-hover:scale-105 transition"
+                            className="lab-ied-photo h-full w-full object-contain group-hover:scale-105 transition-transform"
                           />
                           <span
                             ref={setPortRef(`ied_${dev.id}`)}
@@ -1022,7 +1104,7 @@ export const ModbusTcpLabPage: React.FC = () => {
                           >
                             ETH
                           </span>
-                        </div>
+                        </button>
                       </div>
                     );
                   })}
@@ -1030,10 +1112,24 @@ export const ModbusTcpLabPage: React.FC = () => {
 
                 {/* COLUMN 2: REALISTIC HIRSCHMANN RSP35 INDUSTRIAL SWITCH (DETAILS HIDDEN; HOVER OPENS HOLOGRAPHIC POPUP) */}
                 <div className="flex flex-col items-center justify-center pt-[125px]">
-                  <div
+                  <button
+                    type="button"
                     className="relative flex items-center justify-center cursor-pointer"
-                    onMouseEnter={() => setSwitchHovered(true)}
-                    onMouseLeave={() => setSwitchHovered(false)}
+                    aria-label="Hirschmann RSP35 switch details"
+                    aria-expanded={showSwitchPopup}
+                    aria-controls={showSwitchPopup ? 'lab-switch-info' : undefined}
+                    onMouseEnter={() => {
+                      if (window.matchMedia('(hover: hover)').matches) {
+                        clearTimeout(switchPopupCloseTimer.current);
+                        setSwitchHovered(true);
+                      }
+                    }}
+                    onMouseLeave={scheduleSwitchPopupClose}
+                    onClick={() => {
+                      dismissIedPopup();
+                      if (switchPinned) closeSwitchPopup();
+                      else setSwitchPinned(true);
+                    }}
                   >
                     <img
                       src="assets/devices/hirschmann-rsp35.png"
@@ -1080,7 +1176,7 @@ export const ModbusTcpLabPage: React.FC = () => {
                     >
                       5
                     </span>
-                  </div>
+                  </button>
 
                 </div>
 
@@ -1090,8 +1186,13 @@ export const ModbusTcpLabPage: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setGatewayPinned((p) => !p);
+                      dismissIedPopup();
+                      closeSwitchPopup();
                       setGatewayManuallyClosed(false);
                     }}
+                    aria-label="Gateway GTW-01 conversion"
+                    aria-pressed={gatewayPinned}
+                    aria-controls={showGatewayPopup ? 'lab-gateway-info' : undefined}
                     title="Click to Pin / Unpin Live Protocol Conversion Popup"
                     className="relative flex items-center justify-center group focus:outline-none"
                   >
@@ -1167,181 +1268,90 @@ export const ModbusTcpLabPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* TOP-LAYER (z-[80] ABOVE ALL CABLES!) EXACT REFERENCE HOLOGRAPHIC GLASS POPUP (image_0f9e88.jpg) */}
-              {(() => {
-                const hovIdx = IED_DEVICES.findIndex((d) => d.id === selectedIedPopup);
-                if (hovIdx === -1) return null;
-                const dev = IED_DEVICES[hovIdx];
-                const topOffsets = [38, 102, 166, 192];
-                return (
-                  <div
-                    className="absolute z-[80] pointer-events-none transition-all duration-150"
-                    style={{
-                      left: '164px',
-                      top: `${topOffsets[hovIdx]}px`,
-                      width: '540px',
-                    }}
-                  >
-                    {/* Glowing Holographic Projection Rays from Hovered IED to Popup Left Edge */}
-                    <svg viewBox="0 0 42 250" className="absolute -left-[40px] top-4 w-[40px] h-[225px] pointer-events-none">
-                      <polygon
-                        points="0,112 42,6 42,244 0,126"
-                        fill="rgba(125, 249, 255, 0.14)"
-                        stroke="rgba(175, 248, 255, 0.58)"
-                        strokeWidth="1"
-                      />
-                      <line x1="0" y1="117" x2="42" y2="58" stroke="rgba(255,255,255,0.48)" strokeWidth="1" />
-                      <line x1="0" y1="121" x2="42" y2="188" stroke="rgba(103,232,249,0.48)" strokeWidth="1" />
-                    </svg>
-
-                    <div
-                      className="rounded-2xl border-[1.5px] p-4 relative overflow-hidden"
-                      style={{
-                        background:
-                          'radial-gradient(ellipse 68% 48% at 18% 12%, rgba(165, 243, 252, 0.24) 0%, transparent 65%), ' +
-                          'radial-gradient(ellipse 55% 40% at 85% 90%, rgba(56, 224, 255, 0.18) 0%, transparent 65%), ' +
-                          'linear-gradient(145deg, rgba(16, 62, 92, 0.68) 0%, rgba(10, 42, 68, 0.76) 52%, rgba(8, 32, 54, 0.80) 100%)',
-                        backdropFilter: 'blur(36px) saturate(170%)',
-                        WebkitBackdropFilter: 'blur(36px) saturate(170%)',
-                        borderColor: 'rgba(182, 248, 255, 0.90)',
-                        boxShadow:
-                          '0 0 28px rgba(56, 232, 255, 0.52), 0 0 60px rgba(0, 210, 255, 0.22), ' +
-                          'inset 0 1.5px 2px rgba(255, 255, 255, 0.85), inset 0 -1px 2px rgba(56, 232, 255, 0.55), inset 0 0 34px rgba(56, 232, 255, 0.14)',
-                      }}
-                    >
-                      {/* Window Bar matching image_0f9e88.jpg (| Modbus TCP — Device Info   - [] x) */}
-                      <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#A5F3FC]/35">
-                        <div className="flex items-center gap-2 text-[12.5px] font-bold text-[#E6FAFF] tracking-wide">
-                          <span className="w-0.5 h-4 bg-[#7DF9FF] shadow-[0_0_8px_#7DF9FF]" />
-                          <span>Modbus TCP — Device Info</span>
-                        </div>
-                        <div className="flex items-center gap-2.5 font-mono text-[12px] text-[#CFFAFE]/90">
-                          <span>–</span>
-                          <span>□</span>
-                          <span>×</span>
-                        </div>
-                      </div>
-
-                      {/* Body: Holographic Wireframe-Glow IED Preview Left + Multi-Color Glass Table Right */}
-                      <div className="grid grid-cols-[140px_1fr] gap-4 items-center">
-                        <div className="flex flex-col items-center justify-center">
-                          <div
-                            className="w-[132px] h-[132px] rounded-xl border border-[#7DF9FF]/50 p-2.5 flex items-center justify-center"
-                            style={{
-                              background: 'radial-gradient(circle, rgba(56, 232, 255, 0.20), rgba(6, 30, 50, 0.42))',
-                              boxShadow: '0 0 24px rgba(56, 232, 255, 0.34), inset 0 0 18px rgba(125, 249, 255, 0.18)',
-                            }}
-                          >
-                            <img
-                              src={dev.image}
-                              alt={dev.fullName}
-                              className="max-h-[112px] w-auto object-contain"
-                              style={{ filter: 'drop-shadow(0 0 14px rgba(103, 232, 249, 0.72))' }}
-                            />
-                          </div>
-                          <div className="mt-2 w-24 h-1.5 rounded-full bg-[#38F3FF]/45 blur-[3px]" />
-                        </div>
-
-                        <div className="space-y-2.5 min-w-0">
-                          <div className="text-[16.5px] font-extrabold text-white tracking-tight truncate drop-shadow-[0_0_10px_rgba(103,232,249,0.45)]">
-                            {dev.fullName}
-                          </div>
-                          <div
-                            className="rounded-xl border border-[#A5F3FC]/42 divide-y divide-[#A5F3FC]/20 text-[11px]"
-                            style={{ background: 'rgba(8, 38, 62, 0.56)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.22)' }}
-                          >
-                            {[
-                              { icon: Cpu, label: 'Device Type', val: dev.deviceType, col: '#FFFFFF' },
-                              { icon: Radio, label: 'IP Address', val: dev.ip, col: '#38F3FF' },
-                              { icon: Layers, label: 'Unit ID', val: String(dev.unitId), col: '#FDE047' },
-                              { icon: Activity, label: 'Protocol', val: dev.protocol, col: '#4ADE80' },
-                              { icon: Database, label: 'Registers', val: dev.registerRange, col: '#E879F9' },
-                              { icon: AlertTriangle, label: 'Signals', val: dev.signals, col: '#7DD3FC' },
-                            ].map(({ icon: Icon, label, val, col }) => (
-                              <div key={label} className="grid grid-cols-[108px_1fr] items-center px-3 py-1.5">
-                                <span className="inline-flex items-center gap-1.5 text-[#E0F7FF] font-semibold">
-                                  <Icon className="w-3.5 h-3.5 text-[#7DF9FF] shrink-0" /> {label}
-                                </span>
-                                <span style={{ color: col }} className="font-mono font-extrabold truncate">: {val}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Bottom 4 Translucent Holographic Glass Action Tiles matching image_0f9e88.jpg */}
-                      <div className="grid grid-cols-4 gap-2.5 mt-3.5">
-                        {[
-                          ['Register Map', Layers],
-                          ['Live Values', Activity],
-                          ['Configuration', Settings],
-                          ['Device Info', Info],
-                        ].map(([label, IconComp]) => {
-                          const Icon = IconComp as React.FC<{ className?: string }>;
-                          return (
-                            <div
-                              key={label as string}
-                              className="rounded-xl border border-[#A5F3FC]/65 py-2.5 px-1.5 flex flex-col items-center justify-center gap-1"
-                              style={{
-                                background: 'linear-gradient(180deg, rgba(165, 243, 252, 0.18), rgba(12, 54, 84, 0.48))',
-                                boxShadow: '0 0 14px rgba(56, 232, 255, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.55)',
-                              }}
-                            >
-                              <Icon className="w-4 h-4 text-[#E6FAFF]" />
-                              <span className="text-[10.5px] font-bold text-white">{label as string}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* TOP-LAYER (z-[80]) HOLOGRAPHIC SWITCH INFO POPUP (ON HOVER OVER HIRSCHMANN RSP35) */}
-              {switchHovered && (
+              {iedPopup && (
                 <div
-                  className="absolute z-[80] pointer-events-none transition-all duration-150"
-                  style={{ left: '42%', top: '34px', width: '500px' }}
+                  className="lab-ied-projection"
+                  style={{ top: iedPopup.top }}
+                  onMouseEnter={() => clearTimeout(iedPopupCloseTimer.current)}
+                  onMouseLeave={scheduleIedPopupClose}
                 >
-                  <div
-                    className="rounded-2xl border-[1.5px] p-4 relative overflow-hidden"
-                    style={{
-                      background:
-                        'radial-gradient(ellipse 68% 48% at 18% 12%, rgba(165, 243, 252, 0.24) 0%, transparent 65%), ' +
-                        'linear-gradient(145deg, rgba(16, 62, 92, 0.70) 0%, rgba(10, 42, 68, 0.78) 52%, rgba(8, 32, 54, 0.82) 100%)',
-                      backdropFilter: 'blur(36px) saturate(170%)',
-                      WebkitBackdropFilter: 'blur(36px) saturate(170%)',
-                      borderColor: 'rgba(182, 248, 255, 0.90)',
-                      boxShadow:
-                        '0 0 28px rgba(56, 232, 255, 0.52), 0 0 60px rgba(0, 210, 255, 0.22), ' +
-                        'inset 0 1.5px 2px rgba(255, 255, 255, 0.85), inset 0 -1px 2px rgba(56, 232, 255, 0.55)',
-                    }}
-                  >
-                    <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-[#A5F3FC]/35">
-                      <div className="flex items-center gap-2 text-[12.5px] font-bold text-[#E6FAFF]">
-                        <span className="w-0.5 h-4 bg-[#7DF9FF] shadow-[0_0_8px_#7DF9FF]" />
-                        <span>Industrial Switch — Device Info</span>
+                  <svg viewBox="0 0 54 390" className="lab-ied-rays" aria-hidden="true">
+                    <path d={`M 1 ${iedPopup.rayY} L 54 61 L 54 355 Z`} className="lab-ied-ray-fill" />
+                    <path d={`M 54 61 L 1 ${iedPopup.rayY} L 54 355 M 1 ${iedPopup.rayY} L 54 211`} className="lab-ied-ray-lines" />
+                    <circle cx="2" cy={iedPopup.rayY} r="3" className="lab-ied-ray-source" />
+                  </svg>
+
+                  <section id="lab-ied-info" className="lab-ied-panel" aria-labelledby="lab-ied-title">
+                    <div className="lab-ied-bar">
+                      <span>Modbus TCP — Device Info</span>
+                      <button
+                        ref={iedPopupClose}
+                        type="button"
+                        className="lab-ied-close"
+                        aria-label="Close device info"
+                        onClick={() => dismissIedPopup(true)}
+                      >
+                        <X size={20} />
+                      </button>
+                    </div>
+
+                    <div className="lab-ied-body">
+                      <div className="lab-ied-relay">
+                        <img src={iedPopup.device.image} alt="" />
                       </div>
-                      <div className="flex items-center gap-2.5 font-mono text-[12px] text-[#CFFAFE]/90">
-                        <span>–</span><span>□</span><span>×</span>
+                      <div className="lab-ied-details">
+                        <h2 id="lab-ied-title">{iedPopup.device.fullName}</h2>
+                        <dl>
+                          {[
+                            { icon: Cpu, label: 'Device Type', value: iedPopup.device.deviceType },
+                            { icon: Network, label: 'IP Address', value: iedPopup.device.ip },
+                            { icon: Tag, label: 'Unit ID', value: iedPopup.device.unitId },
+                            { icon: Layers, label: 'Protocol', value: iedPopup.device.protocol },
+                            { icon: Database, label: 'Registers', value: iedPopup.device.registerRange },
+                            { icon: Activity, label: 'Signals', value: iedPopup.device.signals },
+                          ].map(({ icon: Icon, label, value }) => (
+                            <div key={label}>
+                              <dt><Icon size={19} aria-hidden="true" />{label}</dt>
+                              <dd>{value}</dd>
+                            </div>
+                          ))}
+                        </dl>
                       </div>
                     </div>
-                    <div className="grid grid-cols-[124px_1fr] gap-4 items-center">
-                      <div
-                        className="w-[118px] h-[118px] rounded-xl border border-[#7DF9FF]/50 p-2 flex items-center justify-center"
-                        style={{ background: 'radial-gradient(circle, rgba(56,232,255,0.20), rgba(6,30,50,0.42))' }}
-                      >
-                        <img
-                          src="assets/devices/hirschmann-rsp35.png"
-                          alt="Hirschmann RSP35"
-                          className="max-h-[100px] w-auto object-contain"
-                          style={{ filter: 'drop-shadow(0 0 12px rgba(103,232,249,0.72))' }}
-                        />
+
+                    <div className="lab-ied-actions">
+                      <button type="button" onClick={() => openIedPopupTab('REGISTER_MAPPING')}><Layers aria-hidden="true" />Register Map</button>
+                      <button type="button" onClick={() => openIedPopupTab('REGISTER_BROWSER')}><BarChart3 aria-hidden="true" />Live Values</button>
+                      <button type="button" onClick={() => openIedPopupTab('POLLING_CONFIG')}><Settings aria-hidden="true" />Configuration</button>
+                      <button type="button" aria-pressed={iedPopupPinned} onClick={() => setIedPopupPinned(true)}><Info aria-hidden="true" />Device Info</button>
+                    </div>
+                  </section>
+                </div>
+              )}
+
+              {showSwitchPopup && (
+                <section
+                  id="lab-switch-info"
+                  className="lab-switch-projection"
+                  aria-labelledby="lab-switch-title"
+                  data-pinned={switchPinned}
+                  onMouseEnter={() => clearTimeout(switchPopupCloseTimer.current)}
+                  onMouseLeave={scheduleSwitchPopupClose}
+                >
+                  <div className="lab-ied-panel lab-switch-panel" data-fault={!stationBusOk}>
+                    <div className="lab-ied-bar">
+                      <span>Station Bus Switch — Device Info</span>
+                      <button type="button" className="lab-ied-close" aria-label="Close switch details" onClick={closeSwitchPopup}>
+                        <X size={20} />
+                      </button>
+                    </div>
+                    <div className="lab-ied-body">
+                      <div className="lab-ied-relay">
+                        <img src="assets/devices/hirschmann-rsp35.png" alt="" />
                       </div>
-                      <div className="space-y-2 min-w-0">
-                        <div className="text-[16px] font-extrabold text-white">Hirschmann RSP35</div>
-                        <div className="rounded-xl border border-[#A5F3FC]/42 divide-y divide-[#A5F3FC]/20 text-[11px]" style={{ background: 'rgba(8, 38, 62, 0.56)' }}>
+                      <div className="lab-ied-details">
+                        <h2 id="lab-switch-title">Hirschmann RSP35</h2>
+                        <dl>
                           {[
                             { label: 'Device Type', val: 'Managed Industrial Ethernet Switch', col: '#FFFFFF' },
                             { label: 'Mgmt IP', val: '10.132.30.10', col: '#38F3FF' },
@@ -1350,16 +1360,20 @@ export const ModbusTcpLabPage: React.FC = () => {
                             { label: 'Uplink Port', val: 'P5 (SFP) → GTW-01 ETH0', col: '#E879F9' },
                             { label: 'Switch Status', val: stationBusOk ? 'HEALTHY · FORWARDING' : 'LINK FAULT / DOWN', col: stationBusOk ? '#4ADE80' : '#FCA5A5' },
                           ].map(({ label, val, col }) => (
-                            <div key={label} className="grid grid-cols-[100px_1fr] items-center px-3 py-1.5">
-                              <span className="text-[#E0F7FF] font-semibold">{label}</span>
-                              <span style={{ color: col }} className="font-mono font-extrabold truncate">: {val}</span>
+                            <div key={label}>
+                              <dt>{label}</dt>
+                              <dd style={{ color: col }}>{val}</dd>
                             </div>
                           ))}
-                        </div>
+                        </dl>
                       </div>
                     </div>
                   </div>
-                </div>
+                  <svg viewBox="0 0 360 49" className="lab-gateway-rays" aria-hidden="true">
+                    <path d="M 15 0 L 180 48 L 345 0 Z" className="lab-ied-ray-fill" />
+                    <path d="M 15 0 L 180 48 L 345 0 M 180 0 V 48" className="lab-ied-ray-lines" />
+                  </svg>
+                </section>
               )}
 
                             {/* PORT-TO-PORT GLOWING SVG CABLES & ANIMATED PACKETS */}
@@ -1399,17 +1413,18 @@ export const ModbusTcpLabPage: React.FC = () => {
                   const frac = cycleProgress / 0.22;
                   pktPos = samplePolyline(reqFullPts, frac);
                   pktColor = '#00E5FF';
-                  pktLabel = `REQ FC${selectedFc}`;
+                  pktLabel = `MODBUS REQ · FC${selectedFc} · Reg ${activeIed.sampleReg}`;
                 } else if (simPhase === 'RESP' && stationBusOk && !iedOfflineNow && !respTimeout) {
                   const frac = (cycleProgress - 0.22) / 0.22;
                   pktPos = samplePolyline(respFullPts, frac);
-                  pktColor = ex01 || ex02 || ex03 ? '#EF4444' : '#22C55E';
-                  pktLabel = ex01 || ex02 || ex03 ? 'EX ERR' : `${liveValue} ${activeIed.sampleUnit}`;
+                  const exCode = ex01 ? '0x01' : ex02 ? '0x02' : ex03 ? '0x03' : '';
+                  pktColor = exCode ? '#EF4444' : '#22C55E';
+                  pktLabel = exCode ? `MODBUS EX · ${exCode}` : `MODBUS RSP · ${liveValue} ${activeIed.sampleUnit}`;
                 } else if (simPhase === 'WAN_TX' && conversionHealthy && wanHealthy) {
                   const frac = (cycleProgress - 0.80) / 0.20;
                   pktPos = samplePolyline(gtwToRccPts, frac);
                   pktColor = '#A3E635';
-                  pktLabel = `IEC-104 · IOA:${activeIed.ioa}`;
+                  pktLabel = `IEC-104 · ${activeIed.iecType} · IOA:${activeIed.ioa}`;
                 }
 
                 const midSwGtwX = (ports.sw_p5.x + ports.gtw_eth0.x) / 2;
@@ -1489,34 +1504,45 @@ export const ModbusTcpLabPage: React.FC = () => {
                       (IEC-104 TCP/2404)
                     </text>
 
-                    {/* Live Animated Packet Dot + Tag */}
-                    {pktPos && (
-                      <g>
-                        <circle cx={pktPos.x} cy={pktPos.y} r="7.5" fill={pktColor} fillOpacity="0.28" />
-                        <circle cx={pktPos.x} cy={pktPos.y} r="4.8" fill="#FFFFFF" stroke={pktColor} strokeWidth="2.5" filter="url(#mbGlowCyan)" />
-                        <rect
-                          x={pktPos.x - (simPhase === 'WAN_TX' ? 56 : 40)}
-                          y={pktPos.y - 28}
-                          width={simPhase === 'WAN_TX' ? 112 : 80}
-                          height="18"
-                          rx="9"
-                          fill={simPhase === 'WAN_TX' ? '#06331F' : '#041526'}
-                          stroke={pktColor}
-                          strokeWidth="1.5"
-                        />
-                        <text
-                          x={pktPos.x}
-                          y={pktPos.y - 16}
-                          textAnchor="middle"
-                          fill={simPhase === 'WAN_TX' ? '#D9F99D' : '#FFFFFF'}
-                          fontSize="9"
-                          fontWeight="800"
-                          fontFamily="monospace"
-                        >
-                          {pktLabel}
-                        </text>
-                      </g>
-                    )}
+                    {/* Live Animated Packet Dot + Protocol Data Flow Badge */}
+                    {pktPos && (() => {
+                      const pillW = Math.max(118, Math.round(pktLabel.length * 6.1) + 22);
+                      const pillX = Math.max(8, Math.min(W - pillW - 8, pktPos.x - pillW / 2));
+                      const pillY = Math.max(8, pktPos.y - 31);
+                      const bgFill =
+                        simPhase === 'WAN_TX' ? '#06331F' :
+                        pktColor === '#EF4444' ? '#3B0D15' :
+                        pktColor === '#22C55E' ? '#052E1E' : '#05243A';
+                      return (
+                        <g>
+                          <circle cx={pktPos.x} cy={pktPos.y} r="8" fill={pktColor} fillOpacity="0.30" />
+                          <circle cx={pktPos.x} cy={pktPos.y} r="4.8" fill="#FFFFFF" stroke={pktColor} strokeWidth="2.5" filter="url(#mbGlowCyan)" />
+                          <rect
+                            x={pillX}
+                            y={pillY}
+                            width={pillW}
+                            height="21"
+                            rx="10.5"
+                            fill={bgFill}
+                            fillOpacity="0.95"
+                            stroke={pktColor}
+                            strokeWidth="1.6"
+                            filter={simPhase === 'WAN_TX' ? 'url(#mbGlowGreen)' : 'url(#mbGlowCyan)'}
+                          />
+                          <text
+                            x={pillX + pillW / 2}
+                            y={pillY + 13.8}
+                            textAnchor="middle"
+                            fill={simPhase === 'WAN_TX' ? '#D9F99D' : pktColor === '#EF4444' ? '#FECACA' : '#F0FAFF'}
+                            fontSize="9.3"
+                            fontWeight="800"
+                            fontFamily="monospace"
+                          >
+                            {pktLabel}
+                          </text>
+                        </g>
+                      );
+                    })()}
                   </svg>
                 );
               })()}
@@ -1551,21 +1577,19 @@ export const ModbusTcpLabPage: React.FC = () => {
               background:
                 'radial-gradient(ellipse 46% 32% at 50% 0%, rgba(72, 238, 255, 0.28) 0%, transparent 72%), ' +
                 'radial-gradient(ellipse 36% 24% at 16% 100%, rgba(0, 225, 255, 0.22) 0%, transparent 72%), ' +
-                'radial-gradient(ellipse 38% 24% at 78% 100%, rgba(0, 225, 255, 0.22) 0%, transparent 72%), ' +
                 'linear-gradient(180deg, rgba(24, 78, 108, 0.78) 0%, rgba(16, 56, 82, 0.84) 52%, rgba(12, 46, 68, 0.88) 100%)',
               backdropFilter: 'blur(20px)',
               WebkitBackdropFilter: 'blur(20px)',
               border: '1.5px solid rgba(86, 235, 255, 0.78)',
-              boxShadow:
-                '0 0 34px rgba(0, 224, 255, 0.34), inset 0 1px 1px rgba(190, 252, 255, 0.72), inset 0 -1px 1px rgba(0, 232, 255, 0.55)',
+              boxShadow: '0 0 34px rgba(0, 224, 255, 0.34), inset 0 1px 1px rgba(190, 252, 255, 0.72), inset 0 -1px 1px rgba(0, 232, 255, 0.55)',
             }}
           >
             <style>{`
               .mb-glass-panel::before { content:''; position:absolute; top:0; left:10%; right:10%; height:2px; background:linear-gradient(90deg,transparent,rgba(160,250,255,.92),transparent); pointer-events:none; }
               .mb-glass-panel::after { content:''; position:absolute; bottom:0; left:12%; right:12%; height:2px; background:linear-gradient(90deg,transparent,rgba(0,232,255,.85),transparent); pointer-events:none; }
               .mb-glass-scroll::-webkit-scrollbar { width: 11px; height: 11px; }
-              .mb-glass-scroll::-webkit-scrollbar-track { background: rgba(10, 42, 64, 0.72); border-left: 1px solid rgba(90, 215, 245, 0.28); }
-              .mb-glass-scroll::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #42F8FF 0%, #00D8F5 100%); border-radius: 999px; border: 2px solid rgba(10, 42, 64, 0.85); box-shadow: 0 0 12px rgba(0, 240, 255, 0.9); }
+              .mb-glass-scroll::-webkit-scrollbar-track { background: #041024; border-left: 1px solid #1E4E8C; }
+              .mb-glass-scroll::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #3B82F6 0%, #1D4ED8 100%); border-radius: 999px; border: 2px solid #041024; }
             `}</style>
 
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1661,6 +1685,8 @@ export const ModbusTcpLabPage: React.FC = () => {
               })}
             </div>
 
+            {/* 2-COLUMN DARK-BLUE SPLIT: LEFT = 32-TEST TABLE | RIGHT = STEP-BY-STEP INSPECTOR */}
+            <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-3.5 items-start">
             {/* Glass Table */}
             <div
               style={{
@@ -1672,8 +1698,8 @@ export const ModbusTcpLabPage: React.FC = () => {
               <table className="w-full text-left border-collapse font-sans text-[12.5px]">
                 <thead
                   style={{
-                    background: 'linear-gradient(180deg, rgba(64, 126, 158, 0.68) 0%, rgba(36, 86, 116, 0.76) 100%)',
-                    borderBottom: '1px solid rgba(120, 218, 245, 0.38)',
+                    background: 'linear-gradient(180deg, #0C2854 0%, #081D3F 100%)',
+                    borderBottom: '1px solid #1E4E8C',
                   }}
                   className="sticky top-0 z-10 text-[#F0FAFF] font-bold"
                 >
@@ -1762,6 +1788,62 @@ export const ModbusTcpLabPage: React.FC = () => {
                   })}
                 </tbody>
               </table>
+            </div>
+
+
+              {(() => {
+                const selTest = MODBUS_TESTS.find((x) => x.id === selectedTestId) || MODBUS_TESTS[0];
+                const selRt = testState[selTest.id];
+                const info = buildModbusTestSteps(selTest, selRt, tidHex, effectiveOrder);
+                return (
+                  <div
+                    style={{
+                      border: '1.5px solid rgba(125, 249, 255, 0.65)',
+                      background: 'radial-gradient(ellipse 65% 40% at 50% 0%, rgba(56, 232, 255, 0.18), transparent 72%), linear-gradient(180deg, rgba(18, 62, 90, 0.72) 0%, rgba(10, 38, 60, 0.86) 100%)',
+                      boxShadow: 'inset 0 1px 0 rgba(210, 252, 255, 0.42), 0 0 22px rgba(0, 224, 255, 0.18)',
+                    }}
+                    className="rounded-xl p-3.5 space-y-2.5 max-h-[385px] overflow-y-auto mb-glass-scroll"
+                  >
+                    <div className="flex items-start justify-between gap-2 pb-2 border-b border-[#1E4E8C]">
+                      <div className="min-w-0">
+                        <div className="font-mono text-[10px] font-extrabold text-[#38F3FF]">STEP-BY-STEP TEST INSPECTOR · TEST #{selTest.num}</div>
+                        <div className="text-[14px] font-extrabold text-white leading-snug mt-0.5">{selTest.name}</div>
+                      </div>
+                      <span
+                        className="shrink-0 rounded-full border-[1.5px] px-2.5 py-0.5 font-mono text-[9.5px] font-extrabold"
+                        style={
+                          selRt.status === 'PASSED'
+                            ? { background: 'rgba(16,185,129,0.28)', borderColor: '#4ADE80', color: '#DCFCE7' }
+                            : selRt.status === 'FAILED'
+                            ? { background: 'rgba(239,68,68,0.28)', borderColor: '#F87171', color: '#FEE2E2' }
+                            : { background: 'rgba(18,52,102,0.75)', borderColor: '#3B82F6', color: '#BFDBFE' }
+                        }
+                      >
+                        {selRt.enabled ? (selTest.isFault ? 'FAULT ACTIVE' : 'PASSED') : 'IDLE'}
+                      </span>
+                    </div>
+                    <div className="rounded-lg border border-[#1E4E8C] bg-[#061630]/90 px-2.5 py-1.5 font-mono text-[10px]">
+                      <span className="text-[#93C5FD] font-bold">Affected Path: </span>
+                      <span className="text-[#E0F7FF]">{info.path}</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {info.steps.map((st) => (
+                        <div key={st.num} className="rounded-lg border border-[#1E4E8C]/75 bg-[#081C3B]/90 px-2.5 py-2 flex items-start gap-2.5">
+                          <span style={{ backgroundColor: st.color, color: '#031829' }} className="w-5 h-5 rounded-full shrink-0 inline-flex items-center justify-center font-mono text-[10px] font-black mt-0.5">{st.num}</span>
+                          <div className="min-w-0">
+                            <div style={{ color: st.color }} className="text-[11px] font-extrabold">Step {st.num}: {st.title}</div>
+                            <div className="text-[11px] text-[#E0F3FC] leading-relaxed mt-0.5">{st.detail}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="rounded-lg border border-[#FACC15]/45 bg-[#041024] p-2 font-mono text-[10px]">
+                      <div className="text-[#FDE047] font-extrabold mb-0.5">Wire Frame / MBAP Hex Trace:</div>
+                      <div className="text-[#A3E635] break-all">{info.frameHex}</div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {showHistory && (

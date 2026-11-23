@@ -192,7 +192,7 @@ export const OpcUaLabPage: React.FC = () => {
 
   // Navigation & Playback Controls (Default 0.5x)
   const [activeTab, setActiveTab] = useState<OpcUaV3Tab>('TOPOLOGY_LIVE');
-  const [speed, setSpeed] = useState<0.5 | 1 | 2 | 4>(0.5);
+  const [speed, setSpeed] = useState<0.1 | 0.25 | 0.5 | 1 | 2 | 4>(0.1);
   const [playing, setPlaying] = useState<boolean>(true);
 
   // Server & Security Config (Simulated)
@@ -716,7 +716,7 @@ export const OpcUaLabPage: React.FC = () => {
           </button>
 
           <div className="flex items-center rounded-lg border border-[#184064] bg-[#04101E] p-0.5 font-mono text-[10px]">
-            {([0.5, 1, 2, 4] as const).map((s) => (
+            {([0.1, 0.25, 0.5, 1, 2, 4] as const).map((s) => (
               <button
                 key={s}
                 type="button"
@@ -735,7 +735,7 @@ export const OpcUaLabPage: React.FC = () => {
           <button
             type="button"
             onClick={() => {
-              setSpeed(0.5);
+              setSpeed(0.1);
               setPlaying(true);
               handleStopAndResetAllFaults(true);
             }}
@@ -1150,6 +1150,100 @@ export const OpcUaLabPage: React.FC = () => {
                   {playing && sessionActive && dmzOk && cloudOk && (() => {
                     const pt = dotAt(efToCldP, (animPhase + 0.86) % 1);
                     return pt ? <circle cx={pt.x} cy={pt.y} r="6.2" fill="#F5E8FF" stroke="#C864FF" strokeWidth="2" filter="url(#glowViolet)" /> : null;
+                  })()}
+
+                  {/* ================= LIVE MOVING PROTOCOL DATA FLOW BADGES ACROSS ALL 5 ZONES ================= */}
+                  {(() => {
+                    const renderFlowBadge = (
+                      key: string,
+                      pt: PortPoint | null,
+                      label: string,
+                      stroke: string,
+                      fill: string,
+                      textFill: string,
+                      dy = -26
+                    ) => {
+                      if (!pt) return null;
+                      const w = Math.max(122, Math.round(label.length * 7.6) + 22);
+                      const bx = Math.max(12, Math.min(1908 - w, pt.x - w / 2));
+                      const by = Math.max(44, Math.min(578, pt.y + dy));
+                      return (
+                        <g key={key} style={{ pointerEvents: 'none' }}>
+                          <rect x={bx} y={by} width={w} height="24" rx="12" fill={fill} fillOpacity="0.94" stroke={stroke} strokeWidth="1.8" />
+                          <text x={bx + w / 2} y={by + 15.8} textAnchor="middle" fill={textFill} fontSize="11.5" fontWeight="800" fontFamily="monospace">
+                            {label}
+                          </text>
+                        </g>
+                      );
+                    };
+
+                    return (
+                      <>
+                        {lanAUp && renderFlowBadge(
+                          'opc-b-z1a',
+                          dotAt(laPktRoutes[0], animPhase % 1),
+                          'IEC 61850 · PRP-A',
+                          '#38BDF8',
+                          '#05233A',
+                          '#E0F7FF',
+                          -28
+                        )}
+                        {lanBUp && renderFlowBadge(
+                          'opc-b-z1b',
+                          dotAt(lbPktRoutes[2], (animPhase + 0.45) % 1),
+                          'IEC 61850 · PRP-B',
+                          '#C864FF',
+                          '#23103D',
+                          '#F5E8FF',
+                          12
+                        )}
+                        {fieldLinkUp && aggSwitchUp && renderFlowBadge(
+                          'opc-b-z23',
+                          dotAt(z2To3A, animPhase % 1),
+                          'MMS · TCP/102',
+                          '#00E5FF',
+                          '#05263D',
+                          '#E0FAFF',
+                          -30
+                        )}
+                        {fieldLinkUp && aggSwitchUp && sessionActive && renderFlowBadge(
+                          'opc-b-z3opc',
+                          dotAt(z3OpcP, (animPhase + 0.62) % 1),
+                          'OPC UA · Client/Server',
+                          '#22D3EE',
+                          '#062B42',
+                          '#CFFAFE',
+                          14
+                        )}
+                        {sessionActive && aggServerOk && otFirewallOk && renderFlowBadge(
+                          'opc-b-z34',
+                          dotAt(z3ToFw, (animPhase + 0.1) % 1),
+                          'UA TCP/4840 · TLS',
+                          '#38F3FF',
+                          '#052B44',
+                          '#E6FAFF',
+                          -30
+                        )}
+                        {sessionActive && aggServerOk && historianOk && renderFlowBadge(
+                          'opc-b-z45',
+                          dotAt(aggToDpP, (animPhase + 0.66) % 1),
+                          bufferedSamples > 0 ? `Buffered · ${bufferedSamples}` : 'DataChange · Good',
+                          bufferedSamples > 0 ? '#FBBF24' : '#4ADE80',
+                          bufferedSamples > 0 ? '#332206' : '#052E1E',
+                          bufferedSamples > 0 ? '#FEF08A' : '#DCFCE7',
+                          -30
+                        )}
+                        {sessionActive && aggServerOk && dmzOk && cloudOk && renderFlowBadge(
+                          'opc-b-cld',
+                          dotAt(efToCldP, (animPhase + 0.86) % 1),
+                          'HTTPS/MQTT · Cloud',
+                          '#2AE8C8',
+                          '#05302B',
+                          '#CCFBF1',
+                          -30
+                        )}
+                      </>
+                    );
                   })()}
                 </svg>
               );

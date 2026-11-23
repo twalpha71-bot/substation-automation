@@ -38,6 +38,52 @@ declare global {
   }
 }
 
+let threeScript: Promise<void> | undefined;
+let districtLoaderScript: Promise<void> | undefined;
+
+function loadLocalThree() {
+  if (window.THREE?.WebGLRenderer) return Promise.resolve();
+  threeScript ??= new Promise<void>((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = `${import.meta.env.BASE_URL}assets/three.min.js`;
+    script.async = true;
+    const failed = () => {
+      script.remove();
+      threeScript = undefined;
+      reject(new Error('Failed to load the local Three.js library.'));
+    };
+    script.onload = () => window.THREE?.WebGLRenderer ? resolve() : failed();
+    script.onerror = failed;
+    document.head.appendChild(script);
+  });
+  return threeScript;
+}
+
+async function getDistrictVehicleLoader(three: any) {
+  if (!three.GLTFLoader) {
+    districtLoaderScript ??= new Promise<void>((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = `${import.meta.env.BASE_URL}assets/substation/GLTFLoader.js`;
+      script.onload = () => resolve();
+      script.onerror = () => {
+        script.remove();
+        districtLoaderScript = undefined;
+        reject(new Error('Failed to load the local glTF loader.'));
+      };
+      document.head.appendChild(script);
+    });
+    await districtLoaderScript;
+  }
+  return new three.GLTFLoader();
+}
+
+const districtCamera = {
+  theta: -0.21,
+  phi: 1.15,
+  radius: 98,
+  target: [0, 5.0, 0.4] as [number, number, number],
+};
+
 type LightingPreset = 'DUSK_TWILIGHT' | 'DAYLIGHT_CLEAR' | 'NIGHT_FLOODLIGHT';
 type CameraPreset =
   | 'ISOMETRIC'
@@ -732,7 +778,8 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
   }, [isFullscreen, onCloseFullscreen]);
   const [autoRotate, setAutoRotate] = useState<boolean>(false);
   const [zoom, setZoom] = useState<number>(1.0);
-  const [lightingPreset, setLightingPreset] = useState<LightingPreset>('DUSK_TWILIGHT');
+  const [lightingPreset, setLightingPreset] = useState<LightingPreset>('NIGHT_FLOODLIGHT');
+  const [showIndustrialDistrict, setShowIndustrialDistrict] = useState(true);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('ISOMETRIC');
   const [cameraNavMode, setCameraNavMode] = useState<CameraNavMode>('PAN');
   const [followRoadActive, setFollowRoadActive] = useState<boolean>(false);
@@ -1061,6 +1108,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     autoRotate,
     zoom,
     lightingPreset,
+    showIndustrialDistrict,
     labelMode,
     xraySwitchgearRoof,
     showElectricalConnections,
@@ -1092,6 +1140,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       autoRotate,
       zoom,
       lightingPreset,
+      showIndustrialDistrict,
       labelMode,
       xraySwitchgearRoof,
       showElectricalConnections,
@@ -1121,6 +1170,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     autoRotate,
     zoom,
     lightingPreset,
+    showIndustrialDistrict,
     labelMode,
     xraySwitchgearRoof,
     showElectricalConnections,
@@ -1143,14 +1193,12 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
 
   // Unified world-space camera state supporting Orbit, Ground-Plane Pan, Street Walk, Free 3D Fly & Road Follow
   const camControlRef = useRef({
-    theta: -0.28,
-    phi: 1.10,
-    radius: 86,
-    target: [13.5, 2.2, 2.5] as [number, number, number],
-    desiredTarget: [13.5, 2.2, 2.5] as [number, number, number],
-    desiredTheta: -0.28,
-    desiredPhi: 1.10,
-    desiredRadius: 86,
+    ...districtCamera,
+    target: [...districtCamera.target] as [number, number, number],
+    desiredTarget: [...districtCamera.target] as [number, number, number],
+    desiredTheta: districtCamera.theta,
+    desiredPhi: districtCamera.phi,
+    desiredRadius: districtCamera.radius,
     isInterpolating: false,
     eyePos: [-10.0, 36.0, 74.0] as [number, number, number],
     yaw: -0.28,
@@ -1174,39 +1222,18 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     },
   });
 
-  // Load Three.js r128 progressively
+  // The embedded scene or the fullscreen dialog loads Three.js on demand.
   useEffect(() => {
-    if (window.THREE && window.THREE.WebGLRenderer) {
-      setThreeLoaded(true);
-      setLoadingProgress(100);
-      return;
-    }
-
+    let active = true;
     setLoadingProgress(45);
-    const existingScript = document.getElementById('three-js-r128-cdn') as HTMLScriptElement | null;
-    if (existingScript) {
-      const checkTimer = window.setInterval(() => {
-        if (window.THREE && window.THREE.WebGLRenderer) {
-          window.clearInterval(checkTimer);
-          setLoadingProgress(100);
-          setThreeLoaded(true);
-        }
-      }, 80);
-      return () => window.clearInterval(checkTimer);
-    }
-
-    const script = document.createElement('script');
-    script.id = 'three-js-r128-cdn';
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
-    script.async = true;
-    script.onload = () => {
-      setLoadingProgress(100);
+    void loadLocalThree().then(() => {
+      if (!active) return;
       setThreeLoaded(true);
-    };
-    script.onerror = () => {
-      setWebglError('Three.js library could not be fetched.');
-    };
-    document.head.appendChild(script);
+      setLoadingProgress(100);
+    }, () => {
+      if (active) setWebglError('Three.js library could not be loaded.');
+    });
+    return () => { active = false; };
   }, []);
 
   const switchCameraNavMode = (nextMode: CameraNavMode) => {
@@ -1296,7 +1323,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     c.desiredPhi = 1.06;
     c.desiredRadius = 112;
     setCameraPreset('ISOMETRIC');
-    setHoveredNodeTitle('Fit All: Framing Complete 3D World (RCC, 132/33/11 kV Substation & All 46 Residential Houses)');
+    setHoveredNodeTitle('Fit All: Framing Complete 3D World (RCC, 132/33/11 kV Substation & Surrounding District)');
   };
 
   const applyCameraPreset = (preset: CameraPreset) => {
@@ -1309,10 +1336,10 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     c.isInterpolating = true;
     switch (preset) {
       case 'ISOMETRIC':
-        c.desiredTarget = [6.0, 2.2, -2.0];
-        c.desiredTheta = -0.28;
-        c.desiredPhi = 1.10;
-        c.desiredRadius = 86;
+        c.desiredTarget = [...districtCamera.target];
+        c.desiredTheta = districtCamera.theta;
+        c.desiredPhi = districtCamera.phi;
+        c.desiredRadius = districtCamera.radius;
         break;
       case 'TOP_PLAN':
         c.desiredTarget = [8, 0, -4];
@@ -1359,12 +1386,14 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         c.desiredRadius = 26;
         break;
       case 'RESIDENTIAL':
+        setShowIndustrialDistrict(false);
         c.desiredTarget = [58, 3.2, -10];
         c.desiredTheta = -0.36;
         c.desiredPhi = 1.04;
         c.desiredRadius = 68;
         break;
       case 'DIST_TX':
+        setShowIndustrialDistrict(false);
         c.desiredTarget = [43.2, 5.2, 8.2];
         c.desiredTheta = -0.32;
         c.desiredPhi = 1.12;
@@ -1510,9 +1539,14 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       return;
     }
 
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const compactView = () => container.clientWidth < 640;
+    let resolutionScale = 1;
+    const pixelRatio = () => Math.max(0.75, Math.min(window.devicePixelRatio || 1, compactView() ? 1 : 1.75) * resolutionScale);
+    renderer.setPixelRatio(pixelRatio());
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     if (THREE.ACESFilmicToneMapping !== undefined) {
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1733,8 +1767,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     const sunLight = new THREE.DirectionalLight(0x8ab4f8, 0.52);
     sunLight.position.set(-36, 64, 38);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.mapSize.set(compactView() ? 1024 : 2048, compactView() ? 1024 : 2048);
     sunLight.shadow.camera.near = 10;
     sunLight.shadow.camera.far = 210;
     const d = 75;
@@ -1890,6 +1923,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         baseSpeed: number;
         offset: number;
         baseColorHex: number;
+        instanced?: boolean;
       }[];
     } = {
       positionIndicators: {},
@@ -2011,14 +2045,18 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       core.position.y = height / 2;
       grp.add(core);
 
-      for (let i = 0; i < sheds; i++) {
-        const sy = (height / (sheds + 1)) * (i + 1);
-        const disc = new THREE.Mesh(
+      if (sheds > 0) {
+        const discs = new THREE.InstancedMesh(
           isGrey ? sharedGeos.insulatorShedGrey : sharedGeos.insulatorShedBrown,
-          isGrey ? mats.porcelainGrey : mats.porcelainBrown
+          isGrey ? mats.porcelainGrey : mats.porcelainBrown,
+          sheds
         );
-        disc.position.y = sy;
-        grp.add(disc);
+        const matrix = new THREE.Matrix4();
+        for (let i = 0; i < sheds; i++) {
+          discs.setMatrixAt(i, matrix.makeTranslation(0, height * (i + 1) / (sheds + 1), 0));
+        }
+        discs.instanceMatrix.needsUpdate = true;
+        grp.add(discs);
       }
 
       if (withCoronaRing) {
@@ -2295,13 +2333,20 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         txGroup.add(rib);
       });
 
+      const radiatorPositions: [number, number][] = [];
+      for (const x of [-2.9, 2.9]) {
+        for (let z = -1.25; z <= 1.25; z += 0.36) radiatorPositions.push([x, z]);
+      }
+      const radiator = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(0.88, 3.55, 0.08), mats.radiatorFin, radiatorPositions.length
+      );
+      const radiatorMatrix = new THREE.Matrix4();
+      radiatorPositions.forEach(([x, z], index) => radiator.setMatrixAt(index, radiatorMatrix.makeTranslation(x, 2.7, z)));
+      radiator.instanceMatrix.needsUpdate = true;
+      radiator.castShadow = true;
+      txGroup.add(radiator);
+
       [-2.9, 2.9].forEach((rx) => {
-        for (let f = -1.25; f <= 1.25; f += 0.36) {
-          const fin = new THREE.Mesh(new THREE.BoxGeometry(0.88, 3.55, 0.08), mats.radiatorFin);
-          fin.position.set(rx, 2.7, f);
-          fin.castShadow = true;
-          txGroup.add(fin);
-        }
         const topManifold = new THREE.Mesh(
           new THREE.CylinderGeometry(0.12, 0.12, 2.9, 8),
           mats.transformerTank
@@ -2695,6 +2740,9 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     // CB-11 Bus-Tie 3-Phase Enclosed Copper Busbars bridging BUS-11-A and BUS-11-B
     createThreePhaseConnection('BAY-11-BC', [-1.8, 3.25, 22.5], [1.8, 3.25, 22.5], 'Z', 0.24, 0.0, 'ENCLOSED_COPPER_BUS', 0.04);
 
+    const pulseGeometry = new THREE.CylinderGeometry(0.055, 0.055, 0.68, 10);
+    const pulseMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1, side: THREE.FrontSide });
+    const pulseInstanceColor = new THREE.Color();
     // Helper to register animated power-flow pulse path for a bay
     const addPowerPulsePath = (
       p1: [number, number, number],
@@ -2719,15 +2767,12 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       // Three spaced glowing streaks per physical conductor route for a cleaner, lower-density power flow.
       const flowStreakDensity = 3;
       for (let k = 0; k < flowStreakDensity; k++) {
-        const orb = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.055, 0.055, 0.68, 10),
-          new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 1.0 })
-        );
+        const orb = new THREE.Object3D();
         // A slim directional streak is aligned to the physical conductor span.
         const tangent = new THREE.Vector3(p2[0]-p1[0], p2[1]-p1[1], p2[2]-p1[2]).normalize();
         orb.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
-        scene.add(orb);
         dynamicActors.powerPulses.push({
+          instanced: true,
           mesh: orb,
           p1,
           p2,
@@ -2747,6 +2792,10 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     // 230 V Single-Phase (L-N) Service Drops -> Suburban Residential Houses.
     const residentialGroup = new THREE.Group();
     scene.add(residentialGroup);
+    const residentialTraining = new THREE.Group();
+    residentialGroup.add(residentialTraining);
+    const legacyAvenueMarkings = new THREE.Group();
+    residentialGroup.add(legacyAvenueMarkings);
     const hv11LiveMeshes: any[] = [];
     const lt415LiveMeshes: any[] = [];
     const serviceDropLiveMeshes: any[] = [];
@@ -2760,6 +2809,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     const houseFeederId = (index: number) => streetFeederIds[Math.min(streetFeederIds.length - 1, Math.floor(index * streetFeederIds.length / 46))] || 'BAY-11-F01';
     const residentialGlowPools: any[] = [];
     const streetLights: any[] = [];
+    const streetLightGlows: any[] = [];
     const distPulseActors: {
       mesh: any;
       curve: any;
@@ -3036,6 +3086,9 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       center: [number, number, number];
     }[] = [];
     let roadCounter = 0;
+    const districtRoads: any[] = [];
+    const avenueSouthFixtures = new THREE.Group();
+    residentialGroup.add(avenueSouthFixtures);
 
     // Optimized road builder using textured black-and-yellow curb strips + pickable road exploration metadata
     const buildRoadSegment = (
@@ -3073,6 +3126,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       const d = axis === 'X' ? width : len;
       const road = residentialBox(w, 0.10, d, cx, 0.01, cz, asphaltMat);
       road.receiveShadow = true;
+      if (roadCounter <= 3) districtRoads.push(road);
       const p1: [number, number, number] = axis === 'X' ? [cx - len / 2 + 2, 1.72, cz] : [cx, 1.72, cz - len / 2 + 2];
       const p2: [number, number, number] = axis === 'X' ? [cx + len / 2 - 2, 1.72, cz] : [cx, 1.72, cz + len / 2 - 2];
       const roadMeta: WorldInspectableItem = {
@@ -3087,14 +3141,15 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       pickableMeshes.push(road);
       roadSegmentsRegistry.push({ id: roadId, title: roadTitle, p1, p2, center: [cx, 1.2, cz] });
 
-      // Yellow dashed road-center markings
+      const markingsParent = roadCounter === 1 ? legacyAvenueMarkings : residentialGroup;
+        // Yellow dashed road-center markings
       const steps = Math.floor(len / 5.2);
       for (let i = 0; i < steps; i++) {
         const offset = -len / 2 + 2.6 + i * 5.2;
         if (axis === 'X') {
-          residentialBox(2.4, 0.02, 0.18, cx + offset, 0.075, cz, roadLineYellowMat);
+          residentialBox(2.4, 0.02, 0.18, cx + offset, 0.075, cz, roadLineYellowMat, markingsParent);
         } else {
-          residentialBox(0.18, 0.02, 2.4, cx, 0.075, cz + offset, roadLineYellowMat);
+          residentialBox(0.18, 0.02, 2.4, cx, 0.075, cz + offset, roadLineYellowMat, markingsParent);
         }
       }
 
@@ -3104,11 +3159,11 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         });
         for (const side of [-1, 1]) {
           if (axis === 'X') {
-            residentialBox(len, 0.16, 1.35, cx, 0.05, cz + side * (width / 2 + 0.72), sidewalkMat);
-            residentialBox(len, 0.19, 0.24, cx, 0.065, cz + side * (width / 2 + 0.08), curbMat);
+            residentialBox(len, 0.16, 1.35, cx, 0.05, cz + side * (width / 2 + 0.72), sidewalkMat, roadCounter === 1 && side === 1 ? legacyAvenueMarkings : residentialGroup);
+            residentialBox(len, 0.19, 0.24, cx, 0.065, cz + side * (width / 2 + 0.08), curbMat, markingsParent);
           } else {
             residentialBox(1.35, 0.16, len, cx + side * (width / 2 + 0.72), 0.05, cz, sidewalkMat);
-            const cMesh = residentialBox(len, 0.19, 0.24, cx + side * (width / 2 + 0.08), 0.065, cz, curbMat);
+            const cMesh = residentialBox(len, 0.19, 0.24, cx + side * (width / 2 + 0.08), 0.065, cz, curbMat, markingsParent);
             cMesh.rotation.y = Math.PI / 2;
           }
         }
@@ -3149,6 +3204,8 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     buildRoadSegment(-82, -37, 47, 5.6, 'X', true);
     buildRoadSegment(-82, -8, 47, 5.6, 'X', true);
 
+    // Keep the original residential model and its feeder exercise available as a separate view.
+    const legacyApartmentsStart = residentialGroup.children.length;
     const aptWalls = [rMat(0xcbd6df, 0.88, 0.06), rMat(0xe3d7c4, 0.88, 0.06), rMat(0xb8c8d5, 0.88, 0.06)];
     const aptRoof = rMat(0x354658, 0.78, 0.08);
     const aptTrim = rMat(0x526c7c, 0.72, 0.08);
@@ -3322,6 +3379,8 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       });
     });
 
+    residentialGroup.children.slice(legacyApartmentsStart).forEach((item: any) => residentialTraining.add(item));
+
     // ==================== 2. SUBSTATION PERIMETER WROUGHT-IRON FENCE, BOLLARDS & FLOWERBEDS ====================
     const buildFenceRun = (
       x1: number,
@@ -3451,56 +3510,71 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     ].forEach(([tx, tz, sc], i) => makeTree(tx, tz, sc, i + 1));
 
     // ==================== 4. 26 SLENDER WARM AMBER LED STREETLIGHTS (2700-3200K) ====================
-    const addStreetLight = (x: number, z: number, armDirX: number, armDirZ: number, withPointLight = false) => {
-      const poleH = 6.6;
-      residentialCyl(0.065, 0.11, poleH, x, poleH / 2, z, fenceIronMat, residentialGroup, 6);
-      residentialCyl(0.16, 0.18, 0.45, x, 0.22, z, foundationStoneMat, residentialGroup, 6);
-
-      const armLen = 1.55;
-      const tipX = x + armDirX * armLen;
-      const tipZ = z + armDirZ * armLen;
-      const armStart = new THREE.Vector3(x, poleH - 0.15, z);
-      const armEnd = new THREE.Vector3(tipX, poleH + 0.22, tipZ);
-      const armVec = armEnd.clone().sub(armStart);
-      const armMesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.04, 0.055, armVec.length(), 6),
-        fenceIronMat
-      );
-      armMesh.position.copy(armStart).add(armEnd).multiplyScalar(0.5);
-      armMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), armVec.normalize());
-      residentialGroup.add(armMesh);
-
-      residentialBox(0.62, 0.12, 0.34, tipX, poleH + 0.22, tipZ, fenceIronMat);
-      const lens = residentialBox(0.50, 0.06, 0.26, tipX, poleH + 0.15, tipZ, lampBulb);
-      streetLights.push(lens);
+    const streetPoleHeight = 6.6;
+    const streetArmLength = 1.55;
+    const streetArmY = 0.37;
+    const streetParts = [
+      { geometry: new THREE.CylinderGeometry(0.065, 0.11, streetPoleHeight, 6), material: fenceIronMat },
+      { geometry: new THREE.CylinderGeometry(0.16, 0.18, 0.45, 6), material: foundationStoneMat },
+      { geometry: new THREE.CylinderGeometry(0.04, 0.055, Math.hypot(streetArmLength, streetArmY), 6), material: fenceIronMat },
+      { geometry: new THREE.BoxGeometry(0.62, 0.12, 0.34), material: fenceIronMat },
+      { geometry: new THREE.BoxGeometry(0.50, 0.06, 0.26), material: lampBulb },
+    ];
+    const streetPoolGeometry = new THREE.PlaneGeometry(8.8, 8.8);
+    const streetMatrices = new Map<any, any[][]>();
+    const streetTransform = new THREE.Object3D();
+    const vertical = new THREE.Vector3(0, 1, 0);
+    const addStreetLight = (x: number, z: number, armDirX: number, armDirZ: number, withPointLight = false, parent = residentialGroup) => {
+      const poleH = streetPoleHeight;
+      const tipX = x + armDirX * streetArmLength;
+      const tipZ = z + armDirZ * streetArmLength;
+      let parts = streetMatrices.get(parent);
+      if (!parts) {
+        parts = streetParts.map(() => []);
+        streetMatrices.set(parent, parts);
+      }
+      const positions = [
+        [x, poleH / 2, z], [x, 0.22, z],
+        [(x + tipX) / 2, poleH + 0.035, (z + tipZ) / 2],
+        [tipX, poleH + 0.22, tipZ], [tipX, poleH + 0.15, tipZ],
+      ];
+      positions.forEach(([px, py, pz], i) => {
+        streetTransform.position.set(px, py, pz);
+        streetTransform.quaternion.identity();
+        if (i === 2) {
+          streetTransform.quaternion.setFromUnitVectors(vertical, new THREE.Vector3(tipX - x, streetArmY, tipZ - z).normalize());
+        }
+        streetTransform.updateMatrix();
+        parts[i].push(streetTransform.matrix.clone());
+      });
 
       // Soft radial bloom sprite around luminaire
       if (THREE.Sprite) {
         const haloSprite = new THREE.Sprite(lampSpriteMat);
         haloSprite.position.set(tipX, poleH + 0.08, tipZ);
         haloSprite.scale.set(1.55, 1.55, 1);
-        residentialGroup.add(haloSprite);
-        residentialGlowPools.push(haloSprite);
+        parent.add(haloSprite);
+        streetLightGlows.push(haloSprite);
       }
 
       // Soft radial gradient golden light pool on the dark asphalt road below
-      const roadPool = new THREE.Mesh(new THREE.PlaneGeometry(8.8, 8.8), lightPoolMat);
+      const roadPool = new THREE.Mesh(streetPoolGeometry, lightPoolMat);
       roadPool.rotation.x = -Math.PI / 2;
       roadPool.position.set(tipX, 0.075, tipZ);
-      residentialGroup.add(roadPool);
-      residentialGlowPools.push(roadPool);
+      parent.add(roadPool);
+      streetLightGlows.push(roadPool);
 
       if (withPointLight) {
         const pt = new THREE.PointLight(0xffb84d, 0.88, 28, 1.6);
         pt.position.set(tipX, poleH - 0.2, tipZ);
-        residentialGroup.add(pt);
+        parent.add(pt);
         streetLights.push(pt);
       }
     };
 
     [-64, -48, -34, -18, -2, 14, 30, 48, 66, 84, 102].forEach((sx, idx) => {
       addStreetLight(sx, 24.8, 0, 1, idx % 3 === 0);
-      addStreetLight(sx + 4, 33.6, 0, -1, false);
+      addStreetLight(sx + 4, 33.6, 0, -1, false, avenueSouthFixtures);
     });
     [16, 4, -8, -20, -32, -44, -54].forEach((sz, idx) => {
       addStreetLight(32.3, sz, 1, 0, idx % 2 === 0);
@@ -3522,6 +3596,18 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       addStreetLight(sx, -41.1, 0, -1, idx === 2);
       addStreetLight(sx + 3, -47.9, 0, 1, false);
     });
+
+    streetMatrices.forEach((parts, parent) => {
+      for (const [i, matrices] of parts.entries()) {
+        const { geometry, material } = streetParts[i];
+        const fixtures = new THREE.InstancedMesh(geometry, material, matrices.length);
+        matrices.forEach((matrix, index) => fixtures.setMatrixAt(index, matrix));
+        fixtures.instanceMatrix.needsUpdate = true;
+        parent.add(fixtures);
+        if (material === lampBulb) streetLights.push(fixtures);
+      }
+    });
+    streetMatrices.clear();
 
     // ==================== 5. 15 DETAILED SUBURBAN HOUSES MATCHING IMAGE 1 ====================
     const makeSlopedGableRoof = (
@@ -3609,7 +3695,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       house.position.set(hx, 0, hz);
       // Orient house so the gable front facade, porch pillars, and glowing golden windows face the camera & street like Image 1
       house.rotation.y = rotY + ((idx % 3) - 1) * 0.04;
-      residentialGroup.add(house);
+      residentialTraining.add(house);
 
       const wallMat = wallMats[idx % wallMats.length];
       const wingWallMat = wallMats[(idx + 1) % wallMats.length];
@@ -3872,6 +3958,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     });
 
     // ==================== 6. ENGINEERING-ACCURATE 11 kV -> 250 kVA DT -> 415 V LT -> 230 V SERVICE NETWORK ====================
+    const legacyNetworkStart = residentialGroup.children.length;
     const build11kVPole = (px: number, pz: number, rotY = 0) => {
       const pGrp = new THREE.Group();
       pGrp.position.set(px, 0, pz);
@@ -4216,6 +4303,570 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     const neighborhoodLightC = new THREE.PointLight(0xffb84d, 1.25, 78, 1.3);
     neighborhoodLightC.position.set(-6, 15, -44);
     residentialGroup.add(neighborhoodLightC);
+
+    residentialGroup.children.slice(legacyNetworkStart).forEach((item: any) => residentialTraining.add(item));
+
+    // The commercial district is visual scenery. Its lights are independent of the
+    // residential feeder exercise and it does not add any objects to equipment picking.
+    const district = new THREE.Group();
+    district.name = 'Night industrial district';
+    scene.add(district);
+    const districtMaterials = new Set<any>();
+    const standard = (color: number, roughness: number, metalness = 0) => {
+      const material = new THREE.MeshStandardMaterial({ color, roughness, metalness });
+      districtMaterials.add(material);
+      return material;
+    };
+    const basic = (color: number) => {
+      const material = new THREE.MeshBasicMaterial({ color });
+      districtMaterials.add(material);
+      return material;
+    };
+
+    // Cheap, static environment reflections for the glass and car paint only.
+    // The gradient and cloud bands live in a world-space sky dome.
+    const skyGeometry = new THREE.SphereGeometry(570, 32, 16);
+    const skyMaterial = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      vertexShader: `
+        varying vec3 direction;
+        void main() {
+          direction = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 direction;
+        void main() {
+          vec3 ray = normalize(direction);
+          float horizon = exp(-12.0 * abs(ray.y));
+          vec3 base = mix(vec3(0.010, 0.020, 0.057), vec3(0.053, 0.094, 0.174), horizon);
+          float streak = sin(ray.x * 33.0 + sin(ray.z * 15.0) * 1.6 + ray.y * 95.0)
+                       * sin(ray.z * 26.0 - ray.y * 73.0);
+          float wisps = smoothstep(0.32, 0.92, streak) * exp(-18.0 * abs(ray.y - 0.025));
+          gl_FragColor = vec4(base + vec3(0.016, 0.024, 0.045) * wisps, 1.0);
+        }
+      `,
+    });
+    districtMaterials.add(skyMaterial);
+    const nightSky = new THREE.Mesh(skyGeometry, skyMaterial);
+    nightSky.renderOrder = -5;
+    district.add(nightSky);
+
+    const reflectionCanvas = document.createElement('canvas');
+    reflectionCanvas.width = 256;
+    reflectionCanvas.height = 128;
+    const skyContext = reflectionCanvas.getContext('2d');
+    if (skyContext) {
+      const gradient = skyContext.createLinearGradient(0, 0, 0, 128);
+      gradient.addColorStop(0, '#081124');
+      gradient.addColorStop(0.48, '#5c7da1');
+      gradient.addColorStop(0.55, '#263648');
+      gradient.addColorStop(1, '#0a0d15');
+      skyContext.fillStyle = gradient;
+      skyContext.fillRect(0, 0, 256, 128);
+      for (let i = 0; i < 24; i++) {
+        const x = i * 11;
+        const height = 6 + (i * 17) % 16;
+        skyContext.fillStyle = '#202c40';
+        skyContext.fillRect(x, 69 - height, 8, height);
+        skyContext.fillStyle = i % 3 === 0 ? '#ffca83' : '#859ab3';
+        for (let y = 72 - height; y < 68; y += 4) {
+          skyContext.fillRect(x + 2, y, 1, 1);
+          skyContext.fillRect(x + 5, y, 1, 1);
+        }
+      }
+    }
+    const reflectionTexture = new THREE.CanvasTexture(reflectionCanvas);
+    reflectionTexture.encoding = THREE.sRGBEncoding;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const districtEnvironment = pmrem.fromEquirectangular(reflectionTexture);
+    pmrem.dispose();
+    reflectionTexture.dispose();
+
+    // A lit pane retains the same reflective surface with light behind it.
+    const occupiedGlass = standard(0x9e9f9a, 0.30, 0.45);
+    occupiedGlass.envMap = districtEnvironment.texture;
+    occupiedGlass.emissive.setHex(0xffad55);
+    occupiedGlass.emissiveIntensity = 0.68;
+    const frameSteel = standard(0x4b5968, 0.57, 0.48);
+    const warehouseSiding = standard(0x89919c, 0.64, 0.25);
+    const roofMetal = standard(0x536076, 0.66, 0.30);
+    const paving = standard(0x666874, 0.87);
+    const dockDoor = standard(0x333e50, 0.52, 0.38);
+    const yellowPaint = basic(0xd8a536);
+    const whitePaint = basic(0xb9c2c9);
+    const districtAsphalt = standard(0x24272b, 0.68, 0.10);
+    districtAsphalt.envMap = districtEnvironment.texture;
+    districtAsphalt.envMapIntensity = 0.37;
+    const originalYardSurface = yardPad.material;
+    const gravelSurface = standard(0x535050, 0.89);
+    const asphaltGrain = document.createElement('canvas');
+    asphaltGrain.width = asphaltGrain.height = 128;
+    const grainContext = asphaltGrain.getContext('2d');
+    if (grainContext) {
+      const pixels = grainContext.createImageData(128, 128);
+      let seed = 10423;
+      for (let i = 0; i < pixels.data.length; i += 4) {
+        seed = (Math.imul(1664525, seed) + 1013904223) >>> 0;
+        const value = 125 + (seed >>> 26);
+        pixels.data[i] = pixels.data[i + 1] = pixels.data[i + 2] = value;
+        pixels.data[i + 3] = 255;
+      }
+      grainContext.putImageData(pixels, 0, 0);
+    }
+    const asphaltGrainMap = new THREE.CanvasTexture(asphaltGrain);
+    asphaltGrainMap.wrapS = asphaltGrainMap.wrapT = THREE.RepeatWrapping;
+    asphaltGrainMap.repeat.set(28, 3);
+    districtAsphalt.bumpMap = asphaltGrainMap;
+    districtAsphalt.bumpScale = 0.024;
+    gravelSurface.bumpMap = asphaltGrainMap;
+    gravelSurface.bumpScale = 0.075;
+
+    const unitBox = new THREE.BoxGeometry(1, 1, 1);
+    const staticBoxes = new Map<any, number[][]>();
+    const queueBox = (material: any, x: number, y: number, z: number, w: number, h: number, d: number) => {
+      const transform = [x, y, z, w, h, d];
+      const batch = staticBoxes.get(material);
+      if (batch) batch.push(transform);
+      else staticBoxes.set(material, [transform]);
+    };
+
+    const facadeGeometry = new THREE.PlaneGeometry(1, 1);
+    const facadeTextures: any[] = [];
+    const officeGlazing: any[] = [];
+    const silverTrim = standard(0x9aa9b4, 0.4, 0.57);
+    const lobbyStone = standard(0x747778, 0.78);
+    const lobbyLight = basic(0xceab80);
+
+    // Curtain walls share floor and mullion lines. Illuminated interiors are
+    // baked into the façade so no per-window meshes or lights are required.
+    const curtainWall = (floors: number, columns: number, seed: number, tint: number) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const mask = canvas.cloneNode() as HTMLCanvasElement;
+      const surface = canvas.getContext('2d')!;
+      const interior = mask.getContext('2d')!;
+      const reflection = surface.createLinearGradient(24, 0, 460, 510);
+      reflection.addColorStop(0, '#7893ac');
+      reflection.addColorStop(0.38, '#526980');
+      reflection.addColorStop(0.65, '#7590a2');
+      reflection.addColorStop(1, '#263e52');
+      surface.fillStyle = reflection;
+      surface.fillRect(0, 0, 512, 512);
+      interior.fillStyle = '#000';
+      interior.fillRect(0, 0, 512, 512);
+      const pitch = 512 / columns;
+      const storey = 512 / floors;
+      for (let floor = 0; floor < floors; floor++) {
+        const y = floor * storey;
+        surface.fillStyle = '#243847';
+        surface.fillRect(0, y, 512, Math.max(2, storey * 0.09));
+        for (let column = 0; column < columns; column++) {
+          const x = column * pitch;
+          const group = Math.floor(column / 2);
+          const room = (Math.imul(seed + floor * 29 + group * 67, 1103515245) >>> 24) % 100;
+          surface.fillStyle = 'rgba(17,37,52,0.18)';
+          surface.fillRect(x, y + storey * 0.72, pitch, storey * 0.17);
+          if (room < 59 || floor === floors - 1) {
+            const light = interior.createLinearGradient(0, y, 0, y + storey);
+            light.addColorStop(0, '#130c08');
+            light.addColorStop(0.23, floor === floors - 1 ? '#ffd396' : '#dfb481');
+            light.addColorStop(0.49, '#9d734e');
+            light.addColorStop(0.85, '#281e1a');
+            light.addColorStop(1, '#0c0a09');
+            interior.fillStyle = light;
+            interior.fillRect(x + 2, y + 3, pitch - 4, storey - 4);
+            interior.fillStyle = '#c7a578';
+            interior.fillRect(x + pitch * 0.2, y + storey * 0.27, pitch * 0.55, 2);
+            interior.fillStyle = '#221b19';
+            interior.fillRect(x + pitch * 0.58, y + storey * 0.62, pitch * 0.28, storey * 0.16);
+          }
+          surface.fillStyle = '#223341';
+          surface.fillRect(x, y, 2.5, storey);
+          surface.fillStyle = '#718393';
+          surface.fillRect(x + 2.5, y, 1, storey);
+        }
+      }
+      const colorMap = new THREE.CanvasTexture(canvas);
+      const emissiveMap = new THREE.CanvasTexture(mask);
+      colorMap.encoding = emissiveMap.encoding = THREE.sRGBEncoding;
+      facadeTextures.push(colorMap, emissiveMap);
+      const material = standard(tint, 0.25, 0.40);
+      material.map = colorMap;
+      material.emissiveMap = emissiveMap;
+      material.emissive.setHex(0xffd7ac);
+      material.emissiveIntensity = 0.72;
+      material.envMap = districtEnvironment.texture;
+      material.envMapIntensity = 1.18;
+      officeGlazing.push(material);
+      return material;
+    };
+
+    type OfficeWing = { x: number; z: number; width: number; depth: number; floors: number; base: number };
+    const buildOffice = (wings: OfficeWing[], seed: number, tint: number) => {
+      for (const { x, z, width, depth, floors, base } of wings) {
+        const height = floors * 2.9;
+        const y = base + height / 2;
+        queueBox(frameSteel, x, y, z, width - 0.09, height, depth - 0.09);
+        queueBox(silverTrim, x, base + height + 0.12, z, width + 0.25, 0.25, depth + 0.25);
+        queueBox(roofMetal, x, base + height + 0.48, z - 0.8, width * 0.38, 0.5, depth * 0.32);
+        if (!base) {
+          queueBox(paving, x, 0.06, z, width + 3.4, 0.18, depth + 4.8);
+          queueBox(lobbyStone, x, 0.32, z, width + 0.15, 0.50, depth + 0.12);
+          queueBox(silverTrim, x, 3.06, z + depth / 2 + 0.69, width * 0.50, 0.22, 1.65);
+          queueBox(lobbyLight, x, 2.93, z + depth / 2 + 0.72, width * 0.37, 0.045, 0.65);
+        }
+        for (const axis of ['front', 'side']) {
+          const span = axis === 'front' ? width : depth;
+          const material = curtainWall(floors, Math.max(3, Math.round(span / 1.6)), seed + (axis === 'front' ? 0 : 12), tint);
+          for (const side of [-1, 1]) {
+            const wall = new THREE.Mesh(facadeGeometry, material);
+            wall.scale.set(span, height, 1);
+            if (axis === 'front') {
+              wall.position.set(x, y, z + side * depth / 2);
+              wall.rotation.y = side === 1 ? 0 : Math.PI;
+            } else {
+              wall.position.set(x + side * width / 2, y, z);
+              wall.rotation.y = side * Math.PI / 2;
+            }
+            district.add(wall);
+          }
+        }
+      }
+    };
+
+    // Different massing for each office, with setbacks facing away from the yard.
+    buildOffice([
+      { x: -44, z: -80, width: 24, depth: 14, floors: 2, base: 0 },
+      { x: -48, z: -81, width: 14, depth: 11, floors: 7, base: 5.8 },
+    ], 14, 0x90a7b8);
+    buildOffice([
+      { x: -14, z: -80, width: 25, depth: 15, floors: 5, base: 0 },
+      { x: -19, z: -82, width: 12, depth: 10, floors: 2, base: 14.5 },
+    ], 31, 0x91a6a9);
+    buildOffice([
+      { x: 16, z: -84, width: 22, depth: 13, floors: 3, base: 0 },
+      { x: 19, z: -85, width: 13, depth: 11, floors: 5, base: 8.7 },
+    ], 43, 0xa0b6c7);
+    buildOffice([
+      { x: 46, z: -79, width: 27, depth: 15, floors: 5, base: 0 },
+      { x: 44, z: -81, width: 18, depth: 10, floors: 2, base: 14.5 },
+    ], 56, 0xa4b4b7);
+    buildOffice([{ x: -76, z: -90, width: 18, depth: 13, floors: 8, base: 0 }], 41, 0x94a8ba);
+    buildOffice([{ x: -59, z: -106, width: 12, depth: 10, floors: 9, base: 0 }], 38, 0x93a9ba);
+    buildOffice([{ x: 72, z: -92, width: 21, depth: 16, floors: 6, base: 0 }], 63, 0x9eacb3);
+    buildOffice([{ x: -56, z: -22, width: 15, depth: 13, floors: 4, base: 0 }], 68, 0x9bacbb);
+    buildOffice([{ x: -13, z: -56, width: 22, depth: 10, floors: 3, base: 0 }], 73, 0x8da4ad);
+    buildOffice([{ x: 14, z: -56, width: 22, depth: 11, floors: 3, base: 0 }], 89, 0x839aa9);
+
+    const buildWarehouse = (x: number, z: number, width: number, depth: number) => {
+      const height = 8.2;
+      queueBox(paving, x, 0.04, z + 0.55, width + 2, 0.13, depth + 1.7);
+      queueBox(warehouseSiding, x, height / 2 + 0.12, z, width, height, depth);
+      addRoof(x, z, width, depth, height + 0.19);
+      queueBox(silverTrim, x, height - 0.15, z, width + 0.19, 0.17, depth + 0.19);
+      queueBox(paving, x - width / 2 - 2.0, 0.065, z, 4.8, 0.17, depth + 2.5);
+      for (const offset of [-depth * 0.29, depth * 0.24]) {
+        const wallX = x - width / 2;
+        queueBox(dockDoor, wallX - 0.1, 1.67, z + offset, 0.21, 3.25, 2.95);
+        queueBox(frameSteel, wallX - 0.67, 3.67, z + offset, 1.52, 0.18, 3.38);
+        queueBox(roofMetal, wallX - 0.72, 0.3, z + offset, 1.44, 0.42, 2.92);
+        queueBox(occupiedGlass, wallX - 0.14, 4.32, z + offset, 0.16, 0.25, 1.10);
+        const spill = new THREE.Mesh(doorGlowGeometry, doorGlowMaterial);
+        spill.position.set(wallX - 0.24, 3.0, z + offset);
+        spill.rotation.y = -Math.PI / 2;
+        warehouseGlows.add(spill);
+        for (const side of [-1, 1]) {
+          queueBox(yellowPaint, wallX - 1.16, 0.56, z + offset + side * 1.67, 0.13, 0.95, 0.13);
+        }
+      }
+      for (let rib = -depth / 2 + 0.42; rib < depth / 2; rib += 0.76) {
+        queueBox(roofMetal, x - width / 2 - 0.04, 5.75, z + rib, 0.08, 4.52, 0.065);
+      }
+      queueBox(roofMetal, x, height + 0.76, z - 1.1, 2.3, 0.95, 2.2);
+      queueBox(frameSteel, x + width * 0.24, height + 0.95, z + 0.8, 2.0, 0.86, 1.55);
+      for (const offset of [-width * 0.27, width * 0.06]) {
+        queueBox(frameSteel, x + offset, height + 0.94, z - 1.45, 1.65, 0.70, 2.2);
+        queueBox(silverTrim, x + offset, height + 1.31, z - 1.45, 1.48, 0.08, 1.90);
+      }
+
+      for (let rib = -width / 2 + 0.4; rib < width / 2; rib += 0.76) {
+        queueBox(roofMetal, x + rib, 4.1, z + depth / 2 + 0.04, 0.062, 6.65, 0.08);
+      }
+      for (const offset of [-width * 0.3, 0, width * 0.3]) {
+        queueBox(dockDoor, x + offset, 1.72, z + depth / 2 + 0.12, 2.65, 3.2, 0.19);
+        for (let y = 0.5; y < 3.2; y += 0.36) {
+          queueBox(frameSteel, x + offset, y, z + depth / 2 + 0.23, 2.57, 0.025, 0.03);
+        }
+        queueBox(frameSteel, x + offset, 3.75, z + depth / 2 + 0.72, 3.15, 0.15, 1.45);
+        queueBox(occupiedGlass, x + offset, 4.35, z + depth / 2 + 0.15, 1.65, 0.40, 0.12);
+        const spill = new THREE.Mesh(doorGlowGeometry, doorGlowMaterial);
+        spill.position.set(x + offset, 3.1, z + depth / 2 + 0.24);
+        warehouseGlows.add(spill);
+        queueBox(yellowPaint, x + offset - 1.45, 0.45, z + depth / 2 + 0.76, 0.14, 0.86, 0.14);
+        queueBox(yellowPaint, x + offset + 1.45, 0.45, z + depth / 2 + 0.76, 0.14, 0.86, 0.14);
+      }
+    };
+    const doorGlowGeometry = new THREE.PlaneGeometry(4.7, 5.3);
+    const doorGlowMaterial = lightPoolMat.clone();
+    districtMaterials.add(doorGlowMaterial);
+    doorGlowMaterial.opacity = 0.56;
+    doorGlowMaterial.blending = THREE.AdditiveBlending;
+    const warehouseGlows = new THREE.Group();
+    district.add(warehouseGlows);
+    const gableProfile = new THREE.Shape();
+    gableProfile.moveTo(-0.5, 0);
+    gableProfile.lineTo(0.5, 0);
+    gableProfile.lineTo(0, 1);
+    gableProfile.closePath();
+    const gableGeometry = new THREE.ShapeGeometry(gableProfile);
+    function addRoof(x: number, z: number, width: number, depth: number, base: number) {
+      const slope = 0.1;
+      const halfSpan = (depth + 0.44) / 2;
+      for (const side of [-1, 1]) {
+        const panel = new THREE.Mesh(unitBox, roofMetal);
+        panel.scale.set(width + 0.45, 0.22, halfSpan / Math.cos(slope));
+        panel.rotation.x = side * slope;
+        panel.position.set(x, base + halfSpan * Math.tan(slope) / 2, z + side * halfSpan / 2);
+        district.add(panel);
+        const gable = new THREE.Mesh(gableGeometry, warehouseSiding);
+        gable.rotation.y = side * Math.PI / 2;
+        gable.scale.set(depth, halfSpan * Math.tan(slope) + 0.12, 1);
+        gable.position.set(x + side * width / 2, base - 0.12, z);
+        district.add(gable);
+      }
+    }
+    buildWarehouse(57, 3.5, 23, 13);
+    buildWarehouse(90, 4.2, 25, 10);
+    buildWarehouse(56, -35.5, 23, 12);
+    buildWarehouse(90, -34, 25, 14);
+
+    // Service road and paved office frontage beyond the existing collector.
+    queueBox(districtAsphalt, 1, 0.025, -67.5, 141, 0.096, 5.4);
+    queueBox(districtAsphalt, 36.5, 0.025, -63.4, 5.4, 0.096, 4.8);
+    queueBox(paving, 1, 0.039, -70.95, 141, 0.16, 1.55);
+    for (let x = -67; x < 70; x += 6.2) {
+      queueBox(yellowPaint, x, 0.079, -67.5, 2.6, 0.012, 0.11);
+    }
+
+    // Main avenue overlays the existing inspectable perimeter road in city mode.
+    const avenueCenter = 32;
+    const avenueEdges = [25.4, 38.6];
+    const avenueSpans = [[-75, -47], [-40, 32], [41, 111]];
+    queueBox(districtAsphalt, 18, 0.047, avenueCenter, 186, 0.080, 13.2);
+    for (const [from, to] of avenueSpans) {
+      const span = to - from;
+      const mid = (from + to) / 2;
+      for (const edge of avenueEdges) {
+        const side = edge < avenueCenter ? -1 : 1;
+        queueBox(paving, mid, 0.095, edge + side * 0.98, span, 0.18, 1.95);
+        queueBox(lobbyStone, mid, 0.115, edge + side * 0.055, span, 0.12, 0.17);
+        queueBox(whitePaint, mid, 0.093, edge - side * 0.23, span, 0.009, 0.09);
+      }
+      for (const offset of [-0.115, 0.115]) {
+        queueBox(yellowPaint, mid, 0.093, avenueCenter + offset, span, 0.009, 0.085);
+      }
+      for (let x = from + 2.2; x < to - 2.2; x += 6.1) {
+        for (const offset of [-3.25, 3.25]) {
+          queueBox(whitePaint, x, 0.093, avenueCenter + offset, 2.55, 0.009, 0.105);
+        }
+      }
+    }
+    for (const crosswalkX of [-39.1, 31.3]) {
+      for (let z = 25.75; z < 38.4; z += 0.77) {
+        queueBox(whitePaint, crosswalkX, 0.094, z, 2.45, 0.010, 0.46);
+      }
+      queueBox(yellowPaint, crosswalkX, 0.122, 25.15, 2.45, 0.035, 0.45);
+      queueBox(yellowPaint, crosswalkX, 0.122, 38.95, 2.45, 0.035, 0.45);
+    }
+
+    const roadDecalGeometry = new THREE.PlaneGeometry(1, 1);
+    const warmSpillTexture = makeRadialGlowTexture('rgba(255, 167, 75, 0.74)', 'rgba(255, 130, 40, 0.16)');
+    const contactShadowTexture = makeRadialGlowTexture('rgba(5, 8, 13, 0.76)', 'rgba(5, 8, 13, 0.37)');
+    const warmSpillMaterial = basic(0xffffff);
+    warmSpillMaterial.map = warmSpillTexture;
+    warmSpillMaterial.transparent = true;
+    warmSpillMaterial.depthWrite = false;
+    warmSpillMaterial.blending = THREE.AdditiveBlending;
+    warmSpillMaterial.opacity = 0.64;
+    const contactShadowMaterial = basic(0xffffff);
+    contactShadowMaterial.map = contactShadowTexture;
+    contactShadowMaterial.transparent = true;
+    contactShadowMaterial.depthWrite = false;
+    const avenueNightGlows = new THREE.Group();
+    district.add(avenueNightGlows);
+    function roadDecal(group: any, material: any, x: number, z: number, width: number, depth: number, y: number) {
+      const decal = new THREE.Mesh(roadDecalGeometry, material);
+      decal.rotation.x = -Math.PI / 2;
+      decal.position.set(x, y, z);
+      decal.scale.set(width, depth, 1);
+      group.add(decal);
+    }
+    for (const x of [-48, -34, -18, -2, 14, 30, 48, 66]) {
+      roadDecal(avenueNightGlows, warmSpillMaterial, x, 28.2, 8.1, 8.4, 0.101);
+      roadDecal(avenueNightGlows, warmSpillMaterial, x + 4, 36.5, 7.6, 8.8, 0.101);
+    }
+    function addCarContactShadow(x: number, z: number) {
+      roadDecal(district, contactShadowMaterial, x, z, 5.35, 2.55, 0.097);
+    }
+
+    const instanceTransform = new THREE.Object3D();
+    staticBoxes.forEach((boxes, material) => {
+      const batch = new THREE.InstancedMesh(unitBox, material, boxes.length);
+      boxes.forEach(([x, y, z, w, h, d], index) => {
+        instanceTransform.position.set(x, y, z);
+        instanceTransform.scale.set(w, h, d);
+        instanceTransform.updateMatrix();
+        batch.setMatrixAt(index, instanceTransform.matrix);
+      });
+      batch.instanceMatrix.needsUpdate = true;
+      // r128 does not compute a per-instance batch bounding volume.
+      batch.frustumCulled = false;
+      district.add(batch);
+    });
+
+    const actorBox = (parent: any, material: any, x: number, y: number, z: number, w: number, h: number, d: number) => {
+      const mesh = new THREE.Mesh(unitBox, material);
+      mesh.position.set(x, y, z);
+      mesh.scale.set(w, h, d);
+      parent.add(mesh);
+      return mesh;
+    };
+
+    const parkedVehicles = new THREE.Group();
+    parkedVehicles.name = 'Parked vehicles';
+    district.add(parkedVehicles);
+    const vehicleGeometry = new Set<any>();
+    const vehicleRequest = new AbortController();
+    let vehicleLoadStarted = false;
+
+    // Original sedan and crossover models by Innerscene (CC0). Each model is
+    // joined by material before shipping, and parked copies share geometry.
+    const loadParkedVehicles = async () => {
+      const assetDirectory = `${import.meta.env.BASE_URL}assets/substation/`;
+      const [loader, bytes] = await Promise.all([
+        getDistrictVehicleLoader(THREE),
+        fetch(`${assetDirectory}parked-vehicles.glb`, { signal: vehicleRequest.signal }).then(response => {
+          if (!response.ok) throw new Error(`Vehicle model request failed (${response.status}).`);
+          return response.arrayBuffer();
+        }),
+      ]);
+      if (vehicleRequest.signal.aborted) return;
+      const { scenes } = await new Promise<{ scenes: any[] }>((resolve, reject) => loader.parse(bytes, assetDirectory, resolve, reject));
+      const materials = new Set<any>();
+      for (const model of scenes) {
+        model.traverse((mesh: any) => {
+          if (!mesh.isMesh) return;
+          vehicleGeometry.add(mesh.geometry);
+          materials.add(mesh.material);
+        });
+      }
+      if (vehicleRequest.signal.aborted) {
+        vehicleGeometry.forEach(geometry => geometry.dispose());
+        materials.forEach(material => material.dispose());
+        return;
+      }
+      for (const material of materials) {
+        if (material.metalness > 0.25 || material.name === 'glass') {
+          material.envMap = districtEnvironment.texture;
+          material.envMapIntensity = 1.08;
+        }
+        districtMaterials.add(material);
+      }
+
+      const parkedSpaces = [
+        { model: 1, x: -27, z: 27.0, rotation: -Math.PI / 2, color: 0x92948d },
+        { model: 0, x: -6, z: 27.0, rotation: -Math.PI / 2, color: 0x265386 },
+        { model: 1, x: 14, z: 27.0, rotation: -Math.PI / 2, color: 0x852c28 },
+        { model: 0, x: 25, z: 27.0, rotation: -Math.PI / 2, color: 0xc1c4be },
+      ];
+      const bounds = new THREE.Box3();
+      const center = new THREE.Vector3();
+      const size = new THREE.Vector3();
+      for (const { model, x, z, rotation, color } of parkedSpaces) {
+        const vehicle = scenes[model].clone(true);
+        const parking = new THREE.Group();
+        parking.add(vehicle);
+        bounds.setFromObject(vehicle).getSize(size);
+        if (size.x > size.z) vehicle.rotation.y = Math.PI / 2;
+        bounds.setFromObject(vehicle).getCenter(center);
+        vehicle.position.set(-center.x, -bounds.min.y, -center.z);
+        vehicle.traverse((mesh: any) => {
+          if (!mesh.isMesh || !['blue', 'green'].includes(mesh.material.name)) return;
+          const paint = mesh.material.clone();
+          paint.color.setHex(color);
+          paint.envMap = districtEnvironment.texture;
+          paint.envMapIntensity = 1.08;
+          mesh.material = paint;
+          districtMaterials.add(paint);
+        });
+        parking.rotation.y = rotation;
+        parking.position.set(x, 0.091, z);
+        parking.name = model === 0 ? 'Parked sedan' : 'Parked SUV';
+        parkedVehicles.add(parking);
+        addCarContactShadow(x, z);
+      }
+    };
+
+    const shoes = standard(0x20252d, 0.92);
+    const skin = standard(0xb88970, 0.84);
+    const coatColors = [0x57778f, 0xafa184, 0x854750].map(color => standard(color, 0.85));
+    const trousers = standard(0x141d2a, 0.76);
+
+    const pedestrians = [
+      { start: -40, end: 32, z: 24.8, phase: 0.13 },
+      { start: 32, end: -40, z: 24.45, phase: 0.32 },
+      { start: -33, end: 46, z: 33.65, phase: 0.44 },
+      { start: 32.4, end: 40.5, z: 24.4, phase: 0.21 },
+      { start: 32, end: -40, z: 24.45, phase: 0.82 },
+    ].map(({ start, end, z, phase }, index) => {
+      const root = new THREE.Group();
+      const coat = coatColors[index % coatColors.length];
+      const gaitOffset = index * 0.7;
+      actorBox(root, coat, 0, 1.23, 0, 0.35, 0.53, 0.22);
+      actorBox(root, skin, 0, 1.63, 0, 0.21, 0.25, 0.21);
+      const limbs = [-1, 1].map(side => {
+        const leg = new THREE.Group();
+        leg.position.set(side * 0.105, 0.92, 0);
+        actorBox(leg, trousers, 0, -0.39, 0, 0.14, 0.77, 0.14);
+        actorBox(leg, shoes, 0, -0.80, 0.06, 0.15, 0.13, 0.26);
+        const arm = new THREE.Group();
+        arm.position.set(side * 0.225, 1.43, 0);
+        actorBox(arm, coat, 0, -0.22, 0, 0.11, 0.49, 0.12);
+        actorBox(arm, skin, 0, -0.48, 0, 0.10, 0.12, 0.11);
+        root.add(leg, arm);
+        return { leg, arm, side };
+      });
+      district.add(root);
+      return { root, limbs, start, end, z, phase, gaitOffset };
+    });
+
+    let districtTime = 0;
+    const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updateDistrict = (delta: number, daylight: boolean) => {
+      if (!motionPreference.matches) districtTime += delta;
+      occupiedGlass.emissiveIntensity = daylight ? 0 : 0.68;
+      warehouseGlows.visible = !daylight;
+      avenueNightGlows.visible = !daylight;
+      for (const glazing of officeGlazing) {
+        glazing.emissiveIntensity = daylight ? 0 : 1.05;
+      }
+      pedestrians.forEach(({ root, limbs, start, end, z, phase, gaitOffset }) => {
+        const cycle = (phase + districtTime * 1.25 / Math.abs(end - start)) % 2;
+        const heading = cycle <= 1 ? 1 : -1;
+        const fraction = cycle <= 1 ? cycle : 2 - cycle;
+        const stride = motionPreference.matches ? 0 : Math.sin(districtTime * 9 + gaitOffset);
+        root.position.set(start + (end - start) * fraction, 0.137 + Math.abs(stride) * 0.026, z);
+        root.rotation.y = heading * Math.sign(end - start) * Math.PI / 2;
+        limbs.forEach(({ leg, arm, side }) => {
+          leg.rotation.x = side * stride * 0.46;
+          arm.rotation.x = -side * stride * 0.32;
+        });
+      });
+    };
 
     // ==================== 7. SUBSTATION GATEWAY ROOM & 3D REMOTE CONTROL CENTER (RCC) + IEC-104 FLOWS ====================
     const rccGroup = new THREE.Group();
@@ -4841,7 +5492,12 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       mouseVec.y = -((clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(mouseVec, camera);
       const hits = raycaster.intersectObjects(pickableMeshes, false);
-      return hits.find((h: any) => h.object.parent?.visible !== false) || null;
+      return hits.find((hit: any) => {
+        for (let node = hit.object; node; node = node.parent) {
+          if (!node.visible) return false;
+        }
+        return true;
+      }) || null;
     };
 
     const onPointerDown = (e: PointerEvent) => {
@@ -5101,31 +5757,97 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
+    const pulseBatch = new THREE.InstancedMesh(
+      pulseGeometry, pulseMaterial, dynamicActors.powerPulses.filter(pulse => pulse.instanced).length
+    );
+    pulseBatch.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    pulseBatch.count = 0;
+    scene.add(pulseBatch);
+
     const handleResize = () => {
+      const ratio = pixelRatio();
+      if (renderer.getPixelRatio() !== ratio) renderer.setPixelRatio(ratio);
       if (!container) return;
       camera.aspect = container.clientWidth / Math.max(1, container.clientHeight);
+      camera.fov = Math.max(40, 2 * Math.atan(0.43 / camera.aspect) * 180 / Math.PI);
       camera.updateProjectionMatrix();
       renderer.setSize(container.clientWidth, container.clientHeight);
     };
     window.addEventListener('resize', handleResize);
     const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(handleResize) : null;
     resizeObserver?.observe(container);
+    handleResize();
 
     // ==================== RENDER & SYNCHRONIZATION LOOP ====================
-    let animFrameId = 0;
-    let lastPerfUpdate = performance.now();
+    let animFrameId: number | null = null;
+    let viewportVisible = false;
+    let nextFrameTs = 0;
+    let lastPerfUpdate = 0;
     let frameCounter = 0;
-    let prevFrameTs = performance.now();
+    let prevFrameTs = 0;
+    let slowFrames = 0;
+    let shadowState = '';
+    let labelsWereVisible = false;
 
-    const animate = (now: number) => {
-      const dtMs = now - prevFrameTs;
+    const shouldRender = () => !vehicleRequest.signal.aborted && viewportVisible && !document.hidden;
+    const requestFrame = () => {
+      if (animFrameId === null && shouldRender()) animFrameId = requestAnimationFrame(animate);
+    };
+    const syncVisibility = () => {
+      if (shouldRender()) {
+        requestFrame();
+      } else {
+        if (animFrameId !== null) cancelAnimationFrame(animFrameId);
+        animFrameId = null;
+        nextFrameTs = 0;
+        prevFrameTs = 0;
+        slowFrames = 0;
+        keysPressed.clear();
+      }
+    };
+
+    function animate(now: number) {
+      animFrameId = null;
+      if (!shouldRender()) return;
+      requestFrame();
+      const interval = compactView() ? 1000 / 30 : 1000 / 60;
+      if (now + 1 < nextFrameTs) return;
+      nextFrameTs = nextFrameTs ? Math.max(now, nextFrameTs + interval) : now + interval;
+      const dtMs = prevFrameTs ? now - prevFrameTs : interval;
       prevFrameTs = now;
       frameCounter++;
+      if (frameCounter > 12) {
+        slowFrames = dtMs > interval * 1.55 ? slowFrames + 1 : Math.max(0, slowFrames - 2);
+        if (slowFrames >= 18 && resolutionScale > 0.8) {
+          resolutionScale = Math.max(0.8, resolutionScale - 0.1);
+          slowFrames = 0;
+          handleResize();
+        }
+      }
 
       const st = stateRef.current;
       const c = camControlRef.current;
 
+      district.visible = st.showIndustrialDistrict;
+      residentialTraining.visible = !st.showIndustrialDistrict;
+      legacyAvenueMarkings.visible = !st.showIndustrialDistrict;
+      avenueSouthFixtures.position.z = district.visible ? 6.5 : 0;
+      yardPad.material = district.visible ? gravelSurface : originalYardSurface;
+      worldGround.scale.setScalar(district.visible ? 2.6 : 1);
+      nightSky.visible = district.visible && st.lightingPreset === 'NIGHT_FLOODLIGHT';
+      districtRoads.forEach(road => {
+        road.material = district.visible ? districtAsphalt : asphaltMat;
+      });
+      if (district.visible) {
+        updateDistrict(Math.min(0.35, dtMs * 0.001), st.lightingPreset === 'DAYLIGHT_CLEAR');
+      }
+
       // 1. Toggle 3-Phase Electrical Connections & Subsystem Layers
+      const shadowKey = `${st.showIndustrialDistrict}|${st.lightingPreset}|${Object.values(st.layerVis).join(',')}`;
+      if (shadowKey !== shadowState) {
+        shadowState = shadowKey;
+        renderer.shadowMap.needsUpdate = true;
+      }
       connectionsGroup.visible = st.showElectricalConnections;
       (Object.keys(layerGroups) as (keyof LayerVisibilityState)[]).forEach((lk) => {
         layerGroups[lk].visible = st.layerVis[lk];
@@ -5160,12 +5882,19 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       residentialGlowPools.forEach((pool) => {
         pool.visible = housesEnergized;
       });
+      const streetlightsOn = district.visible ? st.lightingPreset !== 'DAYLIGHT_CLEAR' : lt415Energized;
       streetLights.forEach((item) => {
-        if (item.isLight) item.intensity = lt415Energized ? 0.56 : 0.03;
-        else item.material = lt415Energized ? lampBulb : windowDark;
+        if (item.isLight) {
+          item.visible = !(district.visible && compactView() && Math.abs(item.position.x) > 48);
+          item.intensity = streetlightsOn ? (district.visible ? 1.20 : 0.56) : 0.03;
+        }
+        else item.material = streetlightsOn ? lampBulb : windowDark;
       });
-      neighborhoodLightA.intensity = housesEnergized ? 0.62 : 0.05;
-      neighborhoodLightB.intensity = housesEnergized ? 0.56 : 0.05;
+      streetLightGlows.forEach(glow => {
+        glow.visible = district.visible ? streetlightsOn : housesEnergized;
+      });
+      neighborhoodLightA.intensity = district.visible ? 0.13 : housesEnergized ? 0.62 : 0.05;
+      neighborhoodLightB.intensity = district.visible ? 0.11 : housesEnergized ? 0.56 : 0.05;
 
       // Feeder-specific street state: opening F02/F03/... darkens ONLY its street.
       const feederLive = (id: string) => {
@@ -5329,7 +6058,10 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
           if (
             Math.abs(c.desiredRadius - c.radius) < 0.08 &&
             Math.abs(c.desiredTarget[0] - c.target[0]) < 0.08 &&
-            Math.abs(c.desiredTarget[2] - c.target[2]) < 0.08
+            Math.abs(c.desiredTarget[1] - c.target[1]) < 0.08 &&
+            Math.abs(c.desiredTarget[2] - c.target[2]) < 0.08 &&
+            Math.abs(c.desiredTheta - c.theta) < 0.002 &&
+            Math.abs(c.desiredPhi - c.phi) < 0.002
           ) {
             c.isInterpolating = false;
           }
@@ -5345,7 +6077,8 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         camera.lookAt(c.target[0], c.target[1], c.target[2]);
       }
 
-      // 3. Lighting Preset (Professional Nighttime Color Grading #020B1C, Ambient 0.25, Moonlight 0.50)
+      // 3. Lighting preset. Aerial haze softens the far city without obscuring the yard.
+      scene.fog.density = nightSky.visible ? 0.0028 : 0.0011;
       if (st.lightingPreset === 'DAYLIGHT_CLEAR') {
         scene.background.setHex(0x0a1c34);
         scene.fog.color.setHex(0x0a1c34);
@@ -5354,10 +6087,10 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
         floodLights.forEach((fl) => (fl.intensity = 0.25));
       } else if (st.lightingPreset === 'NIGHT_FLOODLIGHT') {
         scene.background.setHex(0x010712);
-        scene.fog.color.setHex(0x010712);
-        sunLight.intensity = 0.36;
-        hemiLight.intensity = 0.20;
-        floodLights.forEach((fl) => (fl.intensity = 0.78));
+        scene.fog.color.setHex(nightSky.visible ? 0x0e1830 : 0x010712);
+        sunLight.intensity = district.visible ? 0.18 : 0.36;
+        hemiLight.intensity = district.visible ? 0.12 : 0.20;
+        floodLights.forEach((fl) => (fl.intensity = district.visible ? 1.32 : 0.78));
       } else {
         scene.background.setHex(0x020b1c);
         scene.fog.color.setHex(0x020b1c);
@@ -5400,7 +6133,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       rccRackStatusIndicators.forEach((led, idx) => {
         led.material = !iecActive ? rccRedLedMat : isStale ? rccAmberLedMat : idx % 2 === 0 ? rccCyanEdgeMat : rccGreenLedMat;
       });
-      neighborhoodLightC.intensity = housesEnergized ? 0.52 : 0.04;
+      neighborhoodLightC.intensity = district.visible ? 0.12 : housesEnergized ? 0.52 : 0.04;
 
       // 4. Sync Busbar Energized Status & Upstream Supply Trace Highlight
       st.busbars.forEach((bus) => {
@@ -5498,14 +6231,16 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       dynamicActors.coolingFans.forEach(({ txId, mesh }) => {
         const tx = st.transformers.find((t) => t.id === txId);
         if (tx && tx.energized && tx.coolingStage !== 'ONAN') {
-          mesh.rotation.x += 0.15;
+          mesh.rotation.x += Math.min(dtMs, 100) * 0.009;
         }
       });
 
       // 6. State-Aware Animated Power-Flow Pulses (Only active when CLOSED, Energized, AND Active Power MW > 0.05!)
       const tNorm = (now * 0.001) % 1000;
+      const bayById = new Map(st.bays.map(bay => [bay.id, bay]));
+      let visiblePulses = 0;
       dynamicActors.powerPulses.forEach((pp) => {
-        const bay = st.bays.find((b) => b.id === pp.bayId);
+        const bay = bayById.get(pp.bayId);
         const voltageAllowed =
           st.pathVoltageFilter === 'ALL' || st.pathVoltageFilter === pp.voltageKv;
         const hasLoadTransfer = Boolean(
@@ -5536,11 +6271,32 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
           );
 
           pp.mesh.scale.setScalar(inTrace ? 1.22 : 1.04);
-          pp.mesh.material.color.setHex(inTrace ? 0x66ffff : pp.baseColorHex);
+          const color = inTrace ? 0x66ffff : pp.baseColorHex;
+          if (pp.instanced) {
+            pp.mesh.updateMatrix();
+            pulseBatch.setMatrixAt(visiblePulses, pp.mesh.matrix);
+            pulseBatch.setColorAt(visiblePulses, pulseInstanceColor.setHex(color));
+            visiblePulses++;
+          } else {
+            pp.mesh.material.color.setHex(color);
+          }
         }
       });
 
+      pulseBatch.count = visiblePulses;
+      if (visiblePulses) {
+        pulseBatch.instanceMatrix.needsUpdate = true;
+        pulseBatch.instanceColor.needsUpdate = true;
+      }
       renderer.render(scene, camera);
+
+      // Fetch and parse the decorative parking asset after the first visible yard frame.
+      if (district.visible && !vehicleLoadStarted) {
+        vehicleLoadStarted = true;
+        void loadParkedVehicles().catch(error => {
+          if (!vehicleRequest.signal.aborted) console.warn('Parked vehicle assets could not be loaded.', error);
+        });
+      }
 
       if (now - lastPerfUpdate >= 700) {
         setMeasuredPerf({
@@ -5551,7 +6307,8 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       }
 
       // 7. Collision-Avoidant & Distance-Based Contextual 3D Label Projection
-      if (frameCounter % 4 === 0 && st.labelMode !== 'HIDDEN') {
+      if ((frameCounter % 4 === 0 || !labelsWereVisible) && st.labelMode !== 'HIDDEN') {
+        labelsWereVisible = true;
         const W = container.clientWidth;
         const H = container.clientHeight;
         const candidates: ProjectedLabel[] = [];
@@ -5718,7 +6475,8 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
           ay: number;
           active: boolean;
         }[] = [];
-        calloutDefs.forEach((cd) => {
+        const visibleCallouts = district.visible ? calloutDefs.slice(4) : calloutDefs;
+        visibleCallouts.forEach((cd) => {
           const wv = new THREE.Vector3(cd.world[0], cd.world[1], cd.world[2]);
           wv.project(camera);
           if (wv.z >= -1 && wv.z <= 1) {
@@ -5750,18 +6508,26 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
           }
         });
         setDistCalloutLabels(nextCallouts);
-      } else if (st.labelMode === 'HIDDEN' && projectedLabels.length > 0) {
+      } else if (st.labelMode === 'HIDDEN' && labelsWereVisible) {
+        labelsWereVisible = false;
         setProjectedLabels([]);
         setDistCalloutLabels([]);
       }
+    }
 
-      animFrameId = requestAnimationFrame(animate);
-    };
-
-    animFrameId = requestAnimationFrame(animate);
+    const viewportObserver = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(entries => {
+      viewportVisible = entries.some(entry => entry.isIntersecting);
+      syncVisibility();
+    });
+    if (viewportObserver) viewportObserver.observe(container);
+    else viewportVisible = true;
+    document.addEventListener('visibilitychange', syncVisibility);
+    syncVisibility();
 
     return () => {
-      cancelAnimationFrame(animFrameId);
+      if (animFrameId !== null) cancelAnimationFrame(animFrameId);
+      viewportObserver?.disconnect();
+      document.removeEventListener('visibilitychange', syncVisibility);
       domEl.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUpBound);
@@ -5777,7 +6543,31 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('resize', handleResize);
       resizeObserver?.disconnect();
+      vehicleRequest.abort();
+      const geometries = new Set(vehicleGeometry);
+      const materials = new Set(districtMaterials);
+      const textures = new Set(facadeTextures);
+      [asphaltGrainMap, warmSpillTexture, contactShadowTexture].forEach(texture => textures.add(texture));
+      scene.traverse((object: any) => {
+        if (object.isInstancedMesh) object.dispose();
+        if (object.geometry) geometries.add(object.geometry);
+        if (object.material) {
+          for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material);
+        }
+        object.shadow?.map?.dispose();
+      });
+      for (const material of materials) {
+        for (const value of Object.values(material)) {
+          if ((value as any)?.isTexture && value !== districtEnvironment.texture) textures.add(value);
+        }
+        material.dispose();
+      }
+      for (const geometry of geometries) geometry.dispose();
+      for (const texture of textures) texture.dispose();
+      districtEnvironment.dispose();
       renderer.dispose();
+      renderer.forceContextLoss();
+      renderer.domElement.remove();
     };
   }, [threeLoaded]);
 
@@ -6300,6 +7090,19 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
               </button>
             </div>
 
+            <select
+              aria-label="Surrounding district"
+              value={showIndustrialDistrict ? 'INDUSTRIAL' : 'RESIDENTIAL'}
+              onChange={(event) => {
+                setShowIndustrialDistrict(event.target.value === 'INDUSTRIAL');
+                if (selectedWorldItem?.kind === 'HOUSE') setSelectedWorldItem(null);
+              }}
+              className="max-w-full rounded-lg border border-cyan-800 bg-[#081A30] px-2 py-1 text-xs text-cyan-100"
+            >
+              <option value="INDUSTRIAL">Industrial District</option>
+              <option value="RESIDENTIAL">Residential Training</option>
+            </select>
+
             <div className=" flex flex-col items-end gap-1.5">
               <div className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-[#030712]/92 border border-slate-800 text-[10px]">
                 <span className="font-bold text-slate-400 uppercase">Position:</span>
@@ -6339,11 +7142,11 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
 
       </div>
       {/* Only the viewport shares a row with the compact inspector; all controls below span the workspace. */}
-      <div className="flex flex-col flex-1 min-h-0">
-        <div className={isFullscreen ? "flex flex-1 min-h-0" : `sas-scene-overview ${equipmentInspector ? "has-inspector" : ""}`}>
+      <div className={`flex flex-col flex-1 min-h-0 ${isFullscreen ? 'overflow-y-auto' : ''}`}>
+        <div className={isFullscreen ? "flex flex-1 min-h-[min(54vh,520px)] basis-[min(54vh,520px)] shrink-0" : `sas-scene-overview ${equipmentInspector ? "has-inspector" : ""}`}>
         {/* Photorealistic Three.js 3D Viewport */}
         <div
-          style={isFullscreen ? { flex: '1 1 0%', minHeight: 0, height: '100%' } : undefined}
+          style={isFullscreen ? { flex: '1 1 0%', height: 'min(54vh, 520px)' } : undefined}
           className={`sas-scene-viewport relative w-full ${
             isFullscreen ? 'flex-1 min-h-0' : 'h-[400px] sm:h-[500px] lg:h-[620px]'
           } bg-[#030712] select-none overflow-hidden border-b border-[#1E3A5F]`}
@@ -6361,6 +7164,8 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
               </div>
             </div>
           )}
+
+          {webglError && <p role="alert" className="absolute inset-0 z-20 grid place-items-center p-4 text-center text-sm text-cyan-100">{webglError}</p>}
 
           {/* Three.js WebGL Mount */}
           <div ref={mountRef} className="w-full h-full" />
@@ -6494,6 +7299,7 @@ export const Substation3DScene: React.FC<{ initialFullscreen?: boolean; onCloseF
                 };
                 const item = catalog[val];
                 if (item) {
+                  if (item.kind === "HOUSE") setShowIndustrialDistrict(false);
                   setSelectedWorldItem(item);
                   focusCameraOnWorldPoint(item.position, item.kind === "HOUSE" ? 12.5 : 16, item.title);
                 }

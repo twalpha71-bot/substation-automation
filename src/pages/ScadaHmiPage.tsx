@@ -81,6 +81,8 @@ export const ScadaHmiPage: React.FC = () => {
     setBayLocalRemote,
     triggerProtectionTrip,
     resetProtectionTrip,
+    resetRecloseDemo86,
+    feederProtection,
     stepTransformerOltc,
     acknowledgeAlarm,
     acknowledgeAllAlarms,
@@ -2171,7 +2173,11 @@ export const ScadaHmiPage: React.FC = () => {
               <div className="text-slate-300">Bay: <strong className="text-white">{selectedBay.bayCode}</strong> · CB: <strong className="text-white">{selectedBay.breakerState}</strong> · Lockout: <strong className="text-white">{selectedBay.autoRecloseStatus}</strong></div>
               {selectedBay.activeTripFunctions.length>0 && <div className="text-red-300 break-words">Active: {selectedBay.activeTripFunctions.join(', ')}</div>}
               {protectionConfirm && <div className="border border-amber-600 bg-amber-950/40 rounded p-2 space-y-2"><p>Confirm simulated protection trip for {selectedBay.bayCode}? This will open the CB and create Alarm/SOE records.</p><div className="grid grid-cols-2 gap-1"><button type="button" className="bg-red-700 border border-red-400 rounded py-1.5 font-bold" onClick={()=>{triggerProtectionTrip(selectedBay.id,protectionFunction);setProtectionConfirm(false);setRuntimePanel('ALARMS');}}>CONFIRM TRIP</button><button type="button" className="bg-[#244667] border border-[#6083a6] rounded py-1.5" onClick={()=>setProtectionConfirm(false)}>Cancel</button></div></div>}
-              <div className="grid grid-cols-2 gap-1"><button type="button" disabled={selectedBay.protectionTripActive} className="bg-red-800 border border-red-500 rounded py-1.5 font-bold disabled:opacity-40" onClick={()=>setProtectionConfirm(true)}>Simulate Trip</button><button type="button" disabled={!selectedBay.protectionTripActive} className="bg-[#244667] border border-[#6083a6] rounded py-1.5 font-bold disabled:opacity-40" onClick={()=>{resetProtectionTrip(selectedBay.id);setProtectionConfirm(false);}}>Reset Protection</button></div>
+              <div className="grid grid-cols-2 gap-1"><button type="button" disabled={selectedBay.protectionTripActive} className="bg-red-800 border border-red-500 rounded py-1.5 font-bold disabled:opacity-40" onClick={()=>setProtectionConfirm(true)}>Simulate Trip</button><button type="button" disabled={!selectedBay.protectionTripActive} className="bg-[#244667] border border-[#6083a6] rounded py-1.5 font-bold disabled:opacity-40" onClick={()=>{resetProtectionTrip(selectedBay.id);setProtectionConfirm(false);}}>{selectedBay.bayType === 'OUTGOING_FEEDER' ? 'Reset Trip Indication' : 'Reset Protection'}</button>
+                {selectedBay.bayType === 'OUTGOING_FEEDER' && <button type="button" className="bg-[#244667] border border-[#6083a6] rounded py-1.5 font-bold disabled:opacity-40"
+                  disabled={!(selectedBay.masterTripLockout ?? selectedBay.protectionTripActive) || !!feederProtection[selectedBay.id]?.faultActive || selectedBay.breakerState !== 'OPEN'}
+                  onClick={() => resetRecloseDemo86(selectedBay.id)}>Reset 86 Lockout</button>}
+              </div>
               <p className="text-[10px] text-slate-400">Training only. 50BF and 86 use the existing generic trip/lockout simulation, not a full breaker-failure timing sequence.</p>
             </div>
           </div>}

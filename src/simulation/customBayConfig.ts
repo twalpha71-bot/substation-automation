@@ -18,6 +18,7 @@ export function toRuntimeBay(b: BayConfig): BayEquipment {
     breakerId: b.breakerId || `CB-${normalizeBayId(b.id)}`, iedId: b.iedId || `IED-${normalizeBayId(b.id)}`,
     configuredVendor: b.vendor,
     secondaryIedId: undefined, connectedTransformerId: undefined,
+    protectionTripActive: false, masterTripLockout: false, activeTripFunctions: [], autoRecloseStatus: 'DISABLED',
     breakerState: b.breakerState, lineDisconnectorState: 'CLOSED',
     busDisconnectorState: 'CLOSED', earthSwitchState: 'OPEN',
     ctRatio: b.ctRatio, vtRatio: b.vtRatio, nominalLoadMw: b.nominalLoadMw,

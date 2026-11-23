@@ -2,8 +2,9 @@ import { MultifunctionMeter } from '../components/MultifunctionMeter';
 import React, { useState } from 'react';
 import { Zap, Layers3, Activity, Network, CircuitBoard, Cpu, Bell } from 'lucide-react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
-import { Substation3DScene } from '../components/Substation3DScene';
 import { buildProtocolSummaryCards } from '../data/protocolRegistry';
+const Substation3DScene = React.lazy(() => import('../components/Substation3DScene').then(module => ({ default: module.Substation3DScene })));
+
 export const HeroDashboardPage: React.FC = () => {
   const {
     bays,
@@ -21,6 +22,7 @@ export const HeroDashboardPage: React.FC = () => {
     triggerProtectionTrip,
   } = useSubstationStore();
   const [detailTab, setDetailTab] = useState<'STATUS' | 'MEASUREMENTS' | 'ALARMS'>('STATUS');
+  const [showDigitalTwin, setShowDigitalTwin] = useState(false);
   const selectedBay = bays.find(b => b.id === selectedBayId) || bays[0];
   const latestTrend = trendHistory[trendHistory.length - 1];
   const protocolCards = buildProtocolSummaryCards(bays, ieds, gooseControlBlocks, faultScenarios);
@@ -74,7 +76,20 @@ export const HeroDashboardPage: React.FC = () => {
       </section>
         <section className="sas-twin-region" aria-label="3D digital twin">
           <div className="sas-region-title"><div><span className="sas-eyebrow">LIVE ENGINEERING VIEW</span><h2>3D Digital Twin</h2></div><span className="sas-region-tag">132 / 33 / 11 kV</span></div>
-          <div id="sas-3d-switchyard" className="sas-twin-embed"><Substation3DScene equipmentInspector={equipmentInspector} /></div>
+          <div id="sas-3d-switchyard" className="sas-twin-embed">
+            {showDigitalTwin ? (
+              <React.Suspense fallback={<div role="status" className="grid min-h-[420px] place-items-center rounded-xl border border-cyan-900 bg-[#061829] text-sm text-cyan-200">Loading 3D view…</div>}>
+                <Substation3DScene equipmentInspector={equipmentInspector} />
+              </React.Suspense>
+            ) : (
+              <div className="sas-scene-overview has-inspector">
+                <div className="grid min-h-[420px] place-items-center rounded-xl border border-cyan-900 bg-[#061829]">
+                  <button type="button" onClick={() => setShowDigitalTwin(true)} className="rounded-lg border border-cyan-500 px-4 py-2 text-sm font-bold text-cyan-100 hover:bg-cyan-800/40">Open 3D view</button>
+                </div>
+                {equipmentInspector}
+              </div>
+            )}
+          </div>
         </section>
 
       <details className="sas-protocol-disclosure"><summary><span><strong>Communication Protocol Overview</strong><small>Six communication workspaces · Open for diagnostics and protocol status</small></span><span>Expand ▾</span></summary>

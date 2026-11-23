@@ -630,7 +630,7 @@ export const FatSatLabPage: React.FC = () => {
   const [open, setOpen] = useState<number[]>([0]);
   const toggle = (index: number) => setOpen((current) => current.includes(index) ? current.filter((n) => n !== index) : [...current, index]);
   return (
-    <div className="min-h-screen bg-[#050e1c] px-4 py-7 text-slate-100 md:px-8">
+    <div className="sas-fat-sat-page min-h-screen px-4 py-7 text-slate-100 md:px-8">
       <header className="mx-auto max-w-6xl rounded-2xl border border-cyan-800/60 bg-[#0a2237] p-6 md:p-9">
         <div className="flex items-center gap-2 text-sm font-bold tracking-widest text-cyan-400"><BookOpen size={19}/> SAS ENGINEERING HUB / FAT & SAT LEARNING</div>
         <h1 className="mt-4 text-2xl font-extrabold md:text-4xl">FAT / SAT — Complete Step-by-Step Guide</h1>

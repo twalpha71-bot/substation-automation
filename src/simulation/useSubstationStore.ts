@@ -80,6 +80,37 @@ export interface TrendPoint {
   freqHz: number;
 }
 
+const LEGACY_RECLOSE_DEMO_BAY = 'BAY-33-F03';
+const configuredRecloseFeeders = new Set(INITIAL_BAYS.filter(
+  bay => bay.bayType === 'OUTGOING_FEEDER' && bay.autoRecloseStatus === 'READY',
+).map(bay => bay.id));
+
+export function hasConfiguredFeederReclose(bay: BayEquipment): boolean {
+  return bay.bayType === 'OUTGOING_FEEDER' && configuredRecloseFeeders.has(bay.id) && bay.autoRecloseStatus !== 'DISABLED';
+}
+const RECLOSE_DEAD_TIME_MS = 3000;
+const RECLOSE_RECLAIM_MS = 8000;
+const RECLOSE_RETRIP_MS = 700;
+
+type RecloseScenario = 'TEMPORARY' | 'PERMANENT' | 'MASTER_TRIP';
+interface RecloseDemo {
+  phase: 'READY' | 'DEAD_TIME' | 'RETRIP_PENDING' | 'RECLAIM' | 'LOCKOUT';
+  scenario: RecloseScenario | null;
+  faultActive: boolean;
+  shots: 0 | 1;
+  deadline: number | null;
+  reason: string;
+}
+
+export const initialRecloseDemo: RecloseDemo = {
+  phase: 'READY',
+  scenario: null,
+  faultActive: false,
+  shots: 0,
+  deadline: null,
+  reason: 'Ready for a simulated feeder fault.',
+};
+
 interface SubstationStoreState {
   activeTab: ActiveWorkspaceTab;
   selectedBayId: string;
@@ -124,10 +155,16 @@ interface SubstationStoreState {
   requestBusTransfer: (level?: 132 | 33 | 11) => boolean;
 
   // Switching & Electrical Operations
-  commandBreaker: (bayId: string, targetState: 'OPEN' | 'CLOSED', origin?: 'SCADA_SBO' | 'LOCAL_PANEL') => boolean;
+  commandBreaker: (bayId: string, targetState: 'OPEN' | 'CLOSED', origin?: 'SCADA_SBO' | 'LOCAL_PANEL' | 'IED_79') => boolean;
   commandDisconnector: (bayId: string, which: 'BUS_Q1' | 'LINE_Q9' | 'EARTH_Q8', targetState: SwitchPosition) => boolean;
   setBayLocalRemote: (bayId: string, mode: ControlMode) => void;
-  triggerProtectionTrip: (bayId: string, tripFunction?: string) => void;
+  triggerProtectionTrip: (bayId: string, tripFunction?: string, recloseEligible?: boolean) => void;
+  feederProtection: Partial<Record<string, RecloseDemo>>;
+  startRecloseDemo: (bayId: string, scenario: RecloseScenario) => void;
+  clearRecloseDemoFault: (bayId: string) => void;
+  cancelRecloseDemo: (bayId: string) => void;
+  resetRecloseDemo79: (bayId: string) => void;
+  resetRecloseDemo86: (bayId: string) => void;
   resetProtectionTrip: (bayId: string) => void;
   stepTransformerOltc: (txId: string, direction: 'RAISE' | 'LOWER') => void;
 
@@ -556,8 +593,9 @@ export function solveSubstationElectricalGraph(
     if (!bay.dcSupplyHealthy) {
       reasons.push('110V DC Control Supply Failed');
     }
-    if (bay.protectionTripActive) {
-      reasons.push(`Master Trip Lockout 86 Active (${bay.activeTripFunctions.join(', ')})`);
+    if (bay.masterTripLockout ?? bay.protectionTripActive) {
+      const functions = bay.activeTripFunctions.join(', ');
+      reasons.push(functions ? `Master Trip Lockout 86 Active (${functions})` : 'Master Trip Lockout 86 Active');
     }
     if (bay.bayType === 'BUS_COUPLER') {
       if (bay.id === 'BAY-132-BC' && l1?.breakerState === 'CLOSED' && l2?.breakerState === 'CLOSED') {
@@ -641,10 +679,154 @@ const INITIAL_SOE: SoeRecord[] = [
   },
 ];
 
+function syncDemoLockoutAlarms(
+  alarms: AlarmRecord[],
+  bay: BayEquipment | undefined,
+  demo: RecloseDemo,
+  timestamp: string,
+): AlarmRecord[] {
+  if (!bay) return alarms;
+  const conditions = [
+    { ansi: 79, latched: demo.phase === 'LOCKOUT', signalName: 'ANSI 79 Auto-Reclose Lockout', ref: 'RREC1', severity: 'MAJOR' },
+    { ansi: 86, latched: bay.masterTripLockout ?? bay.protectionTripActive, signalName: 'ANSI 86 Master Trip Lockout', ref: 'PTRC1', severity: 'CRITICAL' },
+  ] as const;
+
+  for (const { ansi, latched, signalName, ref, severity } of conditions) {
+    const prefix = `ALM-DEMO-${bay.id}-${ansi}-`;
+    const isActive = (alarm: AlarmRecord) => alarm.id.startsWith(prefix) && alarm.state !== 'CLEARED';
+    if (latched && !alarms.some(isActive)) {
+      alarms = [{
+        id: prefix + timestamp,
+        timestamp,
+        bayId: bay.id,
+        bayName: bay.name,
+        iedId: bay.iedId,
+        signalName,
+        iec61850Ref: `${bay.iedId.replace(/-/g, '_')}/${ref}`,
+        severity,
+        state: 'ACTIVE_UNACK',
+        valueText: 'LATCHED',
+      }, ...alarms];
+    } else if (!latched && alarms.some(isActive)) {
+      alarms = alarms.map(alarm => isActive(alarm) ? { ...alarm, state: 'CLEARED', valueText: 'RESET' } : alarm);
+    }
+  }
+  return alarms;
+}
+
 // Start with no pre-existing active alarms; runtime faults still create alarms normally.
 const INITIAL_ALARMS: AlarmRecord[] = [];
 
-export const useSubstationStore = create<SubstationStoreState>()(persist((set, get) => ({
+export const useSubstationStore = create<SubstationStoreState>()(persist((set, get) => {
+  const recloseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const getProtection = (bayId: string) => get().feederProtection[bayId] ?? initialRecloseDemo;
+
+  const cancelTimer = (bayId: string) => {
+    clearTimeout(recloseTimers.get(bayId));
+    recloseTimers.delete(bayId);
+  };
+
+  const scheduleTimer = (bayId: string, callback: () => void, delay: number) => {
+    cancelTimer(bayId);
+    recloseTimers.set(bayId, setTimeout(() => {
+      recloseTimers.delete(bayId);
+      callback();
+    }, delay));
+  };
+
+  const enterReclosePhase = (bayId: string, demo: RecloseDemo) => {
+    const state = get();
+    const bay = state.bays.find((entry) => entry.id === bayId);
+    if (!bay) return;
+    const timestamp = nextTrainingSoeTime();
+    const status = !hasConfiguredFeederReclose(bay) ? 'DISABLED'
+      : demo.phase === 'READY' || demo.phase === 'LOCKOUT' ? demo.phase : 'IN_PROGRESS';
+    const bays = state.bays.map((entry): BayEquipment => entry.id === bay.id
+      ? { ...entry, autoRecloseStatus: status }
+      : entry);
+    const event: SoeRecord = {
+      id: `SOE-RREC-${timestamp}`,
+      timestampMs: timestamp,
+      bayId: bay.id,
+      bayName: bay.name,
+      iedId: bay.iedId,
+      sourceRef: `${bay.iedId.replace(/-/g, '_')}/${demo.scenario === 'MASTER_TRIP' || status === 'DISABLED' ? 'PTRC1' : 'RREC1'}`,
+      eventDescription: demo.reason,
+      valueChange: demo.scenario === 'MASTER_TRIP' || status === 'DISABLED'
+        ? `Fault ${demo.faultActive ? 'ACTIVE' : 'CLEAR'}`
+        : `ANSI 79 ${demo.phase} • Shots ${demo.shots}/1`,
+      quality: bay.quality,
+      cause: 'SYSTEM_DIAG',
+    };
+    set({
+      feederProtection: { ...state.feederProtection, [bayId]: demo },
+      bays,
+      alarms: syncDemoLockoutAlarms(state.alarms, bay, demo, timestamp),
+      signals: instantiateSignalsForSubstation(bays, state.transformers),
+      soeLog: [event, ...state.soeLog],
+    });
+  };
+
+  const lockoutReclose = (bayId: string, reason: string) => {
+    cancelTimer(bayId);
+    enterReclosePhase(bayId, { ...getProtection(bayId), phase: 'LOCKOUT', deadline: null, reason });
+  };
+
+  const startReclaim = (bayId: string) => {
+    enterReclosePhase(bayId, {
+      ...getProtection(bayId), phase: 'RECLAIM', deadline: Date.now() + RECLOSE_RECLAIM_MS,
+      reason: 'ANSI 79 verified CLOSED feedback. Reclaim timer started.',
+    });
+    scheduleTimer(bayId, () => {
+      if (getProtection(bayId).phase === 'RECLAIM') {
+        enterReclosePhase(bayId, { ...initialRecloseDemo, reason: 'ANSI 79 reclaim complete. One shot available.' });
+      }
+    }, RECLOSE_RECLAIM_MS);
+  };
+
+  const runReclose = (bayId: string) => {
+    const { bays, busbars } = get();
+    const demo = getProtection(bayId);
+    const bay = bays.find((entry) => entry.id === bayId);
+    if (demo.phase !== 'DEAD_TIME') return;
+    if (!bay || bay.breakerState !== 'OPEN' || bay.autoRecloseStatus !== 'IN_PROGRESS') {
+      lockoutReclose(bayId, 'ANSI 79 close blocked: OPEN feedback or reclose permissive unavailable.');
+      return;
+    }
+    if (!bay.interlockPermissive) {
+      lockoutReclose(bayId, `ANSI 79 close blocked: ${bay.interlockReason}.`);
+      return;
+    }
+    const bus = busbars.find((section) => section.id === `BUS-${bay.voltageKv}-${bay.busSection}`);
+    if (!bay.sf6PressureNormal || !bus?.energized) {
+      lockoutReclose(bayId, 'ANSI 79 close blocked: live bus or breaker SF6 permissive unavailable.');
+      return;
+    }
+    enterReclosePhase(bayId, { ...demo, shots: 1, reason: 'ANSI 79 issued its single local close shot.' });
+    if (!get().commandBreaker(bay.id, 'CLOSED', 'IED_79')) {
+      lockoutReclose(bayId, 'ANSI 79 close failed. Manual reset required.');
+      return;
+    }
+    if (!getProtection(bayId).faultActive) {
+      startReclaim(bayId);
+      return;
+    }
+    enterReclosePhase(bayId, {
+      ...getProtection(bayId), phase: 'RETRIP_PENDING', deadline: Date.now() + RECLOSE_RETRIP_MS,
+      reason: 'ANSI 79 verified CLOSED feedback. The persistent fault is still present.',
+    });
+    scheduleTimer(bayId, () => {
+      if (getProtection(bayId).phase !== 'RETRIP_PENDING') return;
+      if (!getProtection(bayId).faultActive) {
+        startReclaim(bayId);
+        return;
+      }
+      get().triggerProtectionTrip(bayId, '50/51 Persistent Overcurrent Retrip', true);
+      lockoutReclose(bayId, 'Persistent fault retripped the breaker. ANSI 79 shot exhausted.');
+    }, RECLOSE_RETRIP_MS);
+  };
+
+  return {
   // Read the requested workspace before React's first paint; avoids a HERO flash on refresh.
   activeTab: (() => {
     if (typeof window === 'undefined') return 'HERO' as ActiveWorkspaceTab;
@@ -658,6 +840,89 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
   networkRedundancyMode: 'PRP',
   bilingualTeluguEnabled: false,
   simulationRunning: true,
+  feederProtection: {},
+
+  startRecloseDemo: (bayId, scenario) => {
+    const bay = get().bays.find(entry => entry.id === bayId);
+    const demo = getProtection(bayId);
+    if (!bay || bay.bayType !== 'OUTGOING_FEEDER' || bay.breakerState !== 'CLOSED' ||
+        demo.phase !== 'READY' || demo.faultActive || (bay.masterTripLockout ?? bay.protectionTripActive)) return;
+
+    if (scenario === 'MASTER_TRIP') {
+      get().triggerProtectionTrip(bayId, '86 Master Trip Test');
+      enterReclosePhase(bayId, {
+        ...initialRecloseDemo, scenario, faultActive: true,
+        reason: 'ANSI 86 latched. Clear the simulated fault, then reset ANSI 86.',
+      });
+      return;
+    }
+
+    const reclose = hasConfiguredFeederReclose(bay);
+    get().triggerProtectionTrip(bayId, '50/51 Feeder Overcurrent', true);
+    if (get().bays.find(entry => entry.id === bayId)?.breakerState !== 'OPEN') return;
+    const faultActive = scenario === 'PERMANENT';
+    const faultReason = faultActive ? 'Persistent fault remains present.' : 'Temporary fault cleared during interruption.';
+    enterReclosePhase(bayId, {
+      ...initialRecloseDemo, scenario, faultActive,
+      phase: reclose ? 'DEAD_TIME' : 'READY',
+      deadline: reclose ? Date.now() + RECLOSE_DEAD_TIME_MS : null,
+      reason: `OPEN feedback confirmed. ${faultReason} ${reclose ? 'Dead time started.' : 'ANSI 79 is disabled. Breaker remains OPEN.'}`,
+    });
+    if (reclose) scheduleTimer(bayId, () => runReclose(bayId), RECLOSE_DEAD_TIME_MS);
+  },
+
+  clearRecloseDemoFault: (bayId) => {
+    const demo = getProtection(bayId);
+    if (!demo.faultActive) return;
+    enterReclosePhase(bayId, { ...demo, faultActive: false, reason: 'Simulated fault cleared.' });
+  },
+
+  cancelRecloseDemo: (bayId) => {
+    if (getProtection(bayId).phase === 'DEAD_TIME') {
+      lockoutReclose(bayId, 'ANSI 79 cancelled during dead time. Breaker remains OPEN.');
+    }
+  },
+
+  resetRecloseDemo79: (bayId) => {
+    const demo = getProtection(bayId);
+    const bay = get().bays.find(entry => entry.id === bayId);
+    if (demo.phase !== 'LOCKOUT' || demo.faultActive || bay?.breakerState !== 'OPEN') return;
+    enterReclosePhase(bayId, { ...initialRecloseDemo, reason: 'ANSI 79 lockout reset. Breaker remains OPEN.' });
+  },
+
+  resetRecloseDemo86: (bayId) => {
+    const state = get();
+    const demo = getProtection(bayId);
+    const bay = state.bays.find(entry => entry.id === bayId);
+    if (!bay || bay.bayType !== 'OUTGOING_FEEDER' || !(bay.masterTripLockout ?? bay.protectionTripActive) ||
+        demo.faultActive || bay.breakerState !== 'OPEN') return;
+    const timestamp = nextTrainingSoeTime();
+    const bays = state.bays.map((entry): BayEquipment => entry.id === bayId
+      ? {
+          ...entry, masterTripLockout: false, lastUpdated: timestamp,
+          autoRecloseStatus: demo.phase === 'READY' && entry.autoRecloseStatus === 'LOCKOUT'
+            ? 'READY'
+            : entry.autoRecloseStatus,
+        }
+      : entry);
+    const solved = solveSubstationElectricalGraph(bays, state.transformers, state.busbars, state.faultScenarios);
+    const event: SoeRecord = {
+      id: `SOE-86-RESET-${timestamp}`, timestampMs: timestamp,
+      bayId: bay.id, bayName: bay.name, iedId: bay.iedId,
+      sourceRef: `${bay.iedId.replace(/-/g, '_')}/PTRC1`,
+      eventDescription: `ANSI 86 master trip lockout reset on ${bay.bayCode}. Breaker remains OPEN.`,
+      valueChange: '86 LATCHED → RESET', quality: bay.quality, cause: 'OPERATOR_CMD',
+    };
+    set({
+      bays: solved.bays,
+      signals: instantiateSignalsForSubstation(solved.bays, solved.transformers),
+      ieds: buildMultiVendorIeds(solved.bays),
+      feederProtection: { ...state.feederProtection, [bayId]: { ...demo, reason: event.eventDescription } },
+      alarms: syncDemoLockoutAlarms(state.alarms, solved.bays.find(entry => entry.id === bayId), demo, timestamp),
+      soeLog: [event, ...state.soeLog],
+      lastCommandFeedback: { type: 'SUCCESS', message: event.eventDescription, timestamp },
+    });
+  },
   simTickCount: 0,
   lastCommandFeedback: null,
   busTransferMode: 'MANUAL',
@@ -773,7 +1038,28 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
     let bay = state.bays.find((b) => b.id === bayId);
     if (!bay) return false;
 
+    const fromReclose = origin === 'IED_79';
+    const demo = getProtection(bayId);
+    if (fromReclose && (!hasConfiguredFeederReclose(bay) || targetState !== 'CLOSED' ||
+        bay.breakerState !== 'OPEN' || demo.phase !== 'DEAD_TIME' || demo.shots !== 1)) return false;
     let ts = nextTrainingSoeTime();
+    if (!fromReclose && bay.bayType === 'OUTGOING_FEEDER' && targetState === 'CLOSED' &&
+        (demo.faultActive || demo.phase === 'DEAD_TIME' || demo.phase === 'LOCKOUT')) {
+      const reason = demo.faultActive ? 'simulated fault is still active'
+        : demo.phase === 'LOCKOUT' ? 'ANSI 79 lockout requires reset'
+        : 'ANSI 79 dead time is active';
+      const message = `Close blocked on ${bay.bayCode}: ${reason}.`;
+      set({
+        lastCommandFeedback: { type: 'ERROR', message, timestamp: ts },
+        soeLog: [{
+          id: `SOE-79-BLOCK-${ts}`, timestampMs: ts,
+          bayId, bayName: bay.name, iedId: bay.iedId, sourceRef: 'RREC1',
+          eventDescription: message, valueChange: 'Requested=CLOSED • Blocked',
+          quality: bay.quality, cause: 'INTERLOCK_BLOCK',
+        }, ...state.soeLog],
+      });
+      return false;
+    }
     // 1. Check communication health if origin is SCADA_SBO
     if (origin === 'SCADA_SBO' && bay.quality !== 'GOOD') {
       const msg = `SBO Command Rejected on ${bay.bayCode}: IED ${bay.iedId} communication is offline or data quality is ${bay.quality}.`;
@@ -951,9 +1237,9 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
       timestampMs: ts,
       bayId: bay.id, bayName: bay.name, iedId: bay.iedId,
       sourceRef: `${bay.iedId.replace(/-/g, '_')}/CSWI1.Pos.Oper`,
-      eventDescription: `SBO ${origin} command issued — ${bay.breakerId} ${targetState}`,
+      eventDescription: `${fromReclose ? "ANSI 79 local IED" : `SBO ${origin}`} command issued — ${bay.breakerId} ${targetState}`,
       valueChange: `Requested=${targetState}; awaiting XCBR1 feedback`,
-      quality: bay.quality, cause: 'OPERATOR_CMD',
+      quality: bay.quality, cause: fromReclose ? 'SYSTEM_DIAG' : 'OPERATOR_CMD',
     };
     const feedbackTs = nextTrainingSoeTime(40);
     const newSoe: SoeRecord = {
@@ -966,7 +1252,7 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
       eventDescription: `Breaker position feedback confirmed — ${bay.breakerId} ${targetState}`,
       valueChange: `${bay.breakerState} → ${targetState} (Dbpos=${targetState === 'CLOSED' ? '10' : '01'})`,
       quality: bay.quality,
-      cause: 'OPERATOR_CMD',
+      cause: fromReclose ? 'SYSTEM_DIAG' : 'OPERATOR_CMD',
     };
 
     const updatedGoose = state.gooseControlBlocks.map((g) =>
@@ -1026,10 +1312,16 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
       soeLog: [...transferSoe.reverse(), newSoe, commandSoe, ...state.soeLog],
       lastCommandFeedback: {
         type: 'SUCCESS',
-        message: `CommandTermination+: ${bay.breakerId} (${bay.bayCode}) successfully ${targetState} via SBO Enhanced Security.`,
+        message: fromReclose
+          ? `ANSI 79 local close confirmed by XCBR1: ${bay.breakerId} CLOSED.`
+          : `CommandTermination+: ${bay.breakerId} (${bay.bayCode}) successfully ${targetState} via SBO Enhanced Security.`,
         timestamp: ts,
       },
     });
+    if (bay.bayType === 'OUTGOING_FEEDER' && targetState === 'OPEN' &&
+        ['DEAD_TIME', 'RETRIP_PENDING', 'RECLAIM'].includes(demo.phase)) {
+      lockoutReclose(bayId, 'Operator OPEN stopped ANSI 79. Manual reset required.');
+    }
     // Opening an incoming source may cause a dead bus at its own or downstream level.
     // Evaluate all enabled automatic transfers from upstream to downstream.
     if (targetState === 'OPEN' && ['BAY-132-L1', 'BAY-132-L2', 'BAY-33-INC1',
@@ -1190,11 +1482,16 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
     });
   },
 
-  triggerProtectionTrip: (bayId, tripFunction = '50/51 Overcurrent') => {
+  triggerProtectionTrip: (bayId, tripFunction = '50/51 Overcurrent', recloseEligible = false) => {
     const state = get();
     const bay = state.bays.find((b) => b.id === bayId);
     if (!bay) return;
-    const ts = nowIso();
+    const ts = nextTrainingSoeTime();
+    const isDemoBay = bay.bayType === 'OUTGOING_FEEDER';
+    const demo = getProtection(bayId);
+    const isRecloseTrip = isDemoBay && recloseEligible && !(bay.masterTripLockout ?? bay.protectionTripActive);
+    const interruptReclose = isDemoBay && !isRecloseTrip &&
+      ['DEAD_TIME', 'RETRIP_PENDING', 'RECLAIM'].includes(demo.phase);
 
     // Cascade trip: if HV Transformer bay trips on 87T, also trip its LV incomer via GOOSE intertrip!
     const intertripBayIds = new Set<string>([bayId]);
@@ -1211,8 +1508,11 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
         breakerState: 'OPEN' as const,
         protectionTripActive: true,
         activeTripFunctions: funcs,
-        autoRecloseStatus: b.autoRecloseStatus === 'DISABLED' ? ('DISABLED' as const) : ('LOCKOUT' as const),
-        opCounter: b.opCounter + 1,
+        ...(b.bayType === 'OUTGOING_FEEDER' && { masterTripLockout: !isRecloseTrip }),
+        autoRecloseStatus: isRecloseTrip || b.autoRecloseStatus === 'DISABLED'
+          ? b.autoRecloseStatus
+          : ('LOCKOUT' as const),
+        opCounter: b.opCounter + Number(b.breakerState !== 'OPEN'),
         lastUpdated: ts,
       };
     });
@@ -1233,7 +1533,7 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
 
     const newAlarms: AlarmRecord[] = [
       {
-        id: `ALM-${Date.now()}-1`,
+        id: `ALM-${bayId}-${ts}-1`,
         timestamp: ts,
         bayId: bay.id,
         bayName: bay.name,
@@ -1242,38 +1542,38 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
         iec61850Ref: `${bay.iedId.replace(/-/g, '_')}/PTRC1.Tr.general`,
         severity: 'CRITICAL',
         state: 'ACTIVE_UNACK',
-        valueText: `TRIPPED — ${bay.breakerId} OPEN (Lockout 86 Latched)`,
+        valueText: `TRIPPED — ${bay.breakerId} OPEN${isDemoBay ? "" : " (Lockout 86 Latched)"}`,
       },
       ...state.alarms,
     ];
 
     const newSoeEntries: SoeRecord[] = [
       {
-        id: `SOE-${Date.now()}-3`,
+        id: `SOE-${bayId}-${ts}-3`,
         timestampMs: ts,
         bayId: bay.id,
         bayName: bay.name,
         iedId: bay.iedId,
         sourceRef: `${bay.iedId.replace(/-/g, '_')}/XCBR1.Pos.stVal`,
-        eventDescription: `Circuit Breaker ${bay.breakerId} 52a/52b Transition → OPEN (Fault Cleared)`,
+        eventDescription: `Circuit Breaker ${bay.breakerId} 52a/52b Feedback → OPEN`,
         valueChange: `Dbpos = 01 (OPEN)`,
         quality: bay.quality,
         cause: 'PROTECTION_TRIP',
       },
       {
-        id: `SOE-${Date.now()}-2`,
+        id: `SOE-${bayId}-${ts}-2`,
         timestampMs: ts,
         bayId: bay.id,
         bayName: bay.name,
         iedId: bay.iedId,
         sourceRef: `${bay.iedId.replace(/-/g, '_')}/PTRC1.Tr.general`,
-        eventDescription: `Master Protection Trip Conditioning Asserted (${tripFunction}) + GOOSE Burst Published`,
+        eventDescription: `${isRecloseTrip ? "Feeder protection trip" : "Master protection trip"} asserted (${tripFunction}) + GOOSE burst published`,
         valueChange: `PTRC1.Tr.general = TRUE`,
         quality: bay.quality,
         cause: 'PROTECTION_TRIP',
       },
       {
-        id: `SOE-${Date.now()}-1`,
+        id: `SOE-${bayId}-${ts}-1`,
         timestampMs: ts,
         bayId: bay.id,
         bayName: bay.name,
@@ -1286,12 +1586,11 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
       },
     ];
 
-    const updatedGoose = state.gooseControlBlocks.map((g) => ({
-      ...g,
-      stNum: g.stNum + 1,
-      sqNum: 0,
-      lastTxTimestamp: ts,
-    }));
+    const updatedGoose = state.gooseControlBlocks.map((g) =>
+      solved.bays.some(entry => intertripBayIds.has(entry.id) && entry.iedId === g.publisherIedId)
+        ? { ...g, stNum: g.stNum + 1, sqNum: 0, lastTxTimestamp: ts }
+        : g
+    );
 
     set({
       bays: solved.bays,
@@ -1300,7 +1599,9 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
       ieds: buildMultiVendorIeds(solved.bays),
       signals: instantiateSignalsForSubstation(solved.bays, solved.transformers),
       gooseControlBlocks: updatedGoose,
-      alarms: newAlarms,
+      alarms: isDemoBay
+        ? syncDemoLockoutAlarms(newAlarms, solved.bays.find(entry => entry.id === bayId), demo, nextTrainingSoeTime())
+        : newAlarms,
       soeLog: [...newSoeEntries, ...state.soeLog],
       lastCommandFeedback: {
         type: 'ERROR',
@@ -1308,21 +1609,29 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
         timestamp: ts,
       },
     });
+    if (interruptReclose) lockoutReclose(bayId, 'Master trip interrupted ANSI 79 and latched ANSI 86.');
   },
 
   resetProtectionTrip: (bayId) => {
     const state = get();
     const bay = state.bays.find((b) => b.id === bayId);
     if (!bay) return;
-    const ts = nowIso();
+    const ts = nextTrainingSoeTime();
+    const demo = getProtection(bayId);
+    const independentReset = bay.bayType === 'OUTGOING_FEEDER';
+    if (independentReset && demo.faultActive) {
+      set({ lastCommandFeedback: { type: 'ERROR', message: 'Clear the simulated fault before resetting the trip indication.', timestamp: ts } });
+      return;
+    }
 
     const updatedBays = state.bays.map((b) =>
       b.id === bayId
         ? {
             ...b,
+            ...(independentReset && { masterTripLockout: b.masterTripLockout ?? b.protectionTripActive }),
             protectionTripActive: false,
             activeTripFunctions: [],
-            autoRecloseStatus: b.autoRecloseStatus === 'LOCKOUT' ? ('READY' as const) : b.autoRecloseStatus,
+            autoRecloseStatus: !independentReset && b.autoRecloseStatus === 'LOCKOUT' ? ('READY' as const) : b.autoRecloseStatus,
             lastUpdated: ts,
           }
         : b
@@ -1342,7 +1651,9 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
     );
 
     const updatedAlarms = state.alarms.map((a) =>
-      a.bayId === bayId && a.state !== 'CLEARED' ? { ...a, state: 'CLEARED' as const } : a
+      a.bayId === bayId && a.state !== 'CLEARED' &&
+      (!independentReset || a.signalName.startsWith('Protection Trip:'))
+        ? { ...a, state: 'CLEARED' as const } : a
     );
 
     set({
@@ -1351,16 +1662,18 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
       busbars: solved.busbars,
       ieds: buildMultiVendorIeds(solved.bays),
       signals: instantiateSignalsForSubstation(solved.bays, solved.transformers),
-      alarms: updatedAlarms,
+      alarms: independentReset
+        ? syncDemoLockoutAlarms(updatedAlarms, solved.bays.find(entry => entry.id === bayId), demo, ts)
+        : updatedAlarms,
       soeLog: [
         {
-          id: `SOE-${Date.now()}`,
+          id: `SOE-${bayId}-${ts}`,
           timestampMs: ts,
           bayId: bay.id,
           bayName: bay.name,
           iedId: bay.iedId,
           sourceRef: `${bay.iedId.replace(/-/g, '_')}/PTRC1.Tr.general`,
-          eventDescription: `Master Trip Lockout Relay (86) & LED Target Reset on ${bay.bayCode}`,
+          eventDescription: independentReset ? `Protection trip indication reset on ${bay.bayCode}` : `Master Trip Lockout Relay (86) & LED Target Reset on ${bay.bayCode}`,
           valueChange: `PTRC1.Tr.general = FALSE`,
           quality: bay.quality,
           cause: 'OPERATOR_CMD',
@@ -1369,7 +1682,9 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
       ],
       lastCommandFeedback: {
         type: 'SUCCESS',
-        message: `Protection Trip Lockout (ANSI 86) reset on ${bay.bayCode}. Breaker is now ready for SBO Close.`,
+        message: independentReset
+          ? `Protection trip indication reset on ${bay.bayCode}.`
+          : `Protection Trip Lockout (ANSI 86) reset on ${bay.bayCode}. Breaker is now ready for SBO Close.`,
         timestamp: ts,
       },
     });
@@ -1430,10 +1745,11 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
   addConfigurableFeederBay: ({ voltageKv, busSection, name, nominalLoadMw, nominalLoadMvar, vendor }) => {
     const state = get();
     const ts = nowIso();
-    const existingCount = state.bays.filter(
-      (b) => b.voltageKv === voltageKv && b.bayType === 'OUTGOING_FEEDER'
-    ).length;
-    const numStr = String(existingCount + 1).padStart(2, '0');
+    const reservedIds = new Set([...INITIAL_BAYS, ...state.bays].map(bay => bay.id));
+    let feederNumber = 1;
+    const formatNumber = () => String(feederNumber).padStart(2, '0');
+    while (reservedIds.has(`BAY-${voltageKv}-F${formatNumber()}`)) feederNumber++;
+    const numStr = formatNumber();
     const bayCode = `${voltageKv}-F${numStr}`;
     const bayId = `BAY-${bayCode}`;
     const breakerId = `CB-${bayCode}`;
@@ -1461,7 +1777,7 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
       interlockReason: `Permissive OK: Earth switch OPEN, Bus ${voltageKv}-${busSection} live`,
       protectionTripActive: false,
       activeTripFunctions: [],
-      autoRecloseStatus: 'READY',
+      autoRecloseStatus: 'DISABLED',
       iedId,
       ctRatio: voltageKv === 33 ? '400/1 A' : '300/1 A',
       vtRatio: voltageKv === 33 ? '33000/110 V' : '11000/110 V',
@@ -1529,6 +1845,9 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
     const state = get();
     const bay = state.bays.find((b) => b.id === bayId);
     if (!bay) return;
+    cancelTimer(bayId);
+    const feederProtection = { ...state.feederProtection };
+    delete feederProtection[bayId];
     const ts = nowIso();
 
     const nextBays = state.bays.filter((b) => b.id !== bayId);
@@ -1540,6 +1859,10 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
     );
 
     set({
+      feederProtection,
+      alarms: state.alarms.map(alarm => alarm.bayId === bayId && alarm.state !== 'CLEARED'
+        ? { ...alarm, state: 'CLEARED' }
+        : alarm),
       bays: solved.bays,
       transformers: solved.transformers,
       busbars: solved.busbars,
@@ -1991,13 +2314,15 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
       trendHistory: [...state.trendHistory.slice(-19), newPoint],
     });
   },
- }), {
+  };
+}, {
   name: 'sas-engineering-hub-runtime-v1',
   version: 1,
   storage: createJSONStorage(() => localStorage),
   // Save operational state, not UI selections, simulation timers or derived data.
   partialize: (state) => ({
     bays: state.bays,
+    feederProtection: state.feederProtection,
     busbars: state.busbars,
     transformers: state.transformers,
     alarms: state.alarms,
@@ -2008,7 +2333,7 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
     busTransferMessage: state.busTransferMessage,
   }),
   merge: (persisted, current) => {
-    const saved = persisted as Partial<SubstationStoreState> | undefined;
+    const saved = persisted as (Partial<SubstationStoreState> & { recloseDemo?: RecloseDemo }) | undefined;
     if (!saved || !Array.isArray(saved.bays) || !Array.isArray(saved.busbars)) return current;
     // Keep newly configured bays and any newly added default bays; restore
     // matching equipment's last operational state from the saved snapshot.
@@ -2017,16 +2342,42 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
     for (const b of saved.bays) if (!bays.some(existing => existing.id === b.id)) bays.push(b);
     const busbars = current.busbars.map(b => saved.busbars!.find(x => x.id === b.id) ?? b);
     const transformers = current.transformers.map(t => saved.transformers?.find(x => x.id === t.id) ?? t);
+    const feederProtection = { ...saved.feederProtection };
+    if (saved.recloseDemo && !feederProtection[LEGACY_RECLOSE_DEMO_BAY]) {
+      feederProtection[LEGACY_RECLOSE_DEMO_BAY] = saved.recloseDemo;
+    }
+    let interruptedReclose = false;
+    let alarms = saved.alarms ?? current.alarms;
+    const timestamp = nowIso();
+    const restoredBays = bays.map(bay => {
+      if (bay.bayType !== 'OUTGOING_FEEDER') return bay;
+      let demo = feederProtection[bay.id] ?? initialRecloseDemo;
+      let restored = bay;
+      if (demo.deadline !== null) {
+        interruptedReclose = true;
+        restored = { ...bay, breakerState: 'OPEN', autoRecloseStatus: 'LOCKOUT' };
+        demo = { ...demo, phase: 'LOCKOUT', deadline: null, reason: 'Simulation reloaded during ANSI 79. Breaker OPEN. Manual reset required.' };
+        feederProtection[bay.id] = demo;
+      }
+      if (!hasConfiguredFeederReclose(restored) && restored.autoRecloseStatus !== 'DISABLED') {
+        restored = { ...restored, autoRecloseStatus: 'DISABLED' };
+      }
+      alarms = syncDemoLockoutAlarms(alarms, restored, demo, timestamp);
+      return restored;
+    });
+    const solved = interruptedReclose
+      ? solveSubstationElectricalGraph(restoredBays, transformers, busbars, current.faultScenarios)
+      : { bays: restoredBays, transformers, busbars };
     return {
       ...current,
       ...saved,
-      bays,
-      busbars,
-      transformers,
+      ...solved,
+      feederProtection,
+      alarms,
       // Recompute derived IEC 61850 values from restored primary equipment.
-      signals: instantiateSignalsForSubstation(bays, transformers),
-      ieds: buildMultiVendorIeds(bays),
-      networkLinks: buildNetworkLinks(bays),
+      signals: instantiateSignalsForSubstation(solved.bays, solved.transformers),
+      ieds: buildMultiVendorIeds(solved.bays),
+      networkLinks: buildNetworkLinks(solved.bays),
       lastCommandFeedback: null,
     };
   },
