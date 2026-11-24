@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { iedImages, getIedImageByModel } from '../data/iedImageRegistry';
 import mergingUnitImg from '../assets/sas-architecture/merging-unit.png';
@@ -506,6 +506,65 @@ const CablePacket: React.FC<{
   );
 };
 
+const SequencePacketDot: React.FC<{
+  path: string;
+  color: string;
+  durSec: number;
+  delaySec?: number;
+  isSequence?: boolean;
+  radius?: number;
+}> = ({ path, color, durSec, delaySec = 0, isSequence = false, radius = 3.4 }) => {
+  const [visible, setVisible] = useState<boolean>(!isSequence || delaySec <= 0.06);
+  const glowAnimRef = useRef<SVGElement | null>(null);
+  const coreAnimRef = useRef<SVGElement | null>(null);
+
+  useEffect(() => {
+    if (!isSequence || delaySec <= 0.06) {
+      setVisible(true);
+      return;
+    }
+    setVisible(false);
+    const t = window.setTimeout(() => setVisible(true), Math.round(delaySec * 1000));
+    return () => window.clearTimeout(t);
+  }, [isSequence, delaySec, path]);
+
+  useEffect(() => {
+    if (!visible || !isSequence) return;
+    const g = glowAnimRef.current as unknown as { beginElement?: () => void } | null;
+    const c = coreAnimRef.current as unknown as { beginElement?: () => void } | null;
+    try {
+      g?.beginElement?.();
+      c?.beginElement?.();
+    } catch {
+      // Fallback: SMIL indefinite loop already running
+    }
+  }, [visible, isSequence, path]);
+
+  if (!visible) return null;
+  return (
+    <g pointerEvents="none">
+      <circle r={radius + 2.2} fill={color} opacity={0.32}>
+        <animateMotion
+          ref={glowAnimRef as React.RefObject<SVGAnimateMotionElement>}
+          path={path}
+          dur={`${durSec.toFixed(2)}s`}
+          begin={isSequence ? '0s' : `${delaySec.toFixed(2)}s`}
+          repeatCount="indefinite"
+        />
+      </circle>
+      <circle r={radius} fill={color} stroke="#FFFFFF" strokeWidth={1.05}>
+        <animateMotion
+          ref={coreAnimRef as React.RefObject<SVGAnimateMotionElement>}
+          path={path}
+          dur={`${durSec.toFixed(2)}s`}
+          begin={isSequence ? '0s' : `${delaySec.toFixed(2)}s`}
+          repeatCount="indefinite"
+        />
+      </circle>
+    </g>
+  );
+};
+
 const PatchCordPath: React.FC<{
   id: string;
   d: string;
@@ -669,6 +728,20 @@ export const NetworkTopologyPage: React.FC = () => {
   const [packetsPlaying, setPacketsPlaying] = useState<boolean>(true);
   const [packetSpeed] = useState<'SLOW' | 'NORMAL' | 'FAST'>('NORMAL');
   const [trafficFilter, setTrafficFilter] = useState<'ALL' | 'GOOSE' | 'MMS' | 'PTP'>('ALL');
+  const [topoFlowMode, setTopoFlowMode] = useState<'SEQUENCE' | 'CONTINUOUS'>('SEQUENCE');
+  const [topoSeqStep, setTopoSeqStep] = useState<number>(0);
+
+  const TOPO_CYCLE_STEPS = [
+    { step: 1, dir: 'UP', title: 'Field Acquisition', detail: 'CT/VT Analog & 52a/52b Contacts → Merging Units (MU-01 / SCU-02)' },
+    { step: 2, dir: 'UP', title: 'Process Bus Publish', detail: 'MU-01 (SV 0x88BA 4800Hz) & SCU-02 (GOOSE) → Process Bus LAN A/B' },
+    { step: 3, dir: 'UP', title: 'Bay IED Subscribe', detail: 'Process Bus LAN A/B → Protection & Control IEDs (SV / GOOSE)' },
+    { step: 4, dir: 'UP', title: 'Station Bus Report', detail: 'Bay IEDs → Hirschmann RSP35 LAN A/B (MMS TCP/102 & GOOSE)' },
+    { step: 5, dir: 'UP', title: 'SCADA / HMI Update', detail: 'Station Bus LAN A/B → SCADA Server, Operator HMI & Gateway' },
+    { step: 6, dir: 'DOWN', title: 'SBO Control Command', detail: 'Operator HMI / SCADA → Station Bus → Bay IED (CSWI1.Pos.Oper)' },
+    { step: 7, dir: 'DOWN', title: 'GOOSE Trip / Close', detail: 'Bay IED → Process Bus LAN A/B → Switchgear MU (SCU-02)' },
+    { step: 8, dir: 'DOWN', title: 'Primary Actuation', detail: 'SCU-02 → Circuit Breaker (XCBR1) 110V DC Coil → Loops to Step 1' },
+  ] as const;
+
   const [selectedVlan, setSelectedVlan] = useState<number | null>(null);
   const [rackZoom, setRackZoom] = useState<number>(1);
   const [showCrossRackPrp, setShowCrossRackPrp] = useState<boolean>(false);
@@ -1132,6 +1205,15 @@ export const NetworkTopologyPage: React.FC = () => {
   const timeSyncFailActive = Boolean(faultScenarios.find((f) => f.id === 'FLT-10')?.active);
 
   const packetDuration = packetSpeed === 'SLOW' ? 3.4 : packetSpeed === 'FAST' ? 1.05 : 1.9;
+
+  useEffect(() => {
+    if (activeView !== 'TOPOLOGY' || !packetsPlaying || topoFlowMode !== 'SEQUENCE') return;
+    const stepMs = Math.max(1250, Math.round(packetDuration * 850));
+    const timer = window.setInterval(() => {
+      setTopoSeqStep((prev) => (prev + 1) % 8);
+    }, stepMs);
+    return () => window.clearInterval(timer);
+  }, [activeView, packetsPlaying, topoFlowMode, packetDuration]);
 
   const getPortOverride = (portId: string): PortFaultOverride =>
     portOverrides[portId] || {
@@ -2547,7 +2629,34 @@ export const NetworkTopologyPage: React.FC = () => {
                     Dual-Attached Nodes (DANP) connected to independent Hirschmann RSP35 Core Switches (LAN A &amp; LAN B). Click any device, cable, or switch port (P1–P8).
                   </p>
                 </div>
-                <div className="flex items-center gap-2 text-xs">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <div className="inline-flex rounded-lg border border-[#1E466E] bg-[#061528] p-0.5 text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTopoFlowMode('SEQUENCE');
+                        setTopoSeqStep(0);
+                      }}
+                      className={`px-2.5 py-0.5 rounded-md transition ${
+                        topoFlowMode === 'SEQUENCE'
+                          ? 'bg-[#00DFFF] text-[#021222]'
+                          : 'text-[#9BB8D3] hover:text-white'
+                      }`}
+                    >
+                      Full Cycle Sequence
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTopoFlowMode('CONTINUOUS')}
+                      className={`px-2.5 py-0.5 rounded-md transition ${
+                        topoFlowMode === 'CONTINUOUS'
+                          ? 'bg-[#168BFF] text-white'
+                          : 'text-[#9BB8D3] hover:text-white'
+                      }`}
+                    >
+                      Continuous Live
+                    </button>
+                  </div>
                   <span className="px-2.5 py-0.5 rounded bg-[#082742] border border-[#168BFF] text-[#77E7FF] font-mono font-bold">
                     LAN A: 192.168.10.0/24
                   </span>
@@ -2556,6 +2665,47 @@ export const NetworkTopologyPage: React.FC = () => {
                   </span>
                 </div>
               </div>
+
+              {topoFlowMode === 'SEQUENCE' && (() => {
+                const curStep = TOPO_CYCLE_STEPS[topoSeqStep];
+                const isUp = curStep.dir === 'UP';
+                return (
+                  <div className="rounded-lg border border-[#163D63] bg-[#06162A]/95 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`px-2 py-0.5 rounded font-mono font-extrabold text-[10px] border ${
+                          isUp
+                            ? 'bg-[#062E20] border-[#22C55E] text-[#4ADE80]'
+                            : 'bg-[#362407] border-[#FACC15] text-[#FDE047]'
+                        }`}
+                      >
+                        STEP {curStep.step}/8 · {isUp ? '↑ MONITORING / SV / MMS' : '↓ COMMAND / GOOSE TRIP'}
+                      </span>
+                      <span className="font-bold text-white">{curStep.title}:</span>
+                      <span className="font-mono text-[#BAE6FD]">{curStep.detail}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {TOPO_CYCLE_STEPS.map((st, idx) => (
+                        <button
+                          key={st.step}
+                          type="button"
+                          title={`Step ${st.step}: ${st.title} — ${st.detail}`}
+                          onClick={() => setTopoSeqStep(idx)}
+                          className={`w-5 h-5 rounded font-mono text-[10px] font-bold border transition ${
+                            topoSeqStep === idx
+                              ? st.dir === 'UP'
+                                ? 'bg-[#22C55E] border-[#86EFAC] text-[#021222]'
+                                : 'bg-[#FACC15] border-[#FEF08A] text-[#021222]'
+                              : 'bg-[#07182B] border-[#1E466E] text-[#8BB3D4] hover:border-[#00DFFF]'
+                          }`}
+                        >
+                          {st.step}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="overflow-x-auto">
                 <svg
@@ -2758,6 +2908,12 @@ export const NetworkTopologyPage: React.FC = () => {
                     };
 
                     // Render smooth glowing cable matching Image 1 (#168BFF for LAN A, #FFC400 for LAN B)
+                    const reverseCubicPath = (pathStr: string): string => {
+                      const m = pathStr.match(/^M\s+([\d.-]+)\s+([\d.-]+)\s+C\s+([\d.-]+)\s+([\d.-]+),\s*([\d.-]+)\s+([\d.-]+),\s*([\d.-]+)\s+([\d.-]+)$/);
+                      if (!m) return pathStr;
+                      return `M ${m[7]} ${m[8]} C ${m[5]} ${m[6]}, ${m[3]} ${m[4]}, ${m[1]} ${m[2]}`;
+                    };
+
                     const renderImage1Cable = (
                       id: string,
                       d: string,
@@ -2767,7 +2923,10 @@ export const NetworkTopologyPage: React.FC = () => {
                       highlighted: boolean,
                       animate: boolean,
                       delay: number,
-                      onClick: () => void
+                      onClick: () => void,
+                      flowDir: 'FORWARD' | 'REVERSE' | 'BIDIRECTIONAL' = 'FORWARD',
+                      seqRunKey?: string,
+                      customDurSec?: number
                     ) => {
                       const strokeCol =
                         status === 'DISCONNECTED'
@@ -2822,27 +2981,37 @@ export const NetworkTopologyPage: React.FC = () => {
                           {/* Wide transparent hit area */}
                           <path d={d} fill="none" stroke="transparent" strokeWidth={14} />
 
-                          {/* Animated glowing packet indicator matching Image 1 */}
-                          {animate && status === 'UP' && (
-                            <g pointerEvents="none">
-                              <circle r={6} fill={dotCol} opacity={0.35}>
-                                <animateMotion
-                                  path={d}
-                                  dur={`${packetDuration}s`}
-                                  begin={`${delay}s`}
-                                  repeatCount="indefinite"
-                                />
-                              </circle>
-                              <circle r={3.6} fill={dotCol} stroke="#FFFFFF" strokeWidth={1.1}>
-                                <animateMotion
-                                  path={d}
-                                  dur={`${packetDuration}s`}
-                                  begin={`${delay}s`}
-                                  repeatCount="indefinite"
-                                />
-                              </circle>
-                            </g>
-                          )}
+                          {/* Animated glowing packet indicator matching real IEC 61850 data flow direction */}
+                          {animate && status === 'UP' && (() => {
+                            const dRev = reverseCubicPath(d);
+                            const upCol = plane === 'LAN_A' ? '#4ADE80' : '#FDE047';
+                            const durSec = customDurSec ?? packetDuration;
+                            const isSeq = Boolean(seqRunKey);
+                            return (
+                              <g key={seqRunKey || 'CONT'} pointerEvents="none">
+                                {(flowDir === 'FORWARD' || flowDir === 'BIDIRECTIONAL') && (
+                                  <SequencePacketDot
+                                    path={d}
+                                    color={dotCol}
+                                    durSec={durSec}
+                                    delaySec={delay}
+                                    isSequence={isSeq}
+                                    radius={3.4}
+                                  />
+                                )}
+                                {(flowDir === 'REVERSE' || flowDir === 'BIDIRECTIONAL') && (
+                                  <SequencePacketDot
+                                    path={dRev}
+                                    color={upCol}
+                                    durSec={durSec * (isSeq ? 1 : 1.05)}
+                                    delaySec={delay + (flowDir === 'BIDIRECTIONAL' ? durSec * 0.45 : 0)}
+                                    isSequence={isSeq}
+                                    radius={3.4}
+                                  />
+                                )}
+                              </g>
+                            );
+                          })()}
                         </g>
                       );
                     };
@@ -2868,6 +3037,27 @@ export const NetworkTopologyPage: React.FC = () => {
                             selectedDeviceKey === st.id ||
                             (selectedSwitchPlane === 'LAN_B' && selectedPortNumber === st.portNum);
 
+                          const isPtpGm = st.id === 'CLK-PTP-GM';
+                          const seqTopActive =
+                            topoFlowMode === 'CONTINUOUS' ||
+                            isPtpGm ||
+                            topoSeqStep === 4 ||
+                            (topoSeqStep === 5 && (st.id === 'SRV-SCADA-A' || st.id === 'WS-HMI-01'));
+                          const topFlowDir: 'FORWARD' | 'REVERSE' | 'BIDIRECTIONAL' =
+                            isPtpGm
+                              ? 'FORWARD'
+                              : topoFlowMode === 'CONTINUOUS'
+                              ? 'BIDIRECTIONAL'
+                              : topoSeqStep === 4
+                              ? 'REVERSE'
+                              : 'FORWARD';
+                          const topSeqKey =
+                            topoFlowMode === 'SEQUENCE' && !isPtpGm ? `TOP-${st.id}-S${topoSeqStep}` : undefined;
+                          const topDelayA = topoFlowMode === 'SEQUENCE' && !isPtpGm ? 0.05 : idx * 0.22;
+                          const topDelayB = topoFlowMode === 'SEQUENCE' && !isPtpGm ? 0.14 : idx * 0.22 + 0.35;
+                          const topDur = topoFlowMode === 'SEQUENCE' && !isPtpGm ? (topoSeqStep === 5 ? 0.72 : 1.15) : undefined;
+                          const seqHighlight = topoFlowMode === 'SEQUENCE' && !isPtpGm && seqTopActive;
+
                           return (
                             <g key={`TOP-CABLE-GRP-${st.id}`}>
                               {renderImage1Cable(
@@ -2876,14 +3066,17 @@ export const NetworkTopologyPage: React.FC = () => {
                                 'LAN_A',
                                 statusA,
                                 selA,
-                                selA || (selectedVlan !== null && portA.allowedVlans.includes(selectedVlan)),
-                                shouldAnimatePort(portA, st.protoType),
-                                idx * 0.22,
+                                selA || seqHighlight || (selectedVlan !== null && portA.allowedVlans.includes(selectedVlan)),
+                                seqTopActive && shouldAnimatePort(portA, st.protoType),
+                                topDelayA,
                                 () => {
                                   setSelectedSwitchPlane('LAN_A');
                                   setSelectedPortNumber(st.portNum);
                                   setSelectedDeviceKey(st.id);
-                                }
+                                },
+                                topFlowDir,
+                                topSeqKey,
+                                topDur
                               )}
                               {renderImage1Cable(
                                 `IMG1-TOP-B-${st.id}`,
@@ -2891,14 +3084,17 @@ export const NetworkTopologyPage: React.FC = () => {
                                 'LAN_B',
                                 statusB,
                                 selB,
-                                selB || (selectedVlan !== null && portB.allowedVlans.includes(selectedVlan)),
-                                shouldAnimatePort(portB, st.protoType),
-                                idx * 0.22 + 0.35,
+                                selB || seqHighlight || (selectedVlan !== null && portB.allowedVlans.includes(selectedVlan)),
+                                seqTopActive && shouldAnimatePort(portB, st.protoType),
+                                topDelayB,
                                 () => {
                                   setSelectedSwitchPlane('LAN_B');
                                   setSelectedPortNumber(st.portNum);
                                   setSelectedDeviceKey(st.id);
-                                }
+                                },
+                                topFlowDir,
+                                topSeqKey,
+                                topDur
                               )}
                             </g>
                           );
@@ -2923,6 +3119,20 @@ export const NetworkTopologyPage: React.FC = () => {
                             selectedDeviceKey === item.id ||
                             (selectedSwitchPlane === 'LAN_B' && selectedPortNumber === item.portNum);
 
+                          const seqBotActive =
+                            topoFlowMode === 'CONTINUOUS' || topoSeqStep === 3 || topoSeqStep === 5;
+                          const botFlowDir: 'FORWARD' | 'REVERSE' | 'BIDIRECTIONAL' =
+                            topoFlowMode === 'CONTINUOUS'
+                              ? 'BIDIRECTIONAL'
+                              : topoSeqStep === 3
+                              ? 'REVERSE'
+                              : 'FORWARD';
+                          const botSeqKey = topoFlowMode === 'SEQUENCE' ? `BOT-${item.id}-S${topoSeqStep}` : undefined;
+                          const botDelayA = topoFlowMode === 'SEQUENCE' ? (topoSeqStep === 5 ? 0.52 : 0.05) : idx * 0.25;
+                          const botDelayB = topoFlowMode === 'SEQUENCE' ? (topoSeqStep === 5 ? 0.60 : 0.14) : idx * 0.25 + 0.38;
+                          const botDur = topoFlowMode === 'SEQUENCE' ? (topoSeqStep === 5 ? 0.72 : 1.15) : undefined;
+                          const seqBotHl = topoFlowMode === 'SEQUENCE' && seqBotActive;
+
                           return (
                             <g key={`BOT-CABLE-GRP-${item.id}`}>
                               {renderImage1Cable(
@@ -2931,14 +3141,17 @@ export const NetworkTopologyPage: React.FC = () => {
                                 'LAN_A',
                                 statusA,
                                 selA,
-                                selA || (selectedVlan !== null && portA.allowedVlans.includes(selectedVlan)),
-                                shouldAnimatePort(portA, 'GOOSE'),
-                                idx * 0.25,
+                                selA || seqBotHl || (selectedVlan !== null && portA.allowedVlans.includes(selectedVlan)),
+                                seqBotActive && shouldAnimatePort(portA, 'GOOSE'),
+                                botDelayA,
                                 () => {
                                   setSelectedSwitchPlane('LAN_A');
                                   setSelectedPortNumber(item.portNum);
                                   setSelectedDeviceKey(item.id);
-                                }
+                                },
+                                botFlowDir,
+                                botSeqKey,
+                                botDur
                               )}
                               {renderImage1Cable(
                                 `IMG1-BOT-B-${item.id}`,
@@ -2946,14 +3159,17 @@ export const NetworkTopologyPage: React.FC = () => {
                                 'LAN_B',
                                 statusB,
                                 selB,
-                                selB || (selectedVlan !== null && portB.allowedVlans.includes(selectedVlan)),
-                                shouldAnimatePort(portB, 'GOOSE'),
-                                idx * 0.25 + 0.38,
+                                selB || seqBotHl || (selectedVlan !== null && portB.allowedVlans.includes(selectedVlan)),
+                                seqBotActive && shouldAnimatePort(portB, 'GOOSE'),
+                                botDelayB,
                                 () => {
                                   setSelectedSwitchPlane('LAN_B');
                                   setSelectedPortNumber(item.portNum);
                                   setSelectedDeviceKey(item.id);
-                                }
+                                },
+                                botFlowDir,
+                                botSeqKey,
+                                botDur
                               )}
                             </g>
                           );
@@ -3419,8 +3635,8 @@ export const NetworkTopologyPage: React.FC = () => {
                         {(() => {
                           const gpsLocked = !timeSyncFailActive;
                           const ptpCol = gpsLocked ? '#FFB547' : '#FF5C65';
-                          const ptpTrunkA = 'M 982 98 C 1012 98, 1012 574, 474 574 L 474 594';
-                          const ptpTrunkB = 'M 982 98 C 1016 98, 1016 588, 924 588 L 924 594';
+                          const ptpTrunkA = 'M 982 98 L 1010 98 L 1010 572 L 474 572 L 474 594';
+                          const ptpTrunkB = 'M 982 98 L 1014 98 L 1014 578 L 924 578 L 924 594';
                           return (
                             <g key="GPS-GNSS-PTP-SYNC">
                               {/* Rooftop GNSS / GPS Antenna Icon above Meinberg M400 */}
@@ -3511,6 +3727,20 @@ export const NetworkTopologyPage: React.FC = () => {
                           const pathPbB = `M ${iedPbBX} ${iedBotY} C ${iedPbBX} 560, ${dstBX} 558, ${dstBX} 594`;
                           const stA = planeAHealthy ? 'UP' : 'DOWN';
                           const stB = planeBHealthy ? 'UP' : 'DOWN';
+                          const seqPbIedActive =
+                            topoFlowMode === 'CONTINUOUS' || topoSeqStep === 2 || topoSeqStep === 6;
+                          const pbIedDir: 'FORWARD' | 'REVERSE' | 'BIDIRECTIONAL' =
+                            topoFlowMode === 'CONTINUOUS'
+                              ? 'BIDIRECTIONAL'
+                              : topoSeqStep === 2
+                              ? 'REVERSE'
+                              : 'FORWARD';
+                          const pbIedKey = topoFlowMode === 'SEQUENCE' ? `PBIED-${item.id}-S${topoSeqStep}` : undefined;
+                          const pbIedDelA = topoFlowMode === 'SEQUENCE' ? 0.05 : idx * 0.24;
+                          const pbIedDelB = topoFlowMode === 'SEQUENCE' ? 0.14 : idx * 0.24 + 0.35;
+                          const pbIedDur = topoFlowMode === 'SEQUENCE' ? (topoSeqStep === 6 ? 0.72 : 1.15) : undefined;
+                          const seqPbIedHl = topoFlowMode === 'SEQUENCE' && seqPbIedActive;
+
                           return (
                             <g key={`PB-IED-CABLES-${item.id}`}>
                               {renderImage1Cable(
@@ -3519,13 +3749,16 @@ export const NetworkTopologyPage: React.FC = () => {
                                 'LAN_A',
                                 stA,
                                 selectedDeviceKey === item.id,
-                                selectedDeviceKey === item.id,
-                                packetsPlaying && planeAHealthy,
-                                idx * 0.24,
+                                selectedDeviceKey === item.id || seqPbIedHl,
+                                seqPbIedActive && packetsPlaying && planeAHealthy,
+                                pbIedDelA,
                                 () => {
                                   setSelectedSwitchPlane('LAN_A');
                                   setSelectedDeviceKey(item.id);
-                                }
+                                },
+                                pbIedDir,
+                                pbIedKey,
+                                pbIedDur
                               )}
                               {renderImage1Cable(
                                 `PB-IED-B-${item.id}`,
@@ -3533,13 +3766,16 @@ export const NetworkTopologyPage: React.FC = () => {
                                 'LAN_B',
                                 stB,
                                 selectedDeviceKey === item.id,
-                                selectedDeviceKey === item.id,
-                                packetsPlaying && planeBHealthy,
-                                idx * 0.24 + 0.35,
+                                selectedDeviceKey === item.id || seqPbIedHl,
+                                seqPbIedActive && packetsPlaying && planeBHealthy,
+                                pbIedDelB,
                                 () => {
                                   setSelectedSwitchPlane('LAN_B');
                                   setSelectedDeviceKey(item.id);
-                                }
+                                },
+                                pbIedDir,
+                                pbIedKey,
+                                pbIedDur
                               )}
                               {/* On-Device PB-A & PB-B Port Jacks on Bottom Edge of Each Bay IED */}
                               <g className="cursor-pointer" onClick={() => setSelectedSwitchPlane('LAN_A')}>
@@ -3585,6 +3821,25 @@ export const NetworkTopologyPage: React.FC = () => {
                           const dstBX = mu.imgBox.x + mu.imgBox.w * 0.68;
                           const pathMuA = `M ${srcAX} 666 C ${srcAX} 702, ${dstAX} 698, ${dstAX} ${mu.imgBox.y}`;
                           const pathMuB = `M ${srcBX} 666 C ${srcBX} 706, ${dstBX} 702, ${dstBX} ${mu.imgBox.y}`;
+                          const isSamu = mu.id === 'MU-33-F03-SV';
+                          const seqMuActive =
+                            topoFlowMode === 'CONTINUOUS' ||
+                            topoSeqStep === 1 ||
+                            (!isSamu && topoSeqStep === 6);
+                          const muFlowDir: 'FORWARD' | 'REVERSE' | 'BIDIRECTIONAL' =
+                            topoFlowMode === 'CONTINUOUS'
+                              ? isSamu
+                                ? 'REVERSE'
+                                : 'BIDIRECTIONAL'
+                              : topoSeqStep === 1
+                              ? 'REVERSE'
+                              : 'FORWARD';
+                          const muSeqKey = topoFlowMode === 'SEQUENCE' ? `PBMU-${mu.id}-S${topoSeqStep}` : undefined;
+                          const muDelA = topoFlowMode === 'SEQUENCE' ? (topoSeqStep === 6 ? 0.52 : 0.05) : mIdx * 0.3;
+                          const muDelB = topoFlowMode === 'SEQUENCE' ? (topoSeqStep === 6 ? 0.60 : 0.14) : mIdx * 0.3 + 0.4;
+                          const muDur = topoFlowMode === 'SEQUENCE' ? (topoSeqStep === 6 ? 0.72 : 1.15) : undefined;
+                          const seqMuHl = topoFlowMode === 'SEQUENCE' && seqMuActive;
+
                           return (
                             <g key={`PB-MU-CABLES-${mu.id}`}>
                               {renderImage1Cable(
@@ -3593,13 +3848,16 @@ export const NetworkTopologyPage: React.FC = () => {
                                 'LAN_A',
                                 planeAHealthy ? 'UP' : 'DOWN',
                                 selectedDeviceKey === mu.id,
-                                selectedDeviceKey === mu.id,
-                                packetsPlaying && planeAHealthy,
-                                mIdx * 0.3,
+                                selectedDeviceKey === mu.id || seqMuHl,
+                                seqMuActive && packetsPlaying && planeAHealthy,
+                                muDelA,
                                 () => {
                                   setSelectedSwitchPlane('LAN_A');
                                   setSelectedDeviceKey(mu.id);
-                                }
+                                },
+                                muFlowDir,
+                                muSeqKey,
+                                muDur
                               )}
                               {renderImage1Cable(
                                 `PB-MU-B-${mu.id}`,
@@ -3607,13 +3865,16 @@ export const NetworkTopologyPage: React.FC = () => {
                                 'LAN_B',
                                 planeBHealthy ? 'UP' : 'DOWN',
                                 selectedDeviceKey === mu.id,
-                                selectedDeviceKey === mu.id,
-                                packetsPlaying && planeBHealthy,
-                                mIdx * 0.3 + 0.4,
+                                selectedDeviceKey === mu.id || seqMuHl,
+                                seqMuActive && packetsPlaying && planeBHealthy,
+                                muDelB,
                                 () => {
                                   setSelectedSwitchPlane('LAN_B');
                                   setSelectedDeviceKey(mu.id);
-                                }
+                                },
+                                muFlowDir,
+                                muSeqKey,
+                                muDur
                               )}
                             </g>
                           );
@@ -3863,16 +4124,42 @@ export const NetworkTopologyPage: React.FC = () => {
                             portLabel: '110V DI',
                           },
                         ].map((fld, fIdx) => {
-                          const dWire = `M ${fld.srcX} ${fld.srcY} C ${fld.srcX} 830, ${fld.dstX} 826, ${fld.dstX} ${fld.dstY}`;
+                          const dWireDown = `M ${fld.srcX} ${fld.srcY} C ${fld.srcX} 830, ${fld.dstX} 826, ${fld.dstX} ${fld.dstY}`;
+                          const dWireUp = `M ${fld.dstX} ${fld.dstY} C ${fld.dstX} 826, ${fld.srcX} 830, ${fld.srcX} ${fld.srcY}`;
+                          const isCtVt = fld.id === 'FLD-CTVT-01';
+                          const showFldUp = topoFlowMode === 'CONTINUOUS' || topoSeqStep === 0;
+                          const showFldDown = !isCtVt && (topoFlowMode === 'CONTINUOUS' || topoSeqStep === 7);
+                          const fldHl = topoFlowMode === 'SEQUENCE' && (showFldUp || showFldDown);
+                          const isFldSeq = topoFlowMode === 'SEQUENCE';
+                          const fldDur = isFldSeq ? 1.35 : Math.max(1.3, packetDuration * 0.9);
                           return (
                             <g key={fld.id}>
-                              {/* Smooth Hardwired Copper/Analog Connection */}
-                              <path d={dWire} fill="none" stroke={fld.wireCol} strokeWidth={5.5} opacity={0.18} strokeLinecap="round" />
-                              <path d={dWire} fill="none" stroke={fld.wireCol} strokeWidth={2.6} strokeDasharray="5 3" strokeLinecap="round" />
-                              {packetsPlaying && (
-                                <circle r={3} fill={fld.wireCol} stroke="#FFFFFF" strokeWidth={0.8}>
-                                  <animateMotion path={dWire} dur={`${Math.max(1.3, packetDuration * 0.9)}s`} begin={`${fIdx * 0.35}s`} repeatCount="indefinite" />
-                                </circle>
+                              {/* Smooth Hardwired Copper/Analog Connection (CT/VT -> MU-01 Upward; CB/Disc <-> SCU-02 Bidirectional) */}
+                              <path d={dWireUp} fill="none" stroke={fld.wireCol} strokeWidth={fldHl ? 8.5 : 5.5} opacity={fldHl ? 0.35 : 0.18} strokeLinecap="round" />
+                              <path d={dWireUp} fill="none" stroke={fld.wireCol} strokeWidth={fldHl ? 3.5 : 2.6} strokeDasharray="5 3" strokeLinecap="round" />
+                              {packetsPlaying && (showFldUp || showFldDown) && (
+                                <g key={isFldSeq ? `FLD-${fld.id}-S${topoSeqStep}` : 'FLD-CONT'}>
+                                  {showFldUp && (
+                                    <SequencePacketDot
+                                      path={dWireUp}
+                                      color={isCtVt ? '#00F0FF' : '#4ADE80'}
+                                      durSec={fldDur}
+                                      delaySec={isFldSeq ? 0 : fIdx * 0.35}
+                                      isSequence={isFldSeq}
+                                      radius={3.4}
+                                    />
+                                  )}
+                                  {showFldDown && (
+                                    <SequencePacketDot
+                                      path={dWireDown}
+                                      color="#FACC15"
+                                      durSec={fldDur}
+                                      delaySec={isFldSeq ? 0 : fIdx * 0.35 + 0.65}
+                                      isSequence={isFldSeq}
+                                      radius={3.4}
+                                    />
+                                  )}
+                                </g>
                               )}
                               {/* Top & Bottom Terminal Port Jacks */}
                               <rect x={fld.srcX - 4.5} y={fld.srcY - 4} width={9} height={8} rx={1} fill="#07111F" stroke={fld.wireCol} strokeWidth={1.4} />
