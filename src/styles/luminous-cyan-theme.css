@@ -10,7 +10,10 @@
   --sas-text: #eaf6ff;
   --sas-workspace-art: url('../assets/backgrounds/substation-digital-twin.webp');
   --sas-workspace-backdrop:
-    linear-gradient(180deg, rgba(1, 11, 23, .18), rgba(1, 11, 23, .26)),
+    linear-gradient(180deg, rgba(2, 11, 22, 0.78), rgba(2, 11, 22, 0.86)),
+    var(--sas-workspace-art);
+  --sas-auth-backdrop:
+    linear-gradient(180deg, rgba(2, 11, 22, 0.36), rgba(2, 11, 22, 0.52)),
     var(--sas-workspace-art);
 }
 
@@ -30,9 +33,9 @@ body,
 
 /* Keep the approved artwork behind the workspace as long pages scroll. */
 .sas-workspace-main {
-  --sas-workspace-glass: linear-gradient(180deg, rgba(2, 17, 30, .28), rgba(2, 14, 26, .40));
-  --sas-workspace-inset-glass: rgba(2, 14, 26, .16);
-  --sas-workspace-frost: none;
+  --sas-workspace-glass: linear-gradient(180deg, rgba(4, 18, 32, 0.84), rgba(3, 14, 26, 0.90));
+  --sas-workspace-inset-glass: rgba(4, 16, 30, 0.72);
+  --sas-workspace-frost: blur(10px) saturate(120%);
   background-color: #03111e;
   background-image: var(--sas-workspace-backdrop);
   background-repeat: no-repeat;
@@ -54,7 +57,7 @@ body,
 
 .sas-auth-artwork {
   background-color: #03111e;
-  background-image: var(--sas-workspace-backdrop);
+  background-image: var(--sas-auth-backdrop);
   background-position: 69% center;
   background-size: cover;
   background-repeat: no-repeat;
@@ -81,8 +84,8 @@ body,
 /* The labs' legacy inline surfaces also use the workspace glass. */
 .sas-workspace-main :is(.sas-glass-panel, .sas-wireshark-panel, .opcua-glass-panel, .i104-glass-panel, .mb-glass-panel) {
   background: var(--sas-workspace-glass) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+  backdrop-filter: var(--sas-workspace-frost) !important;
+  -webkit-backdrop-filter: var(--sas-workspace-frost) !important;
 }
 
 /* Insets sit inside glass panels, so use a lighter tint to avoid stacking dark layers. */
@@ -127,13 +130,13 @@ body,
 }
 
 .sas-workspace-main :is(.sas-feeder-simulation, .sas-signal-chain-summary) {
-  --sas-surface-override: linear-gradient(90deg, rgba(2, 19, 34, .88), rgba(2, 19, 34, .65) 54%, rgba(2, 19, 34, .24));
-  --sas-surface-blur: none;
+  --sas-surface-override: linear-gradient(90deg, rgba(4, 19, 34, 0.92), rgba(4, 19, 34, 0.86) 54%, rgba(4, 19, 34, 0.82));
+  --sas-surface-blur: blur(10px);
 }
 
 .sas-workspace-main .sas-signal-chain-scene {
-  --sas-surface-override: linear-gradient(180deg, rgba(2, 17, 30, .24), rgba(2, 17, 30, .10));
-  --sas-surface-blur: none;
+  --sas-surface-override: linear-gradient(180deg, rgba(4, 18, 32, 0.86), rgba(3, 14, 26, 0.90));
+  --sas-surface-blur: blur(8px);
 }
 
 @media (max-width: 767px) {
@@ -148,11 +151,11 @@ body,
   }
 
   .sas-workspace-main :is(.sas-feeder-simulation, .sas-signal-chain-summary) {
-    --sas-surface-override: linear-gradient(180deg, rgba(2, 19, 34, .80), rgba(2, 19, 34, .60));
+    --sas-surface-override: linear-gradient(180deg, rgba(4, 19, 34, 0.90), rgba(4, 19, 34, 0.84));
   }
 
   .sas-workspace-main .sas-signal-chain-scene {
-    --sas-surface-override: rgba(2, 17, 30, .27);
+    --sas-surface-override: rgba(4, 18, 32, 0.88);
   }
 
   .sas-workspace-main :is(.sas-signal-fault-control, .sas-signal-bay-control) {

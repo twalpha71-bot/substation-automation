@@ -51,7 +51,6 @@ export function BayConfigurationManager() {
     if (b.busSection !== 'COUPLE' && b.bayType === 'BUS_COUPLER') { setMessage('BUS COUPLER requires COUPLE bus section.'); return; }
     if (b.bayType === 'BUS_COUPLER') { setMessage('Adding bus couplers requires dedicated bus topology engineering and is not supported by automatic integration.'); return; }
     if (b.bayType === 'LINE_INCOMER' && b.voltageKv !== 132) { setMessage('Automatic LINE INCOMER placement is supported at 132 kV only.'); return; }
-    if (b.bayType === 'BUS_COUPLER' && rows.some(r => r.id !== editing && r.voltageKv === b.voltageKv && r.bayType === 'BUS_COUPLER')) { setMessage('Only one bus coupler per voltage level is supported by this simulation.'); return; }
     if (b.bayType === 'TRANSFORMER_HV' || b.bayType === 'TRANSFORMER_LV_INCOMER' || b.bayType === 'DIST_TX_FEEDER') { setMessage('Transformer bays require transformer connectivity engineering; automatic creation is not yet supported.'); return; }
     if ([...INITIAL_BAYS, ...rows.filter(r => r.id !== editing)].some(r => r.breakerId === (b.breakerId || `CB-${b.id}`) || r.iedId === (b.iedId || `IED-${b.id}`))) { setMessage('Breaker ID and IED ID must be unique.'); return; }
     setRows(old => editing ? old.map(r => r.id === editing ? b : r) : [...old, b]); setDraft(blank()); setEditing(null); setMessage(`Saved ${b.id} locally.`); }

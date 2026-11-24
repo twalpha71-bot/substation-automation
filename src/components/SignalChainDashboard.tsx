@@ -19,16 +19,8 @@ import {
 } from '../types/substation';
 import { getIedImageByModel } from '../data/iedImageRegistry';
 
-export type SignalChainFaultMode =
-  | 'NONE'
-  | 'DI_INPUT_FAIL'
-  | 'WRONG_IEC_REF'
-  | 'DATASET_MISSING'
-  | 'REPORT_DISABLED'
-  | 'GOOSE_TIMEOUT'
-  | 'MMS_DISCONNECT'
-  | 'BAD_QUALITY'
-  | 'HMI_TAG_MISMATCH';
+import type { SignalChainFaultMode, IedFaultScenario, IedFaultInjection } from '../simulation/signalChainFaults';
+export type { SignalChainFaultMode } from '../simulation/signalChainFaults';
 
 export interface SignalChainActiveModel {
   row: {
@@ -50,6 +42,7 @@ export interface SignalChainActiveModel {
   gooseCbName: string;
   reportCbName: string;
   displayVal: string;
+  sourceDisplayVal?: string;
   scadaTag: string;
   stageStates: ('OK' | 'WARN' | 'ERR')[];
   overallQuality: string;
@@ -72,7 +65,10 @@ interface SignalChainDashboardProps {
   tracedPoint?: InstantiatedSasSignal;
   chainFaultMode: SignalChainFaultMode;
   faultModeByBay?: Partial<Record<string, SignalChainFaultMode>>;
-  setChainFaultMode: (mode: SignalChainFaultMode) => void;
+  faultScenarios?: IedFaultScenario[];
+  activeFault?: IedFaultInjection;
+  faultsByIed?: Record<string, IedFaultInjection>;
+  setChainFaultMode: (modeOrId: string) => void;
   selectedStageIndex: number | null;
   setSelectedStageIndex: (idx: number | null) => void;
   liveClockStr: string;
@@ -306,13 +302,14 @@ function SignalFlowOverlay({
 type GooseDemoValue = BayEquipment['breakerState'] | 'ASSERTED' | 'RESET';
 
 interface GooseDemoFrame {
+  inputHealthy: boolean;
   position: GooseDemoValue;
   stNum: number;
   sqNum: number;
   lans: Record<PrpLan, boolean>;
 }
 
-type GooseRxState = 'WAITING' | 'HEALTHY' | 'INVALID / TIMEOUT';
+type GooseRxState = 'WAITING' | 'HEALTHY' | 'INVALID / TIMEOUT' | 'INVALID / QUALITY';
 
 interface GooseDemoProps {
   block: GooseControlBlock;
@@ -345,7 +342,7 @@ function GoosePositionDemo({
 }: GooseDemoProps) {
   const layer = useRef<SVGGElement>(null);
   const publisher = useRef({
-    position, stNum: block.stNum, nextSqNum: block.sqNum, retryInterval: block.maxTimeMs,
+    position, inputHealthy, stNum: block.stNum, nextSqNum: block.sqNum, retryInterval: block.maxTimeMs,
   });
   const published = useRef<GooseDemoFrame | null>(null);
   const lastReceipt = useRef<{ frame: GooseDemoFrame; lan: PrpLan; at: number } | null>(null);
@@ -361,8 +358,9 @@ function GoosePositionDemo({
   useEffect(() => {
     const start = startedAt.current ??= performance.now();
     const state = publisher.current;
-    if (inputHealthy && state.position !== position) {
-      state.position = position;
+    if ((inputHealthy && state.position !== position) || state.inputHealthy !== inputHealthy) {
+      if (inputHealthy) state.position = position;
+      state.inputHealthy = inputHealthy;
       state.stNum++;
       state.nextSqNum = 0;
       state.retryInterval = minTimeMs;
@@ -383,7 +381,7 @@ function GoosePositionDemo({
 
     const publish = () => {
       const frame = {
-        position: state.position, stNum: state.stNum, sqNum: state.nextSqNum++,
+        position: state.position, inputHealthy: state.inputHealthy, stNum: state.stNum, sqNum: state.nextSqNum++,
         lans: { A: lanAUp, B: lanBUp },
       };
       published.current = frame;
@@ -474,16 +472,16 @@ function GoosePositionDemo({
 
   const { receipt, expired, duplicateLan } = rx;
   const received = receipt?.frame;
-  const rxState: GooseRxState = expired ? 'INVALID / TIMEOUT' : received ? 'HEALTHY' : 'WAITING';
+  const rxState: GooseRxState = expired ? 'INVALID / TIMEOUT' : received ? received.inputHealthy ? 'HEALTHY' : 'INVALID / QUALITY' : 'WAITING';
   useEffect(() => {
     onRxStatusChange?.(block.id, rxState);
   }, [block.id, onRxStatusChange, rxState]);
 
   if (!visible) return null;
 
-  const status = expired ? 'GOOSE TIMEOUT' : received ? 'GOOSE RX ✓' : 'WAITING FOR GOOSE';
+  const status = expired ? 'GOOSE TIMEOUT' : received ? received.inputHealthy ? 'GOOSE RX ✓' : 'GOOSE QUALITY INVALID' : 'WAITING FOR GOOSE';
   const payloadLabel = showTrip ? 'Protection Trip' : 'CB';
-  const color = expired ? '#FCA5A5' : received ? '#86EFAC' : '#BAE6FD';
+  const color = expired || received?.inputHealthy === false ? '#FCA5A5' : received ? '#86EFAC' : '#BAE6FD';
   const lans: PrpLan[] = isPrp || lanBUp ? ['A', 'B'] : ['A'];
   const liveLans = { A: lanAUp, B: lanBUp };
   const deviceSpacing = 226;
@@ -624,6 +622,10 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
   networkRedundancyMode,
   chainFaultMode,
   faultModeByBay,
+  faultScenarios,
+  activeFault,
+  faultsByIed,
+  tracedPoint,
   setChainFaultMode,
   selectedStageIndex,
   setSelectedStageIndex,
@@ -642,6 +644,12 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
     return sequence;
   }, []);
   const [flowRevision, setFlowRevision] = useState(0);
+  const [checkedTroubleshootSteps, setCheckedTroubleshootSteps] = useState<Record<number, boolean>>({});
+  const [troubleshootExpanded, setTroubleshootExpanded] = useState<boolean>(true);
+  useEffect(() => {
+    setCheckedTroubleshootSteps({});
+    if (activeFault) setTroubleshootExpanded(true);
+  }, [activeFault?.scenario.id, bay.id]);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const diagramWrapRef = useRef<HTMLDivElement | null>(null);
   const portRefs = useRef<Record<string, HTMLSpanElement | null>>({});
@@ -657,10 +665,33 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
   const [playing, setPlaying] = useState<boolean>(true);
   const [speed, setSpeed] = useState<FlowSpeed>(DEFAULT_FLOW_SPEED);
 
-  // Independent PRP & Fault Simulation toggles preserved per bay
+  // Independent PRP & Fault Simulation toggles preserved per bay in sessionStorage
+  const NET_FAULTS_STORAGE_KEY = 'sas_signal_chain_net_faults_v1';
   const [netFaultsByBay, setNetFaultsByBay] = useState<
     Record<string, { lanA: boolean; lanB: boolean; trip: boolean }>
-  >({});
+  >(() => {
+    try {
+      const raw = window.sessionStorage.getItem(NET_FAULTS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {
+      // Ignore storage read errors
+    }
+    return {};
+  });
+  useEffect(() => {
+    try {
+      if (Object.keys(netFaultsByBay).length > 0) {
+        window.sessionStorage.setItem(NET_FAULTS_STORAGE_KEY, JSON.stringify(netFaultsByBay));
+      } else {
+        window.sessionStorage.removeItem(NET_FAULTS_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage write errors
+    }
+  }, [netFaultsByBay]);
   const curNetFault = netFaultsByBay[bay.id] || { lanA: false, lanB: false, trip: false };
   const lanAFailed = curNetFault.lanA;
   const lanBFailed = curNetFault.lanB;
@@ -741,8 +772,13 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
         links.find(link => link.lanPlane === 'LAN_B')?.status !== 'DOWN',
     };
   };
-  const canPublishGoose = (block: GooseControlBlock, publisher: BayEquipment, mode: SignalChainFaultMode) =>
-    block.healthy && publisher.quality !== 'INVALID' && mode !== 'GOOSE_TIMEOUT' && mode !== 'DATASET_MISSING';
+  const canPublishGoose = (block: GooseControlBlock, publisher: BayEquipment, mode: SignalChainFaultMode) => {
+    const fault = faultsByIed?.[publisher.iedId]?.scenario;
+    const blocked = fault ? (fault.mode === 'GOOSE_TIMEOUT' && fault.gooseBlockId === block.id) ||
+      (fault.mode === 'DATASET_MISSING' && fault.dataset?.replace(/\$/g, '.') === block.datSet.replace(/\$/g, '.'))
+      : !faultsByIed && (mode === 'GOOSE_TIMEOUT' || mode === 'DATASET_MISSING');
+    return block.healthy && publisher.quality !== 'INVALID' && !blocked;
+  };
 
   const isSingleAttached = ied?.nodeType === 'REDBOX_SAN';
   const isIedFailed = bay.quality === 'INVALID';
@@ -766,14 +802,17 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
     const links = linksByIed.get(publisher.iedId) ?? [];
     const hasVlan = (plane: 'LAN_A' | 'LAN_B') => links.some(link => link.lanPlane === plane && link.vlanList.includes(block.vlanId));
     const lans = { A: available.A && hasVlan('LAN_A'), B: available.B && hasVlan('LAN_B') };
-    return [{ block, publisher, peers, mode, lans, enabled: canPublishGoose(block, publisher, mode) && (lans.A || lans.B) }];
+    const injected = faultsByIed?.[publisher.iedId]?.scenario;
+    const inputQualityFailed = !!injected && ['DI_INPUT_FAIL', 'BAD_QUALITY'].includes(injected.mode) &&
+      block.extRefs.some(ref => ref.bound && injected.evidence === ref.srcRef);
+    return [{ block, publisher, peers, mode, lans, inputQualityFailed, enabled: canPublishGoose(block, publisher, mode) && (lans.A || lans.B) }];
   });
   const selectedGoose = gooseDemos.find(demo => demo.publisher.id === bay.id);
   const showGooseDemo = !!selectedGoose;
   const gooseHealthy = selectedGoose?.enabled ?? false;
-  const iec104Healthy = mmsHealthy && chainFaultMode !== 'HMI_TAG_MISMATCH';
+  const iec104Healthy = mmsHealthy;
   const mmsFaultMode = chainFaultMode === 'GOOSE_TIMEOUT' ? 'NONE' : chainFaultMode;
-  const mmsDataGood = mmsHealthy && !isDiFailed && bay.quality === 'GOOD' && mmsFaultMode === 'NONE';
+  const mmsDataGood = mmsHealthy && !isDiFailed && (tracedPoint?.quality ?? bay.quality) === 'GOOD' && mmsFaultMode === 'NONE';
 
   const isBreakerClosed = bay.breakerState === 'CLOSED';
   const contact52aOn = isBreakerClosed && !isDiFailed;
@@ -807,8 +846,20 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
           y: r.top - wr.top + r.height / 2,
         };
       });
-      setDiagSize({ w: Math.round(wr.width), h: Math.round(wr.height) });
-      setPortCoords(next);
+      const nextW = Math.round(wr.width);
+      const nextH = Math.round(wr.height);
+      setDiagSize((prev) => (prev.w === nextW && prev.h === nextH ? prev : { w: nextW, h: nextH }));
+      setPortCoords((prev) => {
+        const prevKeys = Object.keys(prev);
+        const nextKeys = Object.keys(next);
+        if (prevKeys.length !== nextKeys.length) return next;
+        for (const k of nextKeys) {
+          if (!prev[k] || Math.abs(prev[k].x - next[k].x) > 0.5 || Math.abs(prev[k].y - next[k].y) > 0.5) {
+            return next;
+          }
+        }
+        return prev;
+      });
     };
     measurePorts();
     const t1 = window.setTimeout(measurePorts, 150);
@@ -854,13 +905,13 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
       {
         time: formatMsTime(new Date(now + 4)),
         detail: isDiFailed
-          ? `DI acquisition fault on ${activeChain.diChannelLabel} (q=0x0100 Invalid)`
+          ? `Acquisition fault on ${activeChain.diChannelLabel} (INVALID)`
           : `DI module acquired ${activeChain.diChannelLabel} = ${contact52aOn ? '1' : '0'}`,
         severity: isDiFailed ? 'ERR' : 'INFO',
       },
       {
         time: formatMsTime(new Date(now + 6)),
-        detail: `${activeChain.iedName} updated ${activeChain.lnPart}.${activeChain.doPart}.${activeChain.daPart} = ${activeChain.displayVal}`,
+        detail: `${activeChain.iedName} source ${activeChain.lnPart}.${activeChain.doPart}.${activeChain.daPart} = ${isDiFailed ? 'ACQUISITION INVALID' : activeChain.sourceDisplayVal ?? activeChain.displayVal}`,
         severity: isIedFailed ? 'ERR' : 'INFO',
       },
       {
@@ -879,7 +930,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
       },
       {
         time: formatMsTime(new Date(now + 11)),
-        detail: `SCADA/HMI updated — ${bay.bayCode} Breaker = ${bay.breakerState} (${mmsDataGood ? 'GOOD' : activeChain.overallQuality})`,
+        detail: `SCADA/HMI ${mmsDataGood ? 'updated' : 'quality/stale indication'} — ${activeChain.row.signalName} = ${activeChain.displayVal} (${activeChain.overallQuality})`,
         severity: mmsFaultMode !== 'NONE' || !mmsHealthy ? 'WARN' : 'INFO',
       },
     ];
@@ -888,6 +939,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
     bay.id,
     bay.breakerState,
     chainFaultMode,
+    activeFault?.injectedAt,
     lanAFailed,
     lanBFailed,
     activeChain.lnPart,
@@ -917,12 +969,9 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
     setLanBFailed(false);
     setInterlockTripActive(false);
     setChainFaultMode('NONE');
-    if (bay.bayType !== 'OUTGOING_FEEDER' && bay.protectionTripActive) {
-      onResetTrip(bay.id);
-    }
     setSimPackets({ mms: 1482, goose: 24892, iec104: 940 });
     setTimeline((prev) => [
-      { time: formatMsTime(), detail: `Simulation reset — ${bay.bayCode} (${activeChain.iedName}) healthy`, severity: 'INFO' },
+      { time: formatMsTime(), detail: `Simulation reset — ${bay.bayCode} (${activeChain.iedName}); injected faults cleared, source state retained`, severity: 'INFO' },
       ...prev.slice(0, 8),
     ]);
   };
@@ -956,7 +1005,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
   }, []);
   const gooseRxLabel = selectedGoose ? demoGooseRx[selectedGoose.block.id] ?? 'WAITING' : 'NOT CONFIGURED';
   const gooseRxColor = gooseRxLabel === 'HEALTHY' ? goodStatus
-    : gooseRxLabel === 'INVALID / TIMEOUT' ? faultStatus : warningStatus;
+    : gooseRxLabel.startsWith('INVALID') ? faultStatus : warningStatus;
 
   return (
     <div className="space-y-3">
@@ -1041,7 +1090,13 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
         <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
           <button
             type="button"
-            onClick={() => onToggleBreaker(bay.id, isBreakerClosed ? 'OPEN' : 'CLOSED')}
+            onClick={() => {
+              if (!isBreakerClosed && activeFault?.scenario.tripsBreaker) {
+                setChainFaultMode('NONE');
+                return;
+              }
+              onToggleBreaker(bay.id, isBreakerClosed ? 'OPEN' : 'CLOSED');
+            }}
             title="Click to command Breaker OPEN/CLOSED via SBO"
             className="px-2.5 py-1 rounded-lg border bg-[#041526] hover:brightness-125 transition flex items-center gap-1.5"
             style={{ borderColor: isBreakerClosed ? '#22C55E' : '#F59E0B' }}
@@ -1255,20 +1310,49 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                   />
                   {/* Dynamic Backlit LCD Overlay */}
                   <div
-                    className="absolute px-2 py-1 rounded border font-mono text-[9px] font-extrabold leading-tight shadow-inner pointer-events-none"
+                    className="absolute px-2 py-1 rounded border font-mono text-[8.5px] font-extrabold leading-tight shadow-inner pointer-events-none"
                     style={{
                       top: isDefaultMiComP143 ? '31%' : '14%',
                       left: '50%',
                       transform: 'translateX(-50%)',
-                      backgroundColor: isIedFailed ? '#7F1D1D' : '#B4D455',
-                      borderColor: isIedFailed ? '#EF4444' : '#3F6212',
-                      color: isIedFailed ? '#FEE2E2' : '#0F1F05',
-                      minWidth: '84px',
+                      backgroundColor: isIedFailed || activeFault || bay.protectionTripActive ? '#7F1D1D' : '#B4D455',
+                      borderColor: isIedFailed || activeFault || bay.protectionTripActive ? '#EF4444' : '#3F6212',
+                      color: isIedFailed || activeFault || bay.protectionTripActive ? '#FEE2E2' : '#0F1F05',
+                      minWidth: '90px',
+                      boxShadow: activeFault || bay.protectionTripActive ? '0 0 12px rgba(239,68,68,0.75)' : undefined,
                     }}
                   >
                     <div>{bay.bayCode}</div>
-                    <div>{isIedFailed ? 'IED FAIL' : bay.protectionTripActive ? 'TRIP 50/51' : `CB ${bay.breakerState}`}</div>
+                    <div className="truncate max-w-[96px]">
+                      {isIedFailed
+                        ? 'IED FAIL'
+                        : activeFault
+                        ? activeFault.scenario.lcdText
+                        : bay.protectionTripActive
+                        ? 'TRIP 50/51'
+                        : `CB ${bay.breakerState}`}
+                    </div>
                   </div>
+
+                  {/* Real-Time LED Fault Indication Strip Mounted Directly ON the IED Faceplate */}
+                  {(activeFault || bay.protectionTripActive) && (
+                    <div
+                      className="absolute bottom-[6px] left-1/2 -translate-x-1/2 z-30 w-[92%] max-w-[106px] rounded border px-1.5 py-0.5 text-left font-mono text-[7.2px] leading-tight pointer-events-none shadow-[0_0_12px_rgba(239,68,68,0.7)]"
+                      style={{
+                        backgroundColor: 'rgba(32, 6, 12, 0.94)',
+                        borderColor: '#EF4444',
+                      }}
+                    >
+                      <div className="flex items-center gap-1 text-[#FCA5A5] font-extrabold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#EF4444] sas-led-blink shadow-[0_0_5px_#EF4444] shrink-0" />
+                        <span className="truncate">{activeFault?.scenario.tripsBreaker || bay.protectionTripActive ? 'TRIP' : 'ALARM'} · {activeFault ? activeFault.scenario.ledBadge : 'OVERCURRENT'}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-[#FDE68A] mt-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] sas-led-blink shrink-0" />
+                        <span className="truncate">{activeFault?.scenario.tripsBreaker || bay.protectionTripActive ? '86 LATCHED · CB OPEN' : 'QUALITY FAULT'}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               {/* Physical PRP Dual-Homing Ethernet Ports */}
@@ -1452,7 +1536,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                       color: mmsHealthy ? '#4ADE80' : '#FCA5A5',
                     }}
                   >
-                    {bay.bayCode}: {mmsHealthy ? bay.breakerState : 'COMM LOST'}
+                    {bay.bayCode}: {activeChain.displayVal} {!mmsDataGood && '(STALE / QUALITY)'}
                   </div>
                 </div>
               </div>
@@ -1549,9 +1633,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                 });
               }
             }
-            const valueLabel = activeChain.row.catalogNumber === 1
-              ? bay.breakerState
-              : activeChain.displayVal;
+            const valueLabel = activeChain.displayVal;
             const mappedValue = valueLabel.length > 28 ? 'SCADA TAG UPDATED' : 'SCADA · ' + valueLabel;
             return (
               <svg
@@ -1655,7 +1737,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                 <text x={p.swb_out.x + (showGooseDemo ? 104 : 0)} y={trayTop + 59.5} textAnchor="middle" fill="#FAE8FF" fontSize="9" fontWeight="bold" fontFamily="monospace">
                   LAN B (PRP)
                 </text>
-                {gooseDemos.map(({ block, publisher, peers, mode, lans, enabled }) => {
+                {gooseDemos.map(({ block, publisher, peers, mode, lans, inputQualityFailed, enabled }) => {
                   const isTripDataset = /\$dsProtTrip$/i.test(block.datSet);
                   return (
                     <GoosePositionDemo
@@ -1664,7 +1746,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                       position={isTripDataset ? publisher.protectionTripActive ? 'ASSERTED' : 'RESET' : publisher.breakerState}
                       showTrip={isTripDataset}
                       visible={publisher.id === bay.id}
-                      inputHealthy={isTripDataset || (mode !== 'DI_INPUT_FAIL' && publisher.dcSupplyHealthy)}
+                      inputHealthy={!inputQualityFailed && (isTripDataset || publisher.dcSupplyHealthy)}
                       enabled={enabled}
                       lanAUp={lans.A}
                       lanBUp={lans.B && (isPrp || !lans.A)}
@@ -1726,6 +1808,141 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
         </div>
       </div>
 
+      {/* INTERACTIVE STEP-BY-STEP FAULT TROUBLESHOOTING & ISOLATION GUIDE (Shown when a fault is active) */}
+      {activeFault?.scenario.troubleshooting && (() => {
+        const guide = activeFault.scenario.troubleshooting;
+        const completedCount = guide.steps.filter((s) => checkedTroubleshootSteps[s.step]).length;
+        const stageToIndex: Record<string, number> = {
+          'Field I/O': 0,
+          'Input Module': 1,
+          'IED': 2,
+          'Station Bus': 4,
+          'Gateway': 4,
+          'SCADA / HMI': 5,
+        };
+        return (
+          <div
+            className="rounded-xl border overflow-hidden shadow-[0_0_24px_rgba(239,68,68,0.2)]"
+            style={{
+              borderColor: '#EF4444',
+              background: 'linear-gradient(180deg, rgba(36, 10, 18, 0.94) 0%, rgba(7, 22, 38, 0.96) 100%)',
+            }}
+          >
+            <div className="px-3.5 py-2 border-b border-[#7F1D1D] bg-gradient-to-r from-[#450A14] via-[#2A0E1B] to-[#082035] flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-[#FCA5A5] shrink-0" />
+                <span className="text-xs font-extrabold text-white tracking-wide uppercase">
+                  Fault Finding &amp; Troubleshooting Steps — {activeFault.scenario.label}
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#06281E] border border-[#22C55E] text-[#4ADE80]">
+                  {completedCount}/{guide.steps.length} Steps Checked
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTroubleshootExpanded((v) => !v)}
+                  className="px-2.5 py-1 rounded-md border border-[#1E466E] bg-[#061A2E] text-[10.5px] font-bold text-[#BAE6FD] hover:border-[#00DFFF]"
+                >
+                  {troubleshootExpanded ? 'Hide Steps ▴' : 'Show Steps ▾'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChainFaultMode('NONE')}
+                  className="px-2.5 py-1 rounded-md border border-[#22C55E] bg-[#062E20] text-[10.5px] font-extrabold text-[#4ADE80] hover:brightness-110"
+                >
+                  ✓ Mark Resolved &amp; Restore Healthy
+                </button>
+              </div>
+            </div>
+
+            {troubleshootExpanded && (
+              <div className="p-3 space-y-2.5 text-[11px]">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+                  <div className="lg:col-span-5 rounded-lg border border-[#7F1D1D]/70 bg-[#1B0910]/80 p-2.5 space-y-1">
+                    <div className="text-[10px] font-mono font-extrabold uppercase text-[#FCA5A5]">
+                      1. Fault Symptom &amp; Evidence
+                    </div>
+                    <div className="text-white font-semibold leading-snug">{guide.symptomSummary}</div>
+                    <div className="text-[10px] font-mono text-[#FDE68A] break-all pt-0.5">
+                      Ref: {activeFault.scenario.evidence}
+                    </div>
+                  </div>
+                  <div className="lg:col-span-7 rounded-lg border border-[#1E466E] bg-[#051628]/90 p-2.5 space-y-1">
+                    <div className="text-[10px] font-mono font-extrabold uppercase text-[#7DD3FC]">
+                      2. Probable Root Causes (Check in Order)
+                    </div>
+                    <ul className="list-disc list-inside space-y-0.5 text-[#DCEEFB]">
+                      {guide.probableCauses.map((cause, idx) => (
+                        <li key={idx}>{cause}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                {/* 5-Step Interactive Fault Isolation Checklist */}
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+                  {guide.steps.map((s) => {
+                    const checked = Boolean(checkedTroubleshootSteps[s.step]);
+                    return (
+                      <div
+                        key={s.step}
+                        className="rounded-lg border p-2 flex flex-col justify-between gap-1.5 transition"
+                        style={{
+                          backgroundColor: checked ? 'rgba(6, 46, 32, 0.85)' : 'rgba(5, 22, 38, 0.92)',
+                          borderColor: checked ? '#22C55E' : '#1E4B75',
+                        }}
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between gap-1">
+                            <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() =>
+                                  setCheckedTroubleshootSteps((prev) => ({ ...prev, [s.step]: !prev[s.step] }))
+                                }
+                                className="w-3.5 h-3.5 accent-[#22C55E]"
+                              />
+                              <span className={`font-mono font-extrabold text-[10.5px] ${checked ? 'text-[#4ADE80]' : 'text-[#00DFFF]'}`}>
+                                STEP {s.step}
+                              </span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedStageIndex(stageToIndex[s.stage] ?? 2)}
+                              title="Click to inspect this stage in the Signal Chain"
+                              className="px-1.5 py-0.5 rounded bg-[#0A2942] border border-[#00DFFF]/50 text-[9px] font-mono font-bold text-[#7DD3FC] hover:bg-[#0E3A5E]"
+                            >
+                              {s.stage}
+                            </button>
+                          </div>
+                          <div className="text-[10.5px] text-white leading-snug">{s.action}</div>
+                        </div>
+                        <div className="pt-1 border-t border-[#143554] space-y-0.5 font-mono text-[9.5px]">
+                          <div className="text-[#FDE68A]">Tool: {s.tool}</div>
+                          <div className="text-[#86EFAC]">Check: {s.expectedCheck}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Final Post-Fix Verification Bar */}
+                <div className="rounded-lg border border-[#22C55E]/50 bg-[#05221B]/85 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-[10.5px]">
+                  <span className="text-[#86EFAC] font-semibold">
+                    <strong className="text-white">Post-Fix Verification:</strong> {guide.verificationCheck}
+                  </span>
+                  <span className="font-mono text-[10px] text-[#7DD3FC]">
+                    Tip: Click any stage pill (Field I/O, IED, Station Bus...) to open its live Diagnostic Inspector.
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* MIDDLE ROW: 3 Monitoring Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.45fr_1fr] gap-3">
         {/* Panel 1: Live Signal Trace */}
@@ -1738,12 +1955,12 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
           </div>
           <div className="p-2.5 space-y-1.5">
             {[
-              { label: 'Field Contact (52a/52b)', ok: !isDiFailed },
-              { label: 'DI Acquisition (Remote I/O)', ok: !isDiFailed },
-              { label: `IED Update (${activeChain.lnPart})`, ok: !isIedFailed },
+              { label: activeChain.fieldIoTitle, ok: activeChain.stageStates[0] === 'OK' },
+              { label: activeChain.diModuleTitle, ok: !isDiFailed },
+              { label: `IED Update (${activeChain.lnPart})`, ok: !isIedFailed && activeChain.stageStates[2] === 'OK' },
               { label: `IEC 61850 DataSet (${activeChain.row.defaultDataset})`, ok: chainFaultMode !== 'DATASET_MISSING' && chainFaultMode !== 'WRONG_IEC_REF' },
-              { label: 'MMS / GOOSE Publish', ok: mmsHealthy || gooseHealthy },
-              { label: 'SCADA/HMI Update', ok: mmsHealthy && chainFaultMode !== 'HMI_TAG_MISMATCH' },
+              { label: 'MMS / GOOSE Publish', ok: mmsHealthy && (!showGooseDemo || gooseHealthy) },
+              { label: 'SCADA/HMI Update', ok: mmsDataGood },
             ].map((step, i) => (
               <div
                 key={step.label}
@@ -1965,24 +2182,15 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
           </div>
           <div className="p-2.5 space-y-2 text-[11px]">
             {[
-              {
-                label: 'MMS Communication Loss',
-                checked: chainFaultMode === 'MMS_DISCONNECT',
-                onChange: (c: boolean) => setChainFaultMode(c ? 'MMS_DISCONNECT' : 'NONE'),
-              },
-              {
-                label: 'GOOSE Blocking (VLAN)',
-                disabled: !showGooseDemo,
-                checked: chainFaultMode === 'GOOSE_TIMEOUT',
-                onChange: (c: boolean) => setChainFaultMode(c ? 'GOOSE_TIMEOUT' : 'NONE'),
-              },
-              {
-                label: 'MMS Report Disabled',
-                checked: chainFaultMode === 'REPORT_DISABLED',
-                onChange: (c: boolean) => setChainFaultMode(c ? 'REPORT_DISABLED' : 'NONE'),
-              },
+              ...(faultScenarios || []).map(scenario => ({
+                label: scenario.label,
+                checked: activeFault?.scenario.id === scenario.id,
+                disabled: false,
+                onChange: (checked: boolean) => setChainFaultMode(checked ? scenario.id : 'NONE'),
+              })),
               {
                 label: 'Interlock / Trip Test',
+                disabled: false,
                 checked: interlockTripActive || bay.protectionTripActive,
                 onChange: handleInterlockTripToggle,
               },
@@ -1992,6 +2200,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                 <button
                   type="button"
                   role="switch"
+                  aria-label={t.label}
                   aria-checked={t.checked}
                   disabled={t.disabled}
                   onClick={() => t.onChange(!t.checked)}
@@ -2030,7 +2239,8 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => setChainFaultMode(chainFaultMode === 'DI_INPUT_FAIL' ? 'NONE' : 'DI_INPUT_FAIL')}
+                disabled={!!faultScenarios && !faultScenarios.some(scenario => scenario.mode === 'DI_INPUT_FAIL')}
+                onClick={() => setChainFaultMode(activeFault?.scenario.mode === 'DI_INPUT_FAIL' ? 'NONE' : 'DI_INPUT_FAIL')}
                 className={`px-2 py-0.5 rounded border font-bold ${
                   chainFaultMode === 'DI_INPUT_FAIL'
                     ? 'bg-[#3B0D15] border-[#EF4444] text-[#FCA5A5]'

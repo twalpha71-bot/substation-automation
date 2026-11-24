@@ -527,9 +527,9 @@ export const ScadaHmiPage: React.FC = () => {
   // Operator SLD consumes the same live bay list as Engineering Mode.
   // Extra bays extend outward rather than squeezing the fixed transformer/coupler columns.
   const incoming132A = bays.filter(b => b.voltageKv === 132 && b.busSection === 'A' &&
-    (b.bayType === 'LINE_INCOMER' || b.bayType === 'INCOMING_FEEDER' || b.id === 'BAY-132-L1'));
+    (b.bayType === 'LINE_INCOMER' || String(b.bayType) === 'INCOMING_FEEDER' || b.id === 'BAY-132-L1'));
   const incoming132B = bays.filter(b => b.voltageKv === 132 && b.busSection === 'B' &&
-    (b.bayType === 'LINE_INCOMER' || b.bayType === 'INCOMING_FEEDER' || b.id === 'BAY-132-L2'));
+    (b.bayType === 'LINE_INCOMER' || String(b.bayType) === 'INCOMING_FEEDER' || b.id === 'BAY-132-L2'));
   const extraLeft = Math.max(0, incoming132A.length - 2, bay33BusA.length - 3, bay11BusA.length - 4) * 110;
   const extraRight = Math.max(0, incoming132B.length - 2, bay33BusB.length - 3, bay11BusB.length - 4) * 110;
   const operatorCanvasWidth = 1200 + extraLeft + extraRight;
@@ -1323,7 +1323,7 @@ export const ScadaHmiPage: React.FC = () => {
       <text x={x+13} y={cbY+3} fontSize="8" fill="#d7e7f6">Q0</text>
       <text x={x+24} y={earthY+5} fontSize="8" fill="#d7e7f6">Q8</text>
       <text x={x} y={direction==='up'?top-9:bottom+13} fontSize="10" fill="#f1f7ff" fontWeight="600" textAnchor="middle">{bay.bayCode}</text>
-      {direction==='up' && ((bay.voltageKv === 132 && (bay.bayType === 'LINE_INCOMER' || bay.bayType === 'INCOMING_FEEDER')) || ['BAY-33-INC1', 'BAY-33-INC2', 'BAY-11-INC1', 'BAY-11-INC2'].includes(bay.id) ? (
+      {direction==='up' && ((bay.voltageKv === 132 && (bay.bayType === 'LINE_INCOMER' || String(bay.bayType) === 'INCOMING_FEEDER')) || ['BAY-33-INC1', 'BAY-33-INC2', 'BAY-11-INC1', 'BAY-11-INC2'].includes(bay.id) ? (
         // Incoming source arrows (132 kV lines and 33/11 kV transformer incomers) point toward the busbar.
         <path d={`M${x-4} ${top+1} L${x} ${top+8} L${x+4} ${top+1}`} fill="none" stroke={wire} strokeWidth="1.6"/>
       ) : (

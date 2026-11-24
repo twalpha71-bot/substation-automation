@@ -23,16 +23,11 @@ import {
   X,
 } from 'lucide-react';
 
-type SignalChainFaultMode =
-  | 'NONE'
-  | 'DI_INPUT_FAIL'
-  | 'WRONG_IEC_REF'
-  | 'DATASET_MISSING'
-  | 'REPORT_DISABLED'
-  | 'GOOSE_TIMEOUT'
-  | 'MMS_DISCONNECT'
-  | 'BAD_QUALITY'
-  | 'HMI_TAG_MISMATCH';
+import {
+  buildIedFaultScenarios, faultStageStates, injectIedFault, projectSignalFault,
+  readFaultScl, runtimeFaultConfiguration, datasetPoints,
+} from '../simulation/signalChainFaults';
+import type { SignalChainFaultMode, IedFaultInjection } from '../simulation/signalChainFaults';
 
 interface ParsedSclSummary {
   fileName: string;
@@ -212,7 +207,7 @@ function parseSclXmlString(fileName: string, fileType: string, xmlString: string
   };
 }
 
-function RecloseTrainingPanel({ bayId }: { bayId: string }) {
+function RecloseTrainingPanel({ bayId, onAfterResetTrip }: { bayId: string; onAfterResetTrip?: () => void }) {
   const {
     bays, feederProtection, startRecloseDemo, clearRecloseDemoFault,
     cancelRecloseDemo, resetRecloseDemo79, resetRecloseDemo86, resetProtectionTrip,
@@ -257,7 +252,7 @@ function RecloseTrainingPanel({ bayId }: { bayId: string }) {
         <button type="button" className={buttonClass} disabled={phase !== 'DEAD_TIME'} onClick={() => cancelRecloseDemo(bayId)}>Cancel 79</button>
         <button type="button" className={buttonClass} disabled={!canReset || phase !== 'LOCKOUT'} onClick={() => resetRecloseDemo79(bayId)}>Reset 79 lockout</button>
         <button type="button" className={buttonClass} disabled={!canReset || !lockout86} onClick={() => resetRecloseDemo86(bayId)}>Reset 86 lockout</button>
-        <button type="button" className={buttonClass} disabled={faultActive || !bay.protectionTripActive} onClick={() => resetProtectionTrip(bay.id)}>Reset trip indication</button>
+        <button type="button" className={buttonClass} disabled={faultActive || !bay.protectionTripActive} onClick={() => { resetProtectionTrip(bay.id); onAfterResetTrip?.(); }}>Reset trip indication</button>
       </div>
     </section>
   );
@@ -277,6 +272,8 @@ export const SignalMappingSclPage: React.FC = () => {
     commandBreaker,
     triggerProtectionTrip,
     resetProtectionTrip,
+    resetRecloseDemo86,
+    clearRecloseDemoFault,
   } = useSubstationStore();
 
   // Top 3 Workspace Tabs
@@ -294,8 +291,20 @@ export const SignalMappingSclPage: React.FC = () => {
   const [selectedCatalogNo, setSelectedCatalogNo] = useState<number>(1);
   const [selectedPointId, setSelectedPointId] = useState<string>('SIG-132-L1-01');
 
-  // Interactive Signal-Chain Fault Simulation (Section 11)
-  const [faultModeByBay, setFaultModeByBay] = useState<Record<string, SignalChainFaultMode>>({});
+  // Interactive Signal-Chain Fault Simulation (Section 11) — persisted in sessionStorage across page navigation
+  const FAULTS_STORAGE_KEY = 'sas_signal_chain_faults_by_ied_v1';
+  const [faultsByIed, setFaultsByIed] = useState<Record<string, IedFaultInjection>>(() => {
+    try {
+      const raw = window.sessionStorage.getItem(FAULTS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {
+      // Ignore storage access errors
+    }
+    return {};
+  });
   const [selectedStageIndex, setSelectedStageIndex] = useState<number | null>(null);
   const [selectedProtocolMapMode, setSelectedProtocolMapMode] = useState<'MMS' | 'GOOSE' | 'MODBUS' | 'IEC104' | 'OPCUA'>('MMS');
 
@@ -333,107 +342,193 @@ export const SignalMappingSclPage: React.FC = () => {
     return bays.find((b) => b.id === selectedBayId) || bays.find((b) => b.bayCode === '33-F03') || bays[0];
   }, [bays, selectedBayId]);
 
-  // For Master Catalogue Trace: trace on BAY-132-L1 by default (matching screenshot "LINE-1 (132 kV) / IED_132_L1 / SAS_132_L1_CB_POS_DP") or the selected point's bay in Per-Bay mode
-  const traceBay = useMemo(() => {
-    if (viewMode === 'INSTANTIATED_BAY') {
-      const pt = signals.find((s) => s.id === selectedPointId);
-      if (pt) {
-        const b = bays.find((x) => x.id === pt.bayId);
-        if (b) return b;
+  // The IED selector owns the trace. A stale point selection must never select another bay.
+  const traceBay = kpiBay;
+  const selectedIed = ieds.find(ied => ied.id === traceBay.iedId);
+  const allSclFiles = useMemo(() => [...SCL_FILE_SAMPLES, ...uploadedSclFiles], [uploadedSclFiles]);
+  const currentSclFile = allSclFiles.find(file => file.id === selectedSclId) || allSclFiles[0];
+  const parsedScl = useMemo(() => parseSclXmlString(currentSclFile.fileName, currentSclFile.fileType, currentSclFile.xmlContent), [currentSclFile]);
+  const importedMappings = useMemo(() => selectedSclId.startsWith('SCL-USER-')
+    ? readFaultScl(currentSclFile.xmlContent, currentSclFile.fileName) : {}, [currentSclFile, selectedSclId]);
+  const scenariosByIed = useMemo(() => Object.fromEntries(ieds.map(ied => {
+    const ownerBay = bays.find(b => b.iedId === ied.id);
+    return [ied.id, buildIedFaultScenarios(ied, signals, gooseControlBlocks, importedMappings[ied.name], ownerBay?.bayType)];
+  })), [ieds, bays, signals, gooseControlBlocks, importedMappings]);
+  // Keep only injections whose scenario ID & target point exist for that IED (preserving object identity)
+  const validFaults = useMemo(() => {
+    const entries: Array<[string, IedFaultInjection]> = [];
+    for (const [id, fault] of Object.entries(faultsByIed)) {
+      const matched = scenariosByIed[id]?.find(
+        scenario => scenario.id === fault.scenario.id && scenario.targetId === fault.scenario.targetId
+      );
+      if (matched) {
+        entries.push([id, fault]);
       }
-      return kpiBay;
     }
-    return bays.find((b) => b.id === selectedBayId) || bays.find((b) => b.id === 'BAY-132-L1') || bays[0];
-  }, [viewMode, selectedPointId, selectedBayId, signals, bays, kpiBay]);
+    return Object.fromEntries(entries);
+  }, [faultsByIed, scenariosByIed]);
 
-  const activeBayKey = traceBay?.id ?? selectedBayId;
-  const chainFaultMode: SignalChainFaultMode = faultModeByBay[activeBayKey] || 'NONE';
-  const setChainFaultMode = (mode: SignalChainFaultMode) => {
-    setFaultModeByBay((prev) => ({ ...prev, [activeBayKey]: mode }));
+  // Persist validFaults to sessionStorage without causing re-render loops
+  useEffect(() => {
+    const prevKeys = Object.keys(faultsByIed);
+    const nextKeys = Object.keys(validFaults);
+    if (prevKeys.length !== nextKeys.length) {
+      setFaultsByIed(validFaults);
+      return;
+    }
+    try {
+      if (nextKeys.length > 0) {
+        window.sessionStorage.setItem(FAULTS_STORAGE_KEY, JSON.stringify(validFaults));
+      } else {
+        window.sessionStorage.removeItem(FAULTS_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage write errors
+    }
+  }, [validFaults, faultsByIed]);
+
+  // Edge-triggered sync with global store protectionTripActive (only on true<->false transitions; never oscillates)
+  const prevTripByBayRef = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    const prevMap = prevTripByBayRef.current;
+    const isInitialMount = Object.keys(prevMap).length === 0;
+    let nextFaults: Record<string, IedFaultInjection> | null = null;
+
+    for (const bay of bays) {
+      const wasTripped = prevMap[bay.id] ?? false;
+      const isTripped = Boolean(bay.protectionTripActive);
+      prevMap[bay.id] = isTripped;
+
+      if (isInitialMount) {
+        // On mount, if store has an active trip with no stored fault, sync it once
+        if (isTripped && !faultsByIed[bay.iedId]) {
+          const activeFn = (bay.activeTripFunctions[0] || '').toLowerCase();
+          const inferred =
+            scenariosByIed[bay.iedId]?.find(s => activeFn && s.lcdText.toLowerCase() === activeFn) ||
+            scenariosByIed[bay.iedId]?.find(s => s.tripsBreaker);
+          if (inferred) {
+            nextFaults = { ...(nextFaults ?? faultsByIed), [bay.iedId]: injectIedFault(inferred, signals) };
+          }
+        }
+        continue;
+      }
+
+      if (wasTripped && !isTripped) {
+        // Trip was cleared externally (SLD or Protection Simulation panel) -> clear matching trip fault
+        const curFault = (nextFaults ?? faultsByIed)[bay.iedId];
+        if (curFault?.scenario.tripsBreaker) {
+          const copy = { ...(nextFaults ?? faultsByIed) };
+          delete copy[bay.iedId];
+          nextFaults = copy;
+        }
+      } else if (!wasTripped && isTripped) {
+        // Trip was triggered externally (SLD or Protection Simulation panel) -> reflect in dropdown once
+        const curFault = (nextFaults ?? faultsByIed)[bay.iedId];
+        if (!curFault) {
+          const activeFn = (bay.activeTripFunctions[0] || '').toLowerCase();
+          const inferred =
+            scenariosByIed[bay.iedId]?.find(s => activeFn && s.lcdText.toLowerCase() === activeFn) ||
+            scenariosByIed[bay.iedId]?.find(s => s.tripsBreaker);
+          if (inferred) {
+            nextFaults = { ...(nextFaults ?? faultsByIed), [bay.iedId]: injectIedFault(inferred, signals) };
+          }
+        }
+      }
+    }
+
+    if (nextFaults) {
+      setFaultsByIed(nextFaults);
+    }
+  }, [bays, faultsByIed, scenariosByIed, signals]);
+  const faultScenarios = scenariosByIed[traceBay.iedId] || [];
+  const activeFault = validFaults[traceBay.iedId];
+  const selectedFaultMode: SignalChainFaultMode = activeFault?.scenario.mode || 'NONE';
+  const selectedFaultId: string = activeFault?.scenario.id || 'NONE';
+
+  // Keep traced signal aligned with the active fault target across page navigation and bay switches
+  useEffect(() => {
+    if (!activeFault) return;
+    const target = signals.find(point => point.id === activeFault.scenario.targetId);
+    if (!target) return;
+    if (selectedPointId !== target.id) setSelectedPointId(target.id);
+    if (selectedCatalogNo !== target.catalogNumber) setSelectedCatalogNo(target.catalogNumber);
+  }, [activeFault?.scenario.id, activeFault?.scenario.targetId, traceBay.iedId, signals]);
+  const setChainFaultMode = (modeOrId: string) => {
+    if (modeOrId === 'NONE') {
+      const bayId = traceBay.id;
+      const iedId = traceBay.iedId;
+      const hadBreakerTrip = Boolean(activeFault?.scenario.tripsBreaker || traceBay.protectionTripActive || traceBay.masterTripLockout);
+      setFaultsByIed(previous => {
+        const next = { ...previous };
+        delete next[iedId];
+        return next;
+      });
+      try {
+        const raw = window.sessionStorage.getItem(FAULTS_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          delete parsed[iedId];
+          if (Object.keys(parsed).length > 0) {
+            window.sessionStorage.setItem(FAULTS_STORAGE_KEY, JSON.stringify(parsed));
+          } else {
+            window.sessionStorage.removeItem(FAULTS_STORAGE_KEY);
+          }
+        }
+      } catch {
+        // Ignore storage errors
+      }
+      clearRecloseDemoFault(bayId);
+      resetProtectionTrip(bayId);
+      resetRecloseDemo86(bayId);
+      if (hadBreakerTrip) {
+        window.setTimeout(() => {
+          const st = useSubstationStore.getState();
+          const latestBay = st.bays.find(b => b.id === bayId);
+          if (latestBay?.protectionTripActive) st.resetProtectionTrip(bayId);
+          if (latestBay?.masterTripLockout) st.resetRecloseDemo86(bayId);
+          const refreshedBay = useSubstationStore.getState().bays.find(b => b.id === bayId);
+          if (refreshedBay && refreshedBay.breakerState === 'OPEN') {
+            st.commandBreaker(bayId, 'CLOSED', 'SCADA_SBO');
+          }
+        }, 10);
+      }
+      return;
+    }
+    const scenario =
+      faultScenarios.find(candidate => candidate.id === modeOrId) ||
+      faultScenarios.find(candidate => candidate.mode === modeOrId);
+    if (!scenario) return;
+    const target = signals.find(point => point.id === scenario.targetId);
+    if (!target) return;
+    setSelectedPointId(target.id);
+    setSelectedCatalogNo(target.catalogNumber);
+    setFaultsByIed(previous => ({ ...previous, [traceBay.iedId]: injectIedFault(scenario, signals) }));
+    if (scenario.tripsBreaker) {
+      triggerProtectionTrip(traceBay.id, scenario.lcdText);
+    } else if (traceBay.protectionTripActive) {
+      resetProtectionTrip(traceBay.id);
+    }
   };
-
-  const selectedTemplate = useMemo(() => {
-    return FIFTY_SAS_SIGNAL_TEMPLATES.find((t) => t.catalogNumber === selectedCatalogNo) || FIFTY_SAS_SIGNAL_TEMPLATES[0];
-  }, [selectedCatalogNo]);
+  const displayedSignals = useMemo(() => signals.map(point => projectSignalFault(point, validFaults[point.iedId])), [signals, validFaults]);
+  const faultModeByBay: Record<string, SignalChainFaultMode> = Object.fromEntries(bays.map(bay => [bay.id, validFaults[bay.iedId]?.scenario.mode || 'NONE']));
+  const mapping = selectedIed ? importedMappings[selectedIed.name] ?? runtimeFaultConfiguration(selectedIed) : undefined;
 
   const tracedPoint = useMemo(() => {
-    if (viewMode === 'INSTANTIATED_BAY') {
-      const exact = signals.find((s) => s.id === selectedPointId);
-      if (exact) return exact;
-    }
-    return (
-      signals.find((s) => s.bayId === traceBay.id && s.catalogNumber === selectedCatalogNo) ||
-      signals.find((s) => s.catalogNumber === selectedCatalogNo) ||
-      signals[0]
-    );
-  }, [viewMode, selectedPointId, signals, traceBay.id, selectedCatalogNo]);
+    const ownPoints = displayedSignals.filter(point => point.iedId === traceBay.iedId && point.bayId === traceBay.id);
+    return (viewMode === 'INSTANTIATED_BAY' ? ownPoints.find(point => point.id === selectedPointId) : undefined)
+      || ownPoints.find(point => point.catalogNumber === selectedCatalogNo) || ownPoints[0];
+  }, [displayedSignals, traceBay.id, traceBay.iedId, viewMode, selectedPointId, selectedCatalogNo]);
+  const chainFaultMode: SignalChainFaultMode = tracedPoint && activeFault?.scenario.affectedIds.includes(tracedPoint.id)
+    ? activeFault.scenario.mode : 'NONE';
 
-  // Align first 4 Catalogue display rows with reference screenshot while preserving full IEC 61850-7-4 validity & notes
-  const catalogueDisplayRows = useMemo(() => {
-    return FIFTY_SAS_SIGNAL_TEMPLATES.map((tpl) => {
-      if (tpl.catalogNumber === 1) {
-        return {
-          ...tpl,
-          signalName: 'Circuit Breaker Position',
-          categoryDisplay: 'Circuit Breaker & Switchgear',
-          lnDoDaDisplay: 'XCBR1.Pos.stVal',
-          fcCdcDisplay: '[ST] / DPC',
-          controlModelDisplay: 'sbo-with-enhanced-security',
-          datasetTransportDisplay: 'dsStatus (GOOSE_AND_MMS)',
-          testNoteDisplay:
-            'Verify 52a/52b auxiliary contacts wired to DI Ch.1. Check stVal = TRUE (Closed) / FALSE (Open), q = 0, and timestamp.',
-        };
-      }
-      if (tpl.catalogNumber === 2) {
-        return {
-          ...tpl,
-          signalName: 'CB Trip Command',
-          categoryDisplay: 'Control',
-          lnDoDaDisplay: 'XCBR1.Trip.ctlVal',
-          fcCdcDisplay: '[CO] / SPC',
-          controlModelDisplay: 'direct-with-normal-security',
-          datasetTransportDisplay: 'dsControl (MMS)',
-          testNoteDisplay:
-            'Issue Trip command, verify Operate > stVal transition to OPEN within specified time. (Standard IEC 61850-7-4 maps via XCBR1.Pos.Oper.ctlVal[OFF] / CSWI1.Pos).',
-        };
-      }
-      if (tpl.catalogNumber === 3) {
-        return {
-          ...tpl,
-          signalName: 'CB Close Command',
-          categoryDisplay: 'Control',
-          lnDoDaDisplay: 'XCBR1.Close.ctlVal',
-          fcCdcDisplay: '[CO] / SPC',
-          controlModelDisplay: 'direct-with-normal-security',
-          datasetTransportDisplay: 'dsControl (MMS)',
-          testNoteDisplay:
-            'Issue Close command, verify stVal transition to CLOSED and no blocking interlocks (CILO1.EnaCls == TRUE; XCBR1.Pos.Oper.ctlVal[ON]).',
-        };
-      }
-      if (tpl.catalogNumber === 4) {
-        return {
-          ...tpl,
-          signalName: 'CB Trip Status (Protection)',
-          categoryDisplay: 'Protection',
-          lnDoDaDisplay: 'PTRC1.Tr.stVal',
-          fcCdcDisplay: '[ST] / DPC',
-          controlModelDisplay: 'status-only',
-          datasetTransportDisplay: 'dsProt (GOOSE_AND_MMS)',
-          testNoteDisplay:
-            'Verify protection trip indication (PTRC1.Tr.general / stVal) and correlation with CB position.',
-        };
-      }
-      return {
-        ...tpl,
-        categoryDisplay: tpl.category,
-        lnDoDaDisplay: `${tpl.logicalNodeClass}.${tpl.dataObject}.${tpl.dataAttribute}`,
-        fcCdcDisplay: `[${tpl.fc}] / ${tpl.cdc.split(' ')[0]}`,
-        controlModelDisplay: tpl.controlModel,
-        datasetTransportDisplay: `${tpl.defaultDataset} (${tpl.transportType})`,
-        testNoteDisplay: `${tpl.testProcedureSummary} ${tpl.engineeringNote}`,
-      };
-    });
-  }, []);
+  const catalogueDisplayRows = useMemo(() => FIFTY_SAS_SIGNAL_TEMPLATES.map(tpl => ({
+    ...tpl, categoryDisplay: tpl.category,
+    lnDoDaDisplay: `${tpl.logicalNodeClass}.${tpl.dataObject}.${tpl.dataAttribute}`,
+    fcCdcDisplay: `[${tpl.fc}] / ${tpl.cdc.split(' ')[0]}`,
+    controlModelDisplay: tpl.controlModel,
+    datasetTransportDisplay: `${tpl.defaultDataset} (${tpl.transportType})`,
+    testNoteDisplay: `${tpl.testProcedureSummary} ${tpl.engineeringNote}`,
+  })), []);
 
   const filteredCatalogueRows = useMemo(() => {
     return catalogueDisplayRows.filter((row) => {
@@ -452,7 +547,7 @@ export const SignalMappingSclPage: React.FC = () => {
 
   // Filtered Live Per-Bay Signal Mapping points (Tab 2)
   const filteredBayPoints = useMemo(() => {
-    return signals.filter((s) => {
+    return displayedSignals.filter((s) => {
       if (voltageFilter !== 'ALL' && s.voltageKv !== voltageFilter) return false;
       if (selectedBayId && selectedBayId !== 'ALL_BAYS' && viewMode === 'INSTANTIATED_BAY') {
         if (s.bayId !== selectedBayId) return false;
@@ -460,7 +555,7 @@ export const SignalMappingSclPage: React.FC = () => {
       if (iedFilter !== 'ALL' && s.iedName !== iedFilter) return false;
       if (datasetFilter !== 'ALL' && !s.datasetRef.toLowerCase().includes(datasetFilter.toLowerCase())) return false;
       if (categoryFilter !== 'ALL' && s.category !== categoryFilter) return false;
-      const effectiveQual = chainFaultMode !== 'NONE' && s.id === tracedPoint?.id ? 'BAD' : s.quality;
+      const effectiveQual = s.quality;
       if (qualityFilter === 'GOOD' && effectiveQual !== 'GOOD') return false;
       if (qualityFilter === 'OTHER' && effectiveQual === 'GOOD') return false;
       if (!searchQuery.trim()) return true;
@@ -474,7 +569,7 @@ export const SignalMappingSclPage: React.FC = () => {
       );
     });
   }, [
-    signals,
+    displayedSignals,
     voltageFilter,
     selectedBayId,
     viewMode,
@@ -489,89 +584,35 @@ export const SignalMappingSclPage: React.FC = () => {
 
   // Derived 6-Stage Signal Chain Model for Selected Signal & Bay
   const activeChain = useMemo(() => {
-    const row = catalogueDisplayRows.find((r) => r.catalogNumber === selectedCatalogNo) || catalogueDisplayRows[0];
+    const row = catalogueDisplayRows.find(r => r.catalogNumber === tracedPoint?.catalogNumber) || catalogueDisplayRows[0];
     const bay = traceBay;
     const vendorInfo = getVendorForBay(bay);
-    const iedName = bay.iedId.replace(/-/g, '_'); // e.g., IED_132_L1
-    const bayCodeUnderscore = bay.bayCode.replace(/-/g, '_'); // e.g., 132_L1
-
-    const [lnPart, doPart, daPart] = row.lnDoDaDisplay.split('.');
-    const fc = row.fc;
-    const cdcShort = row.cdc.split(' ')[0];
-
-    // Engineering-accurate GOOSE Control Block vs Report Control Block separation (Section 3 Stage 5)
-    const gooseBlock = gooseControlBlocks.find(block => block.publisherIedId === bay.iedId && block.subscriberIedIds.length > 0);
-    const gooseCbName = gooseBlock ? `${gooseBlock.gocbName} (${gooseBlock.appId})` : 'Not configured';
-    const reportCbName =
-      row.transportType === 'MMS_URCB'
-        ? 'URCB01 (urcbMeas01)'
-        : row.transportType === 'MMS_CONTROL'
-        ? 'SBO / Direct CO'
-        : 'BRCB01 (brcbSt01)';
-
-    // Live value & status formatting
-    const rawVal = tracedPoint ? tracedPoint.value : bay.breakerState;
-    const displayVal =
-      row.catalogNumber === 1
-        ? bay.breakerState
-        : typeof rawVal === 'boolean'
-        ? rawVal
-          ? 'TRUE (ACTIVE)'
-          : 'FALSE (NORMAL)'
-        : `${String(rawVal)}${tracedPoint?.unit ? ' ' + tracedPoint.unit : ''}`;
-
-    const scadaTag =
-      row.catalogNumber === 1 && bay.bayCode === '132-L1'
-        ? 'SAS_132_L1_CB_POS_DP'
-        : `SAS_${bayCodeUnderscore}_${row.scadaTagSuffix.replace(/\./g, '_')}`;
-
-    // Stage health based on chainFaultMode
-    const stage1State: 'OK' | 'WARN' | 'ERR' = 'OK';
-    const stage2State: 'OK' | 'WARN' | 'ERR' = chainFaultMode === 'DI_INPUT_FAIL' ? 'ERR' : 'OK';
-    const stage3State: 'OK' | 'WARN' | 'ERR' =
-      chainFaultMode === 'DI_INPUT_FAIL'
-        ? 'WARN'
-        : chainFaultMode === 'BAD_QUALITY'
-        ? 'WARN'
-        : 'OK';
-    const stage4State: 'OK' | 'WARN' | 'ERR' =
-      chainFaultMode === 'WRONG_IEC_REF' || chainFaultMode === 'DATASET_MISSING' ? 'ERR' : 'OK';
-    const stage5State: 'OK' | 'WARN' | 'ERR' =
-      chainFaultMode === 'REPORT_DISABLED' ||
-      chainFaultMode === 'GOOSE_TIMEOUT' ||
-      chainFaultMode === 'MMS_DISCONNECT'
-        ? 'ERR'
-        : chainFaultMode === 'DATASET_MISSING' || chainFaultMode === 'WRONG_IEC_REF'
-        ? 'WARN'
-        : 'OK';
-    const stage6State: 'OK' | 'WARN' | 'ERR' =
-      chainFaultMode !== 'NONE' ? (chainFaultMode === 'BAD_QUALITY' ? 'WARN' : 'ERR') : 'OK';
-
-    const overallQuality =
-      chainFaultMode === 'NONE' && bay.quality === 'GOOD'
-        ? 'GOOD QUALITY'
-        : chainFaultMode === 'BAD_QUALITY'
-        ? 'QUESTIONABLE (0x0400)'
-        : 'INVALID / FAULT (0x0100)';
-
-    const fieldIoTitle =
-      row.category === 'Electrical Measurements'
-        ? 'CT / VT Secondary (1A / 110V)'
-        : row.catalogNumber === 2 || row.catalogNumber === 3 || row.fc === 'CO'
-        ? 'CB Trip / Close Coil (52TC/CC)'
-        : 'CB Auxiliary Contact (52a/52b)';
-
-    const diModuleTitle =
-      row.category === 'Electrical Measurements'
-        ? 'AI – 4xCT / 4xVT Merging Card'
-        : row.fc === 'CO'
-        ? 'BO – High-Speed Command Relay'
-        : 'DI – 24/110/220 V DC';
-
-    const diChannelLabel =
-      row.catalogNumber === 1
-        ? 'Ch.1 – CB_Pos'
-        : `Ch.${(row.catalogNumber % 16) + 1} – ${doPart}_${daPart.slice(0, 6)}`;
+    const iedName = tracedPoint?.iedName || selectedIed?.name || bay.iedId.replace(/-/g, '_');
+    const lnPart = tracedPoint?.logicalNodeClass || row.logicalNodeClass;
+    const doPart = tracedPoint?.dataObject || row.dataObject;
+    const daPart = tracedPoint?.dataAttribute || row.dataAttribute;
+    const fc = tracedPoint?.fc || row.fc;
+    const cdcShort = (tracedPoint?.cdc || row.cdc).split(' ')[0];
+    const resolvedDataset = mapping?.datasets.find(ds => tracedPoint && datasetPoints(ds, [tracedPoint]).length);
+    const report = mapping?.reports.find(rc => rc.dataset === resolvedDataset?.ref);
+    const gooseBlock = gooseControlBlocks.find(block => block.publisherIedId === bay.iedId &&
+      block.datSet.replace(/\$/g, '.') === resolvedDataset?.ref);
+    const gooseCbName = gooseBlock ? `${gooseBlock.gocbName} (${gooseBlock.appId})` : 'Not mapped for this signal';
+    const reportCbName = report ? `${report.buffered ? 'BRCB' : 'URCB'} (${report.name})`
+      : fc === 'CO' ? 'SBO / Direct CO' : 'No resolved report binding';
+    const source = signals.find(point => point.id === tracedPoint?.id);
+    const sourceDisplayVal = source ? `${String(source.value)}${source.unit ? ' ' + source.unit : ''}` : 'Not configured';
+    const rawVal = tracedPoint?.value ?? 'Not configured';
+    const displayVal = typeof rawVal === 'boolean' ? rawVal ? 'TRUE (ACTIVE)' : 'FALSE (NORMAL)'
+      : `${String(rawVal)}${tracedPoint?.unit ? ' ' + tracedPoint.unit : ''}`;
+    const scadaTag = tracedPoint?.scadaTag || 'Not configured';
+    const quality = tracedPoint?.quality ?? bay.quality;
+    const overallQuality = `${quality}${chainFaultMode === 'GOOSE_TIMEOUT' ? ' — MMS; GOOSE subscriber timeout' : ''}`;
+    const fieldIoTitle = fc === 'MX' ? 'CT / VT / Analog Transducer' : fc === 'CO' ? 'Command Output'
+      : /^(P|R)/.test(lnPart) ? 'Protection Logic' : `${row.signalName} — Field Contact`;
+    const diModuleTitle = fc === 'MX' ? 'AI – Analog Acquisition' : fc === 'CO' ? 'BO – Command Relay'
+      : /^(P|R)/.test(lnPart) ? 'Internal Protection Logic' : 'DI – Binary Input';
+    const diChannelLabel = `${lnPart}.${doPart}.${daPart}`;
 
     return {
       row,
@@ -587,21 +628,20 @@ export const SignalMappingSclPage: React.FC = () => {
       gooseCbName,
       reportCbName,
       displayVal,
+      sourceDisplayVal,
       scadaTag: chainFaultMode === 'HMI_TAG_MISMATCH' ? `${scadaTag}_UNMAPPED_ERR` : scadaTag,
       fieldIoTitle,
       diModuleTitle,
       diChannelLabel,
-      stageStates: [stage1State, stage2State, stage3State, stage4State, stage5State, stage6State],
+      stageStates: faultStageStates(chainFaultMode),
       overallQuality,
     };
-  }, [catalogueDisplayRows, selectedCatalogNo, traceBay, tracedPoint, chainFaultMode, gooseControlBlocks]);
+  }, [catalogueDisplayRows, signals, traceBay, tracedPoint, chainFaultMode, gooseControlBlocks, selectedIed, mapping]);
 
   // Consistent KPI Counts (Section 5)
   const kpiStats = useMemo(() => {
     const totalMapped = signals.length; // 1206
-    const baseGood = signals.filter((s) => s.quality === 'GOOD').length;
-    const faultPenalty = chainFaultMode === 'NONE' ? 0 : 1;
-    const goodCount = Math.max(0, baseGood - faultPenalty);
+    const goodCount = displayedSignals.filter((s) => s.quality === 'GOOD').length;
     const otherCount = totalMapped - goodCount;
 
     return {
@@ -609,77 +649,33 @@ export const SignalMappingSclPage: React.FC = () => {
       goodQuality: goodCount, // 1206 when healthy
       otherQuality: otherCount, // 0 when healthy
       selectedBayCode: kpiBay.bayCode, // 33-F03
-      iedsInBay: 1,
-      datasetsInBay: 8, // dsStatus, dsControl, dsProt, dsProtTrip, dsMeas, dsMetering, dsTransformer, dsSystem
-      reportsAndGooseInBay: 8, // BRCB01..03, URCB01..02, GoCB01..03
+      iedsInBay: ieds.filter(ied => ied.bayId === kpiBay.id).length,
+      datasetsInBay: mapping?.datasets.length || 0,
+      reportsAndGooseInBay: (mapping?.reports.length || 0) + gooseControlBlocks.filter(block => block.publisherIedId === kpiBay.iedId).length,
       mappedPoints: totalMapped, // 1206
     };
-  }, [signals, chainFaultMode, kpiBay.bayCode]);
+  }, [signals, displayedSignals, kpiBay, ieds, mapping, gooseControlBlocks]);
 
-  // Comprehensive IEC 61850 Mapping Validator (Section 12)
+  // Report resolved evidence; partial sample SCL is not a station-wide validation pass.
   const validationResults = useMemo(() => {
-    const checks = [
-      {
-        name: 'LD / LN / DO / DA Object Reference Syntax (IEC 61850-7-4)',
-        status: chainFaultMode === 'WRONG_IEC_REF' ? 'FAIL' : 'PASS',
-        detail:
-          chainFaultMode === 'WRONG_IEC_REF'
-            ? `Unresolved LN/DO reference on ${activeChain.iedName}/${activeChain.row.lnDoDaDisplay}_INVALID.`
-            : 'All 50 Master Signals & 1,206 Bay Points resolve to valid Edition 2.1 Logical Nodes (XCBR, XSWI, CSWI, PTRC, PTOC, PDIF, PDIS, MMXU, YPTR).',
-        remedy: 'Restore standard IEC 61850-7-4 DO/DA path in IED ICD/CID configuration.',
-      },
-      {
-        name: 'Functional Constraint (FC) & Common Data Class (CDC) Compatibility',
-        status: 'PASS',
-        detail: 'Verified [ST] DPC/SPS/ACT, [MX] MV/CMV, [CO] DPC/SPC, and [SP] ASG/ING constraints across all 1,206 points.',
-        remedy: 'None required.',
-      },
-      {
-        name: 'LLN0 DataSet Membership & FCDA Binding',
-        status: chainFaultMode === 'DATASET_MISSING' ? 'FAIL' : 'PASS',
-        detail:
-          chainFaultMode === 'DATASET_MISSING'
-            ? `Selected signal ${activeChain.row.lnDoDaDisplay} is missing from LLN0.${activeChain.row.defaultDataset}.`
-            : 'All 8 per-bay DataSets (dsStatus, dsControl, dsProt, dsProtTrip, dsMeas, dsMetering, dsTransformer, dsSystem) contain complete FCDA entries.',
-        remedy: 'Add FCDA entry to LLN0 DataSet before enabling ReportControl or GSEControl.',
-      },
-      {
-        name: 'ReportControl (BRCB/URCB) & GSEControl (GoCB) Separation',
-        status: chainFaultMode === 'REPORT_DISABLED' || chainFaultMode === 'GOOSE_TIMEOUT' ? 'FAIL' : 'PASS',
-        detail:
-          chainFaultMode === 'REPORT_DISABLED'
-            ? 'Buffered Report Control Block BRCB01 (RptEna=FALSE) is disabled.'
-            : chainFaultMode === 'GOOSE_TIMEOUT'
-            ? 'GOOSE Publisher GoCB_St01 TimeAllowedToLive (TAL=2000ms) expired on subscriber.'
-            : 'Strict separation verified: GOOSE uses GoCB (0x88B8 L2 Multicast) and MMS Reporting uses BRCB/URCB (TCP:102).',
-        remedy: 'Enable RptEna=TRUE on BRCB01 and verify VLAN 20 GOOSE multicast reception.',
-      },
-      {
-        name: 'SCADA / HMI Tag Uniqueness & Source-Destination Mapping',
-        status: chainFaultMode === 'HMI_TAG_MISMATCH' ? 'FAIL' : 'PASS',
-        detail:
-          chainFaultMode === 'HMI_TAG_MISMATCH'
-            ? `HMI Tag "${activeChain.scadaTag}" does not match SCADA database tag for ${activeChain.iedName}.`
-            : 'All 1,206 SCADA tags (SAS_<BAY>_<SIGNAL>) are 100% unique with 0 collisions.',
-        remedy: 'Re-synchronize HMI symbol tag binding with SCADA database.',
-      },
-      {
-        name: 'Quality (q) & Timestamp (t) Propagation across PRP LAN A/B',
-        status:
-          chainFaultMode === 'DI_INPUT_FAIL' ||
-          chainFaultMode === 'MMS_DISCONNECT' ||
-          chainFaultMode === 'BAD_QUALITY'
-            ? 'FAIL'
-            : 'PASS',
-        detail:
-          chainFaultMode === 'NONE'
-            ? `1,206 / 1,206 points reporting Quality = 0x0000 (GOOD) with IEEE 1588v2 PTP locked timestamps.`
-            : `Active signal fault (${chainFaultMode}) degraded quality to ${activeChain.overallQuality}.`,
-        remedy: 'Clear injected field/communication fault to restore q=0x0000.',
-      },
+    const point = tracedPoint;
+    const ds = mapping?.datasets.find(candidate => point && datasetPoints(candidate, [point]).length);
+    const rc = mapping?.reports.find(candidate => candidate.dataset === ds?.ref);
+    return [
+      { name: 'Selected IED signal', status: point?.iedId === traceBay.iedId ? 'PASS' : 'FAIL',
+        detail: point?.iec61850Ref || 'No signal configured for this IED.', remedy: 'Select a configured IED signal.' },
+      { name: 'DataSet FCDA binding', status: ds && chainFaultMode !== 'DATASET_MISSING' && chainFaultMode !== 'WRONG_IEC_REF' ? 'PASS' : 'FAIL',
+        detail: ds?.ref || 'No matching LD/LN/DO/DA and FC in the selected mapping source.', remedy: 'Verify the signal reference, FC and DataSet member.' },
+      { name: 'Report binding', status: rc && chainFaultMode !== 'REPORT_DISABLED' && chainFaultMode !== 'MMS_DISCONNECT' ? 'PASS' : 'FAIL',
+        detail: rc ? `${rc.name} → ${rc.dataset}` : 'No resolved report binding for this signal.', remedy: 'Verify ReportControl DataSet and RptEna.' },
+      { name: 'Signal-chain injection', status: selectedFaultMode === 'NONE' ? 'PASS' : 'FAIL',
+        detail: activeFault ? `${activeFault.scenario.label}: ${activeFault.scenario.evidence}` : 'No injected fault on this IED.',
+        remedy: activeFault?.scenario.recovery || 'None required.' },
+      { name: 'Displayed SCADA quality', status: point?.quality === 'GOOD' ? 'PASS' : 'FAIL',
+        detail: `${point?.quality || 'NOT CONFIGURED'}; mapping source: ${mapping?.source || 'none'}`,
+        remedy: 'Clear the injected fault and resolve any underlying source/communication fault.' },
     ];
-    return checks;
-  }, [chainFaultMode, activeChain]);
+  }, [tracedPoint, mapping, chainFaultMode, selectedFaultMode, activeFault, traceBay.iedId]);
 
   // Export CSV (Section 12)
   const handleExportCsv = () => {
@@ -756,7 +752,7 @@ export const SignalMappingSclPage: React.FC = () => {
         s.hmiObjectType,
         `"${String(s.value).replace(/"/g, '""')}${s.unit ? ' ' + s.unit : ''}"`,
         s.quality,
-        liveClockStr,
+        s.timestamp,
       ].join(',')
     );
     const csv = [header, ...rows].join('\n');
@@ -768,19 +764,6 @@ export const SignalMappingSclPage: React.FC = () => {
     a.click();
     URL.revokeObjectURL(url);
   };
-
-  // SCL XML Workspace File List & Active Parsed Model (Section 10)
-  const allSclFiles = useMemo(() => {
-    return [...SCL_FILE_SAMPLES, ...uploadedSclFiles];
-  }, [uploadedSclFiles]);
-
-  const currentSclFile = useMemo(() => {
-    return allSclFiles.find((f) => f.id === selectedSclId) || allSclFiles[0];
-  }, [allSclFiles, selectedSclId]);
-
-  const parsedScl = useMemo(() => {
-    return parseSclXmlString(currentSclFile.fileName, currentSclFile.fileType, currentSclFile.xmlContent);
-  }, [currentSclFile]);
 
   const handleUploadSclFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -901,31 +884,28 @@ export const SignalMappingSclPage: React.FC = () => {
           </div>
 
           {/* Interactive Signal-Chain Fault Simulator Selector (Section 11) */}
-          <div className="sas-signal-fault-control flex items-center gap-2">
+          <div className="sas-signal-fault-control flex flex-wrap items-center gap-2 min-w-0">
             <span className="text-[11px] text-[#8BB3D4] font-semibold flex items-center gap-1">
               <Wrench className="w-3.5 h-3.5 text-[#00DFFF]" /> Signal Chain Test / Fault Sim:
             </span>
             <select
-              value={chainFaultMode}
-              onChange={(e) => setChainFaultMode(e.target.value as SignalChainFaultMode)}
+              aria-label="IED fault scenario"
+              disabled={!faultScenarios.length}
+              value={selectedFaultId}
+              onChange={(e) => setChainFaultMode(e.target.value)}
               style={{
-                backgroundColor: chainFaultMode === 'NONE' ? '#07182B' : '#3B0D15',
-                borderColor: chainFaultMode === 'NONE' ? '#1E466E' : '#FF5C65',
-                color: chainFaultMode === 'NONE' ? '#E9F3FF' : '#FDA4AF',
+                backgroundColor: selectedFaultId === 'NONE' ? '#07182B' : '#3B0D15',
+                borderColor: selectedFaultId === 'NONE' ? '#1E466E' : '#FF5C65',
+                color: selectedFaultId === 'NONE' ? '#E9F3FF' : '#FDA4AF',
               }}
-              className="px-2.5 py-1 rounded-lg border text-[11px] font-mono font-bold"
+              className="max-w-full sm:max-w-[460px] px-2.5 py-1 rounded-lg border text-[11px] font-mono font-bold"
             >
               <option value="NONE">Normal — Healthy Signal Chain (q=0x0000)</option>
-              <option value="DI_INPUT_FAIL">Fault 1: Field DI Module Opto-Input Failure</option>
-              <option value="WRONG_IEC_REF">Fault 2: Wrong IEC 61850 LN/DO Reference</option>
-              <option value="DATASET_MISSING">Fault 3: FCDA Missing from LLN0 DataSet</option>
-              <option value="REPORT_DISABLED">Fault 4: BRCB01 Report Disabled (RptEna=0)</option>
-              <option value="GOOSE_TIMEOUT" disabled={!gooseControlBlocks.some(block => block.publisherIedId === activeChain.bay.iedId && block.subscriberIedIds.length > 0)}>Fault 5: GOOSE Subscription TAL Timeout</option>
-              <option value="MMS_DISCONNECT">Fault 6: SCADA MMS Association Lost</option>
-              <option value="BAD_QUALITY">Fault 7: Questionable / Oscillatory Quality (0x0400)</option>
-              <option value="HMI_TAG_MISMATCH">Fault 8: Incorrect SCADA / HMI Tag Mapping</option>
+              {faultScenarios.map((scenario, index) => (
+                <option key={scenario.id} value={scenario.id}>{index + 1}. {scenario.label}</option>
+              ))}
             </select>
-            {chainFaultMode !== 'NONE' && (
+            {selectedFaultMode !== 'NONE' && (
               <button
                 type="button"
                 onClick={() => setChainFaultMode('NONE')}
@@ -938,7 +918,24 @@ export const SignalMappingSclPage: React.FC = () => {
         </div>
       </div>
 
-      {activeChain.bay.bayType === 'OUTGOING_FEEDER' && <RecloseTrainingPanel key={activeChain.bay.id} bayId={activeChain.bay.id} />}
+      <div role="status" aria-live="polite" className="rounded-lg border border-[#1E466E] bg-[#07182B] px-3 py-2 text-[11px] text-[#B5ECFA]">
+        <strong>{selectedIed?.name || traceBay.iedId}</strong> · {faultScenarios.length}/8 supported faults · {mapping?.source || 'No mapping'}.
+        {selectedSclId.startsWith('SCL-USER-') && !importedMappings[selectedIed?.name || ''] && ' Imported SCL has no matching IED; using configured runtime mappings.'}
+        {activeFault && <><br />{activeFault.scenario.evidence}<br />Recovery: {activeFault.scenario.recovery}</>}
+        {tracedPoint?.catalogNumber !== selectedCatalogNo && <><br />Catalogue #{selectedCatalogNo} is not configured here; tracing {tracedPoint?.signalName || 'no signal'}.</>}
+      </div>
+
+      {activeChain.bay.bayType === 'OUTGOING_FEEDER' && (
+        <RecloseTrainingPanel
+          key={activeChain.bay.id}
+          bayId={activeChain.bay.id}
+          onAfterResetTrip={() => {
+            if (activeFault?.scenario.tripsBreaker) {
+              setFaultsByIed(previous => { const next = { ...previous }; delete next[traceBay.iedId]; return next; });
+            }
+          }}
+        />
+      )}
 
       {/* 2. MAIN END-TO-END SAS SIGNAL CHAIN TRACE PANEL */}
       <SignalChainDashboard
@@ -951,7 +948,7 @@ export const SignalMappingSclPage: React.FC = () => {
           const matchedBay = bays.find((b) => b.id === bayId);
           if (matchedBay) {
             setSelectedIedId(matchedBay.iedId);
-            const matchedSig = signals.find((s) => s.bayId === bayId && s.catalogNumber === selectedCatalogNo);
+            const matchedSig = signals.find((s) => s.bayId === bayId && s.catalogNumber === selectedCatalogNo) || signals.find(s => s.bayId === bayId);
             if (matchedSig) setSelectedPointId(matchedSig.id);
           }
         }}
@@ -961,10 +958,13 @@ export const SignalMappingSclPage: React.FC = () => {
         tracedPoint={tracedPoint}
         chainFaultMode={chainFaultMode}
         faultModeByBay={faultModeByBay}
+        faultScenarios={faultScenarios}
+        activeFault={activeFault}
+        faultsByIed={validFaults}
         setChainFaultMode={setChainFaultMode}
         selectedStageIndex={selectedStageIndex}
         setSelectedStageIndex={setSelectedStageIndex}
-        liveClockStr={liveClockStr}
+        liveClockStr={tracedPoint?.timestamp || liveClockStr}
         onToggleBreaker={(bayId, target) => commandBreaker(bayId, target, 'SCADA_SBO')}
         onTriggerTrip={triggerProtectionTrip}
         onResetTrip={resetProtectionTrip}
@@ -1089,7 +1089,7 @@ export const SignalMappingSclPage: React.FC = () => {
               ['Namespace', 'ns=2 (urn:sas:iec61850:substation)'],
               ['NodeId', `ns=2;s=SAS.${activeChain.bay.bayCode.replace(/-/g, '_')}.${activeChain.row.lnDoDaDisplay}`],
               ['DataType', activeChain.fc === 'MX' ? 'Double (Float64)' : 'String / Int32'],
-              ['StatusCode', chainFaultMode === 'NONE' ? 'Good (0x00000000)' : 'Bad (0x80000000)'],
+              ['StatusCode', tracedPoint?.quality === 'GOOD' ? 'Good (0x00000000)' : tracedPoint?.quality === 'QUESTIONABLE' ? 'Uncertain (0x40000000)' : 'Bad (0x80000000)'],
             ].map(([k, v]) => (
               <div key={k} className="p-2 rounded bg-[#04101E] border border-[#3B82F6]/50">
                 <div className="text-[9.5px] text-[#8BB3D4] font-sans">{k}</div>
@@ -1425,7 +1425,7 @@ export const SignalMappingSclPage: React.FC = () => {
                                 {String(pt.value)} {pt.unit || ''}
                               </div>
                               <div className="text-[9.5px] text-[#4ADE80]">
-                                {pt.quality} • {liveClockStr.split(' ')[1]}
+                                {pt.quality} • {pt.timestamp}
                               </div>
                             </td>
                           </tr>
@@ -1487,7 +1487,7 @@ export const SignalMappingSclPage: React.FC = () => {
                     [
                       'Transport',
                       activeChain.row.transportType === 'GOOSE_AND_MMS'
-                        ? 'GOOSE (GoCB01), Report (BRCB01)'
+                        ? `GOOSE (${activeChain.gooseCbName}), Report (${activeChain.reportCbName})`
                         : `Report (${activeChain.reportCbName})`,
                     ],
                   ].map(([k, v]) => (
@@ -1503,18 +1503,18 @@ export const SignalMappingSclPage: React.FC = () => {
                     <span className="text-[#6C92B4]">:</span>
                     <span
                       className={`font-bold flex items-center gap-1 ${
-                        chainFaultMode === 'NONE' ? 'text-[#4ADE80]' : 'text-[#FF5C65]'
+                        tracedPoint?.quality === 'GOOD' ? 'text-[#4ADE80]' : 'text-[#FF5C65]'
                       }`}
                     >
                       <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                      {chainFaultMode === 'NONE' ? 'Good (q = 0x00)' : activeChain.overallQuality}
+                      {activeChain.overallQuality}
                     </span>
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "106px 8px minmax(0, 1fr)", alignItems: "baseline", lineHeight: 1.28 }}>
                     <span className="text-[#9BC0DF]">Last Update</span>
                     <span className="text-[#6C92B4]">:</span>
-                    <span className="font-mono text-[10px] text-[#DCEAF5]">{liveClockStr}</span>
+                    <span className="font-mono text-[10px] text-[#DCEAF5]">{tracedPoint?.timestamp || liveClockStr}</span>
                   </div>
                 </div>
 
@@ -1546,12 +1546,12 @@ export const SignalMappingSclPage: React.FC = () => {
                     {[
                       {
                         idx: 0,
-                        title: 'Field Contact (52a/52b)',
+                        title: activeChain.fieldIoTitle,
                         sub: null,
                       },
                       {
                         idx: 1,
-                        title: `DI Module (${activeChain.diChannelLabel.split('–')[0].trim()})`,
+                        title: activeChain.diModuleTitle,
                         sub: null,
                       },
                       {
@@ -1572,8 +1572,8 @@ export const SignalMappingSclPage: React.FC = () => {
                       {
                         idx: 5,
                         title: 'SCADA / HMI',
-                        sub: `(${chainFaultMode === 'NONE' ? activeChain.displayVal : 'FAULT'})`,
-                        highlightGreen: chainFaultMode === 'NONE',
+                        sub: `(${activeChain.displayVal})`,
+                        highlightGreen: tracedPoint?.quality === 'GOOD',
                       },
                     ].map((step) => {
                       const st = activeChain.stageStates[step.idx];

@@ -366,7 +366,7 @@ export const ModbusTcpLabPage: React.FC = () => {
 
   // Continuous cycle state: activeIedIdx (0..3) and progress (0..1)
   const [activeIedIdx, setActiveIedIdx] = useState<number>(1); // Start on P2 (P3F30) matching reference
-  const [cycleProgress, setCycleProgress] = useState<number>(0.48);
+  const [cycleProgress, setCycleProgress] = useState<number>(0);
 
   // Interactive Popups (Instant Hover-Above-Device IED Popup + Auto-Opening Gateway Popup)
   const [iedPopup, setIedPopup] = useState<{ device: IedDeviceSpec; top: number; rayY: number } | null>(null);
@@ -462,8 +462,18 @@ export const ModbusTcpLabPage: React.FC = () => {
   const convStep: 1 | 2 | 3 | 4 =
     convFraction < 0.25 ? 1 : convFraction < 0.5 ? 2 : convFraction < 0.75 ? 3 : 4;
 
+  // Start every architecture visit at the protocol source, not mid-conversion.
+  useEffect(() => {
+    if (activeTab === 'TOPOLOGY_LIVE') {
+      setCycleProgress(0);
+      setActiveIedIdx(0);
+      setGatewayPinned(false);
+      setGatewayManuallyClosed(false);
+    }
+  }, [activeTab]);
+
   // Auto-open Gateway Popup ONLY when packet arrives at Gateway (CONVERT phase), auto-close when packet departs (WAN_TX / REQ / RESP) unless pinned!
-  const showGatewayPopup = !iedPopup && !showSwitchPopup && (gatewayPinned || (simPhase === 'CONVERT' && !gatewayManuallyClosed && stationBusOk && !iedOfflineNow && !respTimeout));
+  const showGatewayPopup = !iedPopup && !showSwitchPopup && (gatewayPinned || (simPhase === 'CONVERT' && !gatewayManuallyClosed && modbusHealthy));
 
   // Reset manual close lock when a new conversion cycle starts
   useEffect(() => {
@@ -474,7 +484,7 @@ export const ModbusTcpLabPage: React.FC = () => {
 
   // Smooth RAF Animation Engine (at 0.1x: ~32s full cycle, ~11.5s slow live conversion inside Gateway!)
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || activeTab !== 'TOPOLOGY_LIVE') return;
     let rafId = 0;
     let lastTs = performance.now();
     const baseCycleMs = highLatency ? 5200 : 3200; // at 0.1x -> 32,000 ms (or 52,000 ms with high latency)
@@ -496,7 +506,7 @@ export const ModbusTcpLabPage: React.FC = () => {
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [playing, speed, highLatency]);
+  }, [playing, speed, highLatency, activeTab]);
 
   // Live register data from bay registry
   const bayRegisters = useMemo(() => {
@@ -1044,102 +1054,33 @@ export const ModbusTcpLabPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* 2x2 Multi-Color Step Cards */}
-                    <div className="lab-gateway-steps font-mono">
-                      {/* Step 1: Payload Capture (Cyan) */}
-                      <div
-                        className="rounded-lg border p-2 transition-all"
-                        style={{
-                          background: convStep === 1 ? 'rgba(0, 212, 255, 0.16)' : 'rgba(8, 28, 46, 0.72)',
-                          borderColor: ex01 || ex02 || ex03 || tidMismatch ? '#EF4444' : convStep === 1 ? '#38F3FF' : 'rgba(90, 180, 220, 0.28)',
-                          boxShadow: convStep === 1 ? '0 0 14px rgba(0, 229, 255, 0.30)' : undefined,
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-extrabold text-[#38F3FF]">1. PAYLOAD CAPTURE</span>
-                          <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 1 ? 'bg-white text-[#031829]' : convStep > 1 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                            {convStep === 1 ? 'ACTIVE' : convStep > 1 ? 'DONE' : 'WAIT'}
-                          </span>
+                    {(() => {
+                      const failed = !modbusHealthy ? 1 : wordSwapFault ? 2 : missingIoa ? 3 : gtwOverload || !wanHealthy ? 4 : 0;
+                      const arrived = modbusHealthy && (simPhase === 'CONVERT' || simPhase === 'WAN_TX');
+                      const ready = arrived && convStep === 4 && conversionHealthy && !missingIoa;
+                      const rows = [["Transaction", tidHex], ["Unit / FC", `${activeIed.unitId} / ${selectedFc}`], ["Register", activeIed.sampleReg], ["Raw words", `${hexWords.hi} ${hexWords.lo}`]];
+                      const value = `${liveValue} ${activeIed.sampleUnit}`;
+                      const quality = badQds ? 'INVALID' : 'GOOD';
+                      const fields = [['Type ID', 13], ['COT / COA', `3 / ${132}`], ['IOA', activeIed.ioa], ['Value / quality', `${value} / ${quality}`]];
+                      const hex = (n: number) => (n & 255).toString(16).padStart(2, '0').toUpperCase();
+                      const header = [13, 1, 3, 0, 132 & 255, 132 >> 8, activeIed.ioa & 255, (activeIed.ioa >> 8) & 255, (activeIed.ioa >> 16) & 255].map(hex).join(' ');
+                      return <div className="space-y-2 font-mono text-[10px]" style={{overflowWrap:'anywhere'}}>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[rows, fields].map((group, i) => <div key={i} className="rounded-lg border border-[#24506a] bg-[#081c2e] p-2 min-w-0">
+                            <div className={i ? 'text-[#4ADE80] font-bold mb-1' : 'text-[#38F3FF] font-bold mb-1'}>{i ? 'OUTPUT · IEC-104' : 'INPUT · PROTOCOL'}</div>
+                            {group.map(([label, data]) => <div key={String(label)} className="mb-1"><span className="text-[#9BC0DF]">{label}: </span><span className="text-white">{(i ? ready : arrived) ? data : '—'}</span></div>)}
+                          </div>)}
                         </div>
-                        <div className="text-[#E0F7FF] font-bold">
-                          {activeIed.shortName} (UID {unitIdMismatch ? 250 : activeIed.unitId}) · TID {tidHex} FC{selectedFc}
-                        </div>
-                        <div className="text-[#FDE047] mt-0.5 truncate">
-                          {ex01 ? 'ERR: EX 0x01 Illegal FC' : ex02 ? 'ERR: EX 0x02 Illegal Addr' : ex03 ? 'ERR: EX 0x03 Illegal Val' : `Hex: ${activeIed.sampleReg} → 0x${hexWords.hi} 0x${hexWords.lo}`}
-                        </div>
-                      </div>
+                        {["Capture response", "Decode FLOAT32", "Scale ×1 / map IOA", "Encode ASDU"].map((label, i) => {
+                          const n = i + 1;
+                          const status = !arrived ? 'WAIT' : failed && n === failed && convStep >= n ? 'FAULT' : failed && n > failed ? 'BLOCKED' : convStep > n ? 'DONE' : convStep === n ? 'ACTIVE' : 'WAIT';
+                          return <div key={label} className="flex justify-between gap-2 rounded border px-2 py-1" style={{borderColor: status === 'FAULT' ? '#EF4444' : status === 'ACTIVE' ? '#38F3FF' : '#24506a', color: status === 'FAULT' ? '#FCA5A5' : status === 'DONE' ? '#4ADE80' : '#D8EAF5'}}><span>{n}. {label}</span><b>{status}</b></div>;
+                        })}
+                        <div className="rounded border border-[#24506a] p-2 text-[#7DD3FC]">{arrived ? `Modbus data words: ${hexWords.hi} ${hexWords.lo}` : 'Awaiting packet'}<div>ASDU header HEX (payload excluded): {ready ? header : '—'}</div></div>
+                        <div className="text-[#9BC0DF]">Cycle reference: {tidCounter} · {failed ? 'Fault active — clear scenario and verify next cycle' : ready ? 'Encoded · awaiting delivery' : 'Waiting / processing'}</div>
+                      </div>;
+                    })()}
 
-                      {/* Step 2: Byte/Word Decode (Violet) */}
-                      <div
-                        className="rounded-lg border p-2 transition-all"
-                        style={{
-                          background: convStep === 2 ? 'rgba(192, 132, 252, 0.18)' : 'rgba(8, 28, 46, 0.72)',
-                          borderColor: wordSwapFault ? '#F59E0B' : convStep === 2 ? '#C084FC' : 'rgba(90, 180, 220, 0.28)',
-                          boxShadow: convStep === 2 ? '0 0 14px rgba(192, 132, 252, 0.32)' : undefined,
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-extrabold text-[#D8B4FE]">2. BYTE/WORD DECODE</span>
-                          <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 2 ? 'bg-[#D8B4FE] text-[#1E0836]' : convStep > 2 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                            {convStep === 2 ? 'ACTIVE' : convStep > 2 ? 'DONE' : 'WAIT'}
-                          </span>
-                        </div>
-                        <div className="text-[#F3E8FF] font-bold">
-                          FLOAT32 ({effectiveOrder}) · {wordSwapFault ? 'SWAP ERR' : 'IEEE-754 Valid'}
-                        </div>
-                        <div className={`mt-0.5 font-extrabold ${wordSwapFault ? 'text-[#FCA5A5]' : 'text-[#4ADE80]'}`}>
-                          Val: {liveValue} {activeIed.sampleUnit}
-                        </div>
-                      </div>
-
-                      {/* Step 3: Scaling & IOA Map (Amber) */}
-                      <div
-                        className="rounded-lg border p-2 transition-all"
-                        style={{
-                          background: convStep === 3 ? 'rgba(250, 204, 21, 0.16)' : 'rgba(8, 28, 46, 0.72)',
-                          borderColor: missingIoa || badQds ? '#EF4444' : convStep === 3 ? '#FACC15' : 'rgba(90, 180, 220, 0.28)',
-                          boxShadow: convStep === 3 ? '0 0 14px rgba(250, 204, 21, 0.28)' : undefined,
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-extrabold text-[#FDE047]">3. SCALING &amp; IOA MAP</span>
-                          <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 3 ? 'bg-[#FDE047] text-[#261802]' : convStep > 3 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                            {convStep === 3 ? 'ACTIVE' : convStep > 3 ? 'DONE' : 'WAIT'}
-                          </span>
-                        </div>
-                        <div className="text-[#FEF08A] font-bold">
-                          {missingIoa ? 'ERR: IOA Unmapped!' : `Map: CA:132 / IOA:${activeIed.ioa}`}
-                        </div>
-                        <div className="text-[#7DD3FC] mt-0.5">
-                          {liveValue} {activeIed.sampleUnit} (×1.0) · QDS: {badQds ? 'IV (0x81)' : 'GOOD (0x00)'}
-                        </div>
-                      </div>
-
-                      {/* Step 4: IEC-104 ASDU Ready (Emerald) */}
-                      <div
-                        className="rounded-lg border p-2 transition-all"
-                        style={{
-                          background: convStep === 4 ? 'rgba(34, 197, 94, 0.18)' : 'rgba(8, 28, 46, 0.72)',
-                          borderColor: gtwOverload || !wanHealthy ? '#EF4444' : convStep === 4 ? '#4ADE80' : 'rgba(90, 180, 220, 0.28)',
-                          boxShadow: convStep === 4 ? '0 0 14px rgba(34, 197, 94, 0.34)' : undefined,
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-extrabold text-[#4ADE80]">4. IEC-104 ASDU READY</span>
-                          <span className={`px-1.5 py-0.2 rounded text-[8px] font-extrabold ${convStep === 4 ? 'bg-[#4ADE80] text-[#032415]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                            {convStep === 4 ? 'READY' : 'WAIT'}
-                          </span>
-                        </div>
-                        <div className="text-[#DCFCE7] font-bold truncate">
-                          {activeIed.iecType} / COT:3 · 68 0E {hexWords.rawBytes}
-                        </div>
-                        <div className="text-[#A3E635] mt-0.5 font-extrabold">
-                          Out: ETH1 → RCC ({liveValue} {activeIed.sampleUnit})
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Multi-Color Progress Bar */}
                     <div className="mt-2.5 flex items-center gap-2">
                       <div className="flex-1 h-2 rounded-full bg-[#061828] border border-[#1E4B6E] overflow-hidden">
                         <div

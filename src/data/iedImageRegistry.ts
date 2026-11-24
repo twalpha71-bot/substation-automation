@@ -19,6 +19,9 @@ export const iedImages = {
   SCADA_WORKSTATION: 'assets/devices/hmi-workstation.jpg',
   ENGINEERING_WORKSTATION: 'assets/devices/engineering-workstation.jpg',
   OPERATOR_CONSOLE: 'assets/devices/operator-console.jpg',
+  HIRSCHMANN_RED25: 'assets/devices/hirschmann-red25.png',
+  LEGACY_SAN_IED: 'assets/devices/legacy-san-ied.png',
+  HIRSCHMANN_QUADBOX: 'assets/devices/hirschmann-quadbox.png',
 } as const;
 
 /**

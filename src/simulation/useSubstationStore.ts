@@ -238,7 +238,7 @@ export function solveSubstationElectricalGraph(
   // All configured 132 kV incoming sources participate in the bus connectivity model.
   // This includes dynamically created LINE_INCOMER bays such as 132-L3.
   const incoming132 = bays.filter((b) => b.voltageKv === 132 &&
-    (b.bayType === 'LINE_INCOMER' || b.bayType === 'INCOMING_FEEDER'));
+    (b.bayType === 'LINE_INCOMER' || String(b.bayType) === 'INCOMING_FEEDER'));
   const liveSources132A = incoming132.filter((b) => b.busSection === 'A' && isClosedPath(b));
   const liveSources132B = incoming132.filter((b) => b.busSection === 'B' && isClosedPath(b));
   const src132B = liveSources132B.length > 0;
@@ -1163,11 +1163,11 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
     // This is NOT a synchronism-check implementation or a physical command.
     if (targetState === 'CLOSED' && bay.breakerState !== 'CLOSED' &&
         bay.voltageKv === 132 &&
-        (bay.bayType === 'LINE_INCOMER' || bay.bayType === 'INCOMING_FEEDER')) {
+        (bay.bayType === 'LINE_INCOMER' || String(bay.bayType) === 'INCOMING_FEEDER')) {
       const competing = state.bays.find((other) =>
         other.id !== bay.id && other.voltageKv === 132 &&
         other.busSection === bay.busSection &&
-        (other.bayType === 'LINE_INCOMER' || other.bayType === 'INCOMING_FEEDER') &&
+        (other.bayType === 'LINE_INCOMER' || String(other.bayType) === 'INCOMING_FEEDER') &&
         other.breakerState === 'CLOSED');
       if (competing) {
         const msg = `132 kV source CLOSE blocked: ${competing.bayCode} is already CLOSED on Bus ${bay.busSection}. Open and verify ${competing.breakerId} first. No synch-check / live paralleling is simulated.`;

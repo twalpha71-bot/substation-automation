@@ -592,9 +592,9 @@ export const SldWorkspacePage: React.FC = () => {
   // Render incoming 132 kV line bays from the live engineering store, not a
   // fixed list of L1/L2 IDs. Reserved transformer columns are kept clear.
   const bay132IncomingA = bays.filter(b => b.voltageKv === 132 && b.busSection === 'A' &&
-    (b.bayType === 'LINE_INCOMER' || b.bayType === 'INCOMING_FEEDER' || b.id === 'BAY-132-L1'));
+    (b.bayType === 'LINE_INCOMER' || String(b.bayType) === 'INCOMING_FEEDER' || b.id === 'BAY-132-L1'));
   const bay132IncomingB = bays.filter(b => b.voltageKv === 132 && b.busSection === 'B' &&
-    (b.bayType === 'LINE_INCOMER' || b.bayType === 'INCOMING_FEEDER' || b.id === 'BAY-132-L2'));
+    (b.bayType === 'LINE_INCOMER' || String(b.bayType) === 'INCOMING_FEEDER' || b.id === 'BAY-132-L2'));
   // Available slots avoid the 132/33 kV transformer drops and bus coupler.
   const incoming132SlotsA = [215, 130, 300, 65, 355];
   const incoming132SlotsB = [985, 1070, 900, 1135, 835];

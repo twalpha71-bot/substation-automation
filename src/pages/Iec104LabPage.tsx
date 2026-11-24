@@ -393,7 +393,7 @@ export const Iec104LabPage: React.FC = () => {
 
   // Cycle State: activeIedIdx (0..3) & cycleProgress (0..1)
   const [activeIedIdx, setActiveIedIdx] = useState<number>(0);
-  const [cycleProgress, setCycleProgress] = useState<number>(0.34);
+  const [cycleProgress, setCycleProgress] = useState<number>(0);
 
   // Hover & Pin Popups
   const [iedPopup, setIedPopup] = useState<{ device: Iec61850IedSpec; top: number; rayY: number } | null>(null);
@@ -480,6 +480,16 @@ export const Iec104LabPage: React.FC = () => {
   const convStep: 1 | 2 | 3 | 4 =
     convFraction < 0.25 ? 1 : convFraction < 0.5 ? 2 : convFraction < 0.75 ? 3 : 4;
 
+  // Start every architecture visit at the protocol source, not mid-conversion.
+  useEffect(() => {
+    if (activeTab === 'TOPOLOGY_LIVE') {
+      setCycleProgress(0);
+      setActiveIedIdx(0);
+      setGatewayPinned(false);
+      setGatewayManuallyClosed(false);
+    }
+  }, [activeTab]);
+
   // Auto-open Gateway Popup on MMS arrival, auto-close on IEC-104 departure (unless pinned)
   const showGatewayPopup = !iedPopup && !showSwitchPopup && (gatewayPinned || (simPhase === 'CONVERT' && !gatewayManuallyClosed && mmsHealthy));
 
@@ -490,7 +500,7 @@ export const Iec104LabPage: React.FC = () => {
   }, [simPhase]);
 
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || activeTab !== 'TOPOLOGY_LIVE') return;
     let rafId = 0;
     let lastTs = performance.now();
     const baseCycleMs = highLatency ? 5200 : 3200; // At 0.1x -> 32s full slow cycle!
@@ -512,7 +522,7 @@ export const Iec104LabPage: React.FC = () => {
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [playing, speed, highLatency]);
+  }, [playing, speed, highLatency, activeTab]);
 
   // Live Telecontrol IOA Table from store
   const ioaTable = useMemo(() => buildIec104TelecontrolTable(bays), [bays]);
@@ -1042,78 +1052,32 @@ export const Iec104LabPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* 2x2 Multi-Color Conversion Cards */}
-                    <div className="lab-gateway-steps font-mono">
-                      <div
-                        className="rounded-lg border p-2.5 transition-all"
-                        style={{
-                          background: convStep === 1 ? 'rgba(0, 212, 255, 0.16)' : 'rgba(8, 28, 46, 0.74)',
-                          borderColor: convStep === 1 ? '#38F3FF' : 'rgba(90, 180, 220, 0.28)',
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-extrabold text-[#38F3FF]">1. MMS REPORT RX</span>
-                          <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 1 ? 'bg-white text-[#031829]' : convStep > 1 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                            {convStep === 1 ? 'ACTIVE' : convStep > 1 ? 'DONE' : 'WAIT'}
-                          </span>
+                    {(() => {
+                      const failed = !mmsHealthy ? 1 : missingIoa ? 3 : gtwOverload || !wanHealthy || coaMismatch ? 4 : 0;
+                      const arrived = mmsHealthy && (simPhase === 'CONVERT' || simPhase === 'WAN_TX');
+                      const ready = arrived && convStep === 4 && convHealthy && !missingIoa;
+                      const rows = [["IED", activeIed.iedName], ["Report", activeIed.rcbName], ["Object", activeIed.lnRef], ["Value", activeIed.baseValue]];
+                      const value = `${activeIed.baseValue} ${activeIed.unit}`;
+                      const quality = badQuality ? 'INVALID' : 'GOOD';
+                      const fields = [['Type ID', activeIed.typeIdNum], ['COT / COA', `3 / ${(coaMismatch ? 99 : 132)}`], ['IOA', activeIed.ioa], ['Value / quality', `${value} / ${quality}`]];
+                      const hex = (n: number) => (n & 255).toString(16).padStart(2, '0').toUpperCase();
+                      const header = [activeIed.typeIdNum, 1, 3, 0, (coaMismatch ? 99 : 132) & 255, (coaMismatch ? 99 : 132) >> 8, activeIed.ioa & 255, (activeIed.ioa >> 8) & 255, (activeIed.ioa >> 16) & 255].map(hex).join(' ');
+                      return <div className="space-y-2 font-mono text-[10px]" style={{overflowWrap:'anywhere'}}>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[rows, fields].map((group, i) => <div key={i} className="rounded-lg border border-[#24506a] bg-[#081c2e] p-2 min-w-0">
+                            <div className={i ? 'text-[#4ADE80] font-bold mb-1' : 'text-[#38F3FF] font-bold mb-1'}>{i ? 'OUTPUT · IEC-104' : 'INPUT · PROTOCOL'}</div>
+                            {group.map(([label, data]) => <div key={String(label)} className="mb-1"><span className="text-[#9BC0DF]">{label}: </span><span className="text-white">{(i ? ready : arrived) ? data : '—'}</span></div>)}
+                          </div>)}
                         </div>
-                        <div className="text-[#E0F7FF] font-bold truncate">{activeIed.iedName} · {activeIed.rcbName}</div>
-                        <div className="text-[#FDE047] mt-0.5 truncate">{activeIed.lnRef}</div>
-                      </div>
-
-                      <div
-                        className="rounded-lg border p-2.5 transition-all"
-                        style={{
-                          background: convStep === 2 ? 'rgba(192, 132, 252, 0.18)' : 'rgba(8, 28, 46, 0.74)',
-                          borderColor: badQuality ? '#EF4444' : convStep === 2 ? '#C084FC' : 'rgba(90, 180, 220, 0.28)',
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-extrabold text-[#D8B4FE]">2. QUALITY &amp; CP56TIME</span>
-                          <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 2 ? 'bg-[#D8B4FE] text-[#1E0836]' : convStep > 2 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                            {convStep === 2 ? 'ACTIVE' : convStep > 2 ? 'DONE' : 'WAIT'}
-                          </span>
-                        </div>
-                        <div className="text-[#F3E8FF] font-bold">q={badQuality ? '0x0100 INV' : '0x0000 GOOD'} → QDS={badQuality ? '0x80' : '0x00'}</div>
-                        <div className="text-[#4ADE80] mt-0.5 font-extrabold">Val: {activeIed.baseValue} {activeIed.unit} · CP56Time2a</div>
-                      </div>
-
-                      <div
-                        className="rounded-lg border p-2.5 transition-all"
-                        style={{
-                          background: convStep === 3 ? 'rgba(250, 204, 21, 0.16)' : 'rgba(8, 28, 46, 0.74)',
-                          borderColor: missingIoa || coaMismatch ? '#EF4444' : convStep === 3 ? '#FACC15' : 'rgba(90, 180, 220, 0.28)',
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-extrabold text-[#FDE047]">3. COA / IOA MAPPING</span>
-                          <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 3 ? 'bg-[#FDE047] text-[#261802]' : convStep > 3 ? 'bg-[#063326] text-[#4ADE80]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                            {convStep === 3 ? 'ACTIVE' : convStep > 3 ? 'DONE' : 'WAIT'}
-                          </span>
-                        </div>
-                        <div className="text-[#FEF08A] font-bold">
-                          {missingIoa ? 'ERR: Unmapped LN!' : `COA:${coaMismatch ? 99 : 132} / IOA:${activeIed.ioa}`}
-                        </div>
-                        <div className="text-[#7DD3FC] mt-0.5">TypeID {activeIed.typeIdNum} ({activeIed.iec104Type}) · COT:3</div>
-                      </div>
-
-                      <div
-                        className="rounded-lg border p-2.5 transition-all"
-                        style={{
-                          background: convStep === 4 ? 'rgba(34, 197, 94, 0.18)' : 'rgba(8, 28, 46, 0.74)',
-                          borderColor: gtwOverload || !wanHealthy ? '#EF4444' : convStep === 4 ? '#4ADE80' : 'rgba(90, 180, 220, 0.28)',
-                        }}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-extrabold text-[#4ADE80]">4. IEC-104 I-FRAME TX</span>
-                          <span className={`px-1.5 rounded text-[8px] font-extrabold ${convStep === 4 ? 'bg-[#4ADE80] text-[#032415]' : 'bg-[#122B40] text-[#94A3B8]'}`}>
-                            {convStep === 4 ? 'READY' : 'WAIT'}
-                          </span>
-                        </div>
-                        <div className="text-[#DCFCE7] font-bold">APCI: 68 15 N(S)={nsSeq} N(R)={nrSeq}</div>
-                        <div className="text-[#A3E635] mt-0.5 font-extrabold">Out: ETH1 → RCC/SLDC (2404)</div>
-                      </div>
-                    </div>
+                        {["Capture MMS report", "Decode value / quality", "Map object to IOA", "Encode timed ASDU"].map((label, i) => {
+                          const n = i + 1;
+                          const status = !arrived ? 'WAIT' : failed && n === failed && convStep >= n ? 'FAULT' : failed && n > failed ? 'BLOCKED' : convStep > n ? 'DONE' : convStep === n ? 'ACTIVE' : 'WAIT';
+                          return <div key={label} className="flex justify-between gap-2 rounded border px-2 py-1" style={{borderColor: status === 'FAULT' ? '#EF4444' : status === 'ACTIVE' ? '#38F3FF' : '#24506a', color: status === 'FAULT' ? '#FCA5A5' : status === 'DONE' ? '#4ADE80' : '#D8EAF5'}}><span>{n}. {label}</span><b>{status}</b></div>;
+                        })}
+                        <div className="rounded border border-[#24506a] p-2 text-[#7DD3FC]">{arrived ? `MMS decoded object: ${activeIed.lnRef} (BER capture not simulated)` : 'Awaiting packet'}<div>ASDU header HEX (payload excluded): {ready ? header : '—'}</div></div>
+                        <div className="text-[#9BC0DF]">Cycle reference: {nsSeq} · {failed ? 'Fault active — clear scenario and verify next cycle' : ready ? 'Encoded · awaiting delivery' : 'Waiting / processing'}</div>
+                      </div>;
+                    })()}
 
                     <div className="mt-2.5 flex items-center gap-2">
                       <div className="flex-1 h-2 rounded-full bg-[#061828] border border-[#1E4B6E] overflow-hidden">
