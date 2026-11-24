@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { iedImages, getIedImageByModel } from '../data/iedImageRegistry';
+import mergingUnitImg from '../assets/sas-architecture/merging-unit.png';
+import instrumentXfmrImg from '../assets/sas-architecture/instrument-transformers.png';
+import circuitBreakerImg from '../assets/sas-architecture/breaker.png';
+import disconnectorImg from '../assets/sas-architecture/disconnector.png';
 import { MultiVendorIed } from '../types/substation';
 import {
   Activity,
@@ -444,6 +448,10 @@ const TOPO_EXACT_IMAGES: Record<string, string> = {
   ABB_RET615: iedImages.ABB_RET615,
   SCHNEIDER_C264: iedImages.SCHNEIDER_C264,
   GE_850: iedImages.GE_850,
+  MERGING_UNIT: mergingUnitImg,
+  INSTRUMENT_XFMR: instrumentXfmrImg,
+  CIRCUIT_BREAKER: circuitBreakerImg,
+  DISCONNECTOR: disconnectorImg,
 };
 
 const getHardwarePhoto = (key: string): string => {
@@ -2551,7 +2559,7 @@ export const NetworkTopologyPage: React.FC = () => {
 
               <div className="overflow-x-auto">
                 <svg
-                  viewBox="0 0 1024 565"
+                  viewBox="0 0 1024 970"
                   className="w-full h-auto min-w-[780px] select-none rounded-lg block"
                   style={{
                     background:
@@ -2573,14 +2581,14 @@ export const NetworkTopologyPage: React.FC = () => {
                       <stop offset="55%" stopColor="#0B1628" />
                       <stop offset="100%" stopColor="#060D1A" />
                     </linearGradient>
-                    <filter id="img1BlueGlow" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1100" height="640">
+                    <filter id="img1BlueGlow" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1100" height="1060">
                       <feGaussianBlur stdDeviation="3.2" result="blur" />
                       <feMerge>
                         <feMergeNode in="blur" />
                         <feMergeNode in="SourceGraphic" />
                       </feMerge>
                     </filter>
-                    <filter id="img1GoldGlow" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1100" height="640">
+                    <filter id="img1GoldGlow" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1100" height="1060">
                       <feGaussianBlur stdDeviation="3.2" result="blur" />
                       <feMerge>
                         <feMergeNode in="blur" />
@@ -3402,6 +3410,495 @@ export const NetworkTopologyPage: React.FC = () => {
                               >
                                 <title>{`${item.label} ETH-B → LAN B Switch P${item.portNum} (${portB.portId})`}</title>
                                 <g><rect x={(item.imgBox.x + item.imgBox.w * 0.70) - 5} y={item.imgBox.y - 4} width={10} height={8} rx={1} fill="#07111F" stroke={upB ? '#FFC400' : '#FF5C65'} strokeWidth={1.5}/><text x={(item.imgBox.x + item.imgBox.w * 0.70)} y={item.imgBox.y + (-8)} textAnchor="middle" fontSize="8" fontWeight="bold" fill={upB ? '#FFC400' : '#FF5C65'}>ETH-B</text></g>
+                              </g>
+                            </g>
+                          );
+                        })}
+
+                        {/* ==================== 5B. GPS / GNSS ANTENNA -> MEINBERG PTP GM & PTP SYNC TRUNK TO PROCESS BUS ==================== */}
+                        {(() => {
+                          const gpsLocked = !timeSyncFailActive;
+                          const ptpCol = gpsLocked ? '#FFB547' : '#FF5C65';
+                          const ptpTrunkA = 'M 982 98 C 1012 98, 1012 574, 474 574 L 474 594';
+                          const ptpTrunkB = 'M 982 98 C 1016 98, 1016 588, 924 588 L 924 594';
+                          return (
+                            <g key="GPS-GNSS-PTP-SYNC">
+                              {/* Rooftop GNSS / GPS Antenna Icon above Meinberg M400 */}
+                              <g
+                                className="cursor-pointer"
+                                onClick={() => toggleFaultScenario('FLT-10')}
+                              >
+                                <title>
+                                  {gpsLocked
+                                    ? 'GNSS / GPS Rooftop Antenna — Locked (11 Satellites · Clock Class 6 · ±38 ns). Click to simulate GNSS Holdover.'
+                                    : 'GNSS / GPS Antenna FAULT — Holdover Mode (Clock Class 7 · smpSynch=1). Click to restore GNSS Lock.'}
+                                </title>
+                                {/* Satellite Signal Arcs */}
+                                {gpsLocked && (
+                                  <g opacity="0.85">
+                                    <path d="M 812 14 A 14 14 0 0 1 836 14" fill="none" stroke="#4ADE80" strokeWidth="1.4" strokeLinecap="round" />
+                                    <path d="M 817 19 A 8 8 0 0 1 831 19" fill="none" stroke="#4ADE80" strokeWidth="1.4" strokeLinecap="round" />
+                                  </g>
+                                )}
+                                {/* Antenna Mast & Dome */}
+                                <line x1="824" y1="26" x2="824" y2="50" stroke={ptpCol} strokeWidth="2.2" />
+                                <path d="M 816 26 Q 824 17 832 26 Z" fill="#0B223D" stroke={ptpCol} strokeWidth="1.6" />
+                                <circle cx="824" cy="24" r="2.2" fill={gpsLocked ? '#4ADE80' : '#FF5C65'} />
+                                {/* RF Coax Label */}
+                                <text x="808" y="34" textAnchor="end" fill={ptpCol} fontSize="7.8" fontFamily="monospace" fontWeight="bold">
+                                  GNSS L1/L2
+                                </text>
+                                <text x="808" y="44" textAnchor="end" fill={gpsLocked ? '#4ADE80' : '#FF5C65'} fontSize="7.5" fontFamily="monospace" fontWeight="bold">
+                                  {gpsLocked ? '● 11 SAT LOCK' : '▲ HOLDOVER'}
+                                </text>
+                              </g>
+
+                              {/* Dedicated IEEE 1588v2 PTP (VLAN 40 · 0x88F7) Sync Trunk from Meinberg GM to Process Bus Switches (P8) */}
+                              <path
+                                d={ptpTrunkB}
+                                fill="none"
+                                stroke={ptpCol}
+                                strokeWidth={2.2}
+                                strokeDasharray="5 4"
+                                opacity={0.88}
+                              />
+                              <path
+                                d={ptpTrunkA}
+                                fill="none"
+                                stroke={ptpCol}
+                                strokeWidth={1.8}
+                                strokeDasharray="5 4"
+                                opacity={0.72}
+                              />
+                              {packetsPlaying && gpsLocked && planeBHealthy && (
+                                <circle r={3.2} fill="#FFB547" stroke="#FFFFFF" strokeWidth={0.9}>
+                                  <animateMotion path={ptpTrunkB} dur={`${Math.max(1.5, packetDuration * 1.1)}s`} repeatCount="indefinite" />
+                                </circle>
+                              )}
+                              {packetsPlaying && gpsLocked && planeAHealthy && (
+                                <circle r={2.8} fill="#FDE047" stroke="#FFFFFF" strokeWidth={0.8}>
+                                  <animateMotion path={ptpTrunkA} dur={`${Math.max(1.8, packetDuration * 1.3)}s`} begin="0.4s" repeatCount="indefinite" />
+                                </circle>
+                              )}
+                              {/* PTP Trunk Label along right margin */}
+                              <g transform="translate(1006, 336) rotate(-90)">
+                                <rect x="-78" y="-9" width="156" height="16" rx="4" fill="#071629" stroke={ptpCol} strokeWidth="1" />
+                                <text x="0" y="2.5" textAnchor="middle" fill={ptpCol} fontSize="8" fontFamily="monospace" fontWeight="bold">
+                                  {gpsLocked ? '1588v2 PTP (VLAN 40) · ±38ns' : 'PTP HOLDOVER (smpSynch=1)'}
+                                </text>
+                              </g>
+                            </g>
+                          );
+                        })()}
+
+                        {/* ==================== 6. PROCESS BUS DIVIDER ==================== */}
+                        <line x1="16" y1="548" x2="1008" y2="548" stroke="#1E4B75" strokeWidth="1" strokeDasharray="6 6" />
+                        <text x="20" y="563" fill="#38BDF8" fontSize="9.5" fontWeight="bold" fontFamily="monospace">
+                          PROCESS BUS — IEC 61850-9-2LE SAMPLED VALUES (0x88BA · 4800 Hz) &amp; GOOSE (0x88B8)
+                        </text>
+                        <text x="1006" y="563" textAnchor="end" fill="#9ED8F6" fontSize="9" fontFamily="monospace">
+                          VLAN 50 (SV) · VLAN 20 (GOOSE) · IEEE 1588v2 PTP
+                        </text>
+
+                        {/* ==================== 7. PORT-TO-PORT CABLES: BAY IEDs (PB-A/PB-B) -> PROCESS BUS SWITCHES (P1..P4) ==================== */}
+                        {bottomIeds.map((item, idx) => {
+                          const iedPbAX = item.imgBox.x + item.imgBox.w * 0.35;
+                          const iedPbBX = item.imgBox.x + item.imgBox.w * 0.70;
+                          const iedBotY = item.imgBox.y + item.imgBox.h;
+                          const dstAX = swATopPortX(idx + 1);
+                          const dstBX = swBTopPortX(idx + 1);
+                          const pathPbA = `M ${iedPbAX} ${iedBotY} C ${iedPbAX} 556, ${dstAX} 554, ${dstAX} 594`;
+                          const pathPbB = `M ${iedPbBX} ${iedBotY} C ${iedPbBX} 560, ${dstBX} 558, ${dstBX} 594`;
+                          const stA = planeAHealthy ? 'UP' : 'DOWN';
+                          const stB = planeBHealthy ? 'UP' : 'DOWN';
+                          return (
+                            <g key={`PB-IED-CABLES-${item.id}`}>
+                              {renderImage1Cable(
+                                `PB-IED-A-${item.id}`,
+                                pathPbA,
+                                'LAN_A',
+                                stA,
+                                selectedDeviceKey === item.id,
+                                selectedDeviceKey === item.id,
+                                packetsPlaying && planeAHealthy,
+                                idx * 0.24,
+                                () => {
+                                  setSelectedSwitchPlane('LAN_A');
+                                  setSelectedDeviceKey(item.id);
+                                }
+                              )}
+                              {renderImage1Cable(
+                                `PB-IED-B-${item.id}`,
+                                pathPbB,
+                                'LAN_B',
+                                stB,
+                                selectedDeviceKey === item.id,
+                                selectedDeviceKey === item.id,
+                                packetsPlaying && planeBHealthy,
+                                idx * 0.24 + 0.35,
+                                () => {
+                                  setSelectedSwitchPlane('LAN_B');
+                                  setSelectedDeviceKey(item.id);
+                                }
+                              )}
+                              {/* On-Device PB-A & PB-B Port Jacks on Bottom Edge of Each Bay IED */}
+                              <g className="cursor-pointer" onClick={() => setSelectedSwitchPlane('LAN_A')}>
+                                <title>{`${item.label} PB-A → Process Bus LAN A P${idx + 1}`}</title>
+                                <rect x={iedPbAX - 5} y={iedBotY - 4} width={10} height={8} rx={1} fill="#07111F" stroke={planeAHealthy ? '#168BFF' : '#FF5C65'} strokeWidth={1.5} />
+                                <text x={iedPbAX} y={iedBotY + 11} textAnchor="middle" fontSize="7.5" fontWeight="bold" fill={planeAHealthy ? '#38BDF8' : '#FF5C65'}>PB-A</text>
+                              </g>
+                              <g className="cursor-pointer" onClick={() => setSelectedSwitchPlane('LAN_B')}>
+                                <title>{`${item.label} PB-B → Process Bus LAN B P${idx + 1}`}</title>
+                                <rect x={iedPbBX - 5} y={iedBotY - 4} width={10} height={8} rx={1} fill="#07111F" stroke={planeBHealthy ? '#FFC400' : '#FF5C65'} strokeWidth={1.5} />
+                                <text x={iedPbBX} y={iedBotY + 11} textAnchor="middle" fontSize="7.5" fontWeight="bold" fill={planeBHealthy ? '#FFC400' : '#FF5C65'}>PB-B</text>
+                              </g>
+                            </g>
+                          );
+                        })}
+
+                        {/* ==================== 8. PORT-TO-PORT CABLES: PROCESS BUS SWITCHES (P5..P6) <-> MERGING UNITS (PB-A/PB-B) ==================== */}
+                        {[
+                          {
+                            id: 'MU-33-F03-SV',
+                            title: 'Merging Unit (MU-01)',
+                            sub: 'IEC 61850-9-2LE SAMU',
+                            badge: 'SV 4800 Hz · 0x88BA',
+                            ip: '192.168.110.11',
+                            imgBox: { x: 86, y: 732, w: 126, h: 66 },
+                            textX: 306,
+                            pbPortNum: 5,
+                          },
+                          {
+                            id: 'MU-33-F03-CB',
+                            title: 'Switchgear MU (SCU-02)',
+                            sub: 'GOOSE Trip & 52a/52b',
+                            badge: 'GOOSE 0x88B8 · 110V DC',
+                            ip: '192.168.110.12',
+                            imgBox: { x: 544, y: 732, w: 126, h: 66 },
+                            textX: 766,
+                            pbPortNum: 6,
+                          },
+                        ].map((mu, mIdx) => {
+                          const srcAX = swABotPortX(mu.pbPortNum);
+                          const srcBX = swBBotPortX(mu.pbPortNum);
+                          const dstAX = mu.imgBox.x + mu.imgBox.w * 0.32;
+                          const dstBX = mu.imgBox.x + mu.imgBox.w * 0.68;
+                          const pathMuA = `M ${srcAX} 666 C ${srcAX} 702, ${dstAX} 698, ${dstAX} ${mu.imgBox.y}`;
+                          const pathMuB = `M ${srcBX} 666 C ${srcBX} 706, ${dstBX} 702, ${dstBX} ${mu.imgBox.y}`;
+                          return (
+                            <g key={`PB-MU-CABLES-${mu.id}`}>
+                              {renderImage1Cable(
+                                `PB-MU-A-${mu.id}`,
+                                pathMuA,
+                                'LAN_A',
+                                planeAHealthy ? 'UP' : 'DOWN',
+                                selectedDeviceKey === mu.id,
+                                selectedDeviceKey === mu.id,
+                                packetsPlaying && planeAHealthy,
+                                mIdx * 0.3,
+                                () => {
+                                  setSelectedSwitchPlane('LAN_A');
+                                  setSelectedDeviceKey(mu.id);
+                                }
+                              )}
+                              {renderImage1Cable(
+                                `PB-MU-B-${mu.id}`,
+                                pathMuB,
+                                'LAN_B',
+                                planeBHealthy ? 'UP' : 'DOWN',
+                                selectedDeviceKey === mu.id,
+                                selectedDeviceKey === mu.id,
+                                packetsPlaying && planeBHealthy,
+                                mIdx * 0.3 + 0.4,
+                                () => {
+                                  setSelectedSwitchPlane('LAN_B');
+                                  setSelectedDeviceKey(mu.id);
+                                }
+                              )}
+                            </g>
+                          );
+                        })}
+
+                        {/* ==================== 9. PROCESS BUS SWITCHES (ZERO BACKGROUND BOXES — TRANSPARENT HARDWARE CUTOUTS) ==================== */}
+                        {[
+                          {
+                            id: 'SW-PB-A',
+                            plane: 'LAN_A' as const,
+                            x: 72,
+                            y: 582,
+                            title: 'HIRSCHMANN RSP35 — PROCESS BUS LAN A',
+                            ipText: '192.168.110.2',
+                            subText: '•   VLAN 50 SV / VLAN 20 GOOSE   •   PTP TC',
+                            healthy: planeAHealthy,
+                            ports: RSP35_PORTS_LAN_A,
+                            topPortXFn: swATopPortX,
+                            botPortXFn: swABotPortX,
+                          },
+                          {
+                            id: 'SW-PB-B',
+                            plane: 'LAN_B' as const,
+                            x: 522,
+                            y: 582,
+                            title: 'HIRSCHMANN RSP35 — PROCESS BUS LAN B',
+                            ipText: '192.168.120.2',
+                            subText: '•   VLAN 50 SV / VLAN 20 GOOSE   •   Isolated Plane B',
+                            healthy: planeBHealthy,
+                            ports: RSP35_PORTS_LAN_B,
+                            topPortXFn: swBTopPortX,
+                            botPortXFn: swBBotPortX,
+                          },
+                        ].map((pbSw) => (
+                          <g key={pbSw.id}>
+                            {/* Transparent Hirschmann RSP35 Photograph — No Box */}
+                            <image
+                              href={TOPO_EXACT_IMAGES.HIRSCHMANN_RSP35}
+                              x={pbSw.x + 8}
+                              y={pbSw.y + 12}
+                              width={126}
+                              height={72}
+                              preserveAspectRatio="xMidYMid meet"
+                              className="cursor-pointer"
+                              onClick={() => setSelectedSwitchPlane(pbSw.plane)}
+                            />
+                            <text x={pbSw.x + 286} y={pbSw.y + 26} textAnchor="middle" fill="#FFFFFF" fontSize="13.5" fontWeight="bold">
+                              {pbSw.title}
+                            </text>
+                            <text x={pbSw.x + 286} y={pbSw.y + 45} textAnchor="middle" fill="#D8ECFF" fontSize="10.5">
+                              <tspan fontFamily="monospace" fontWeight="bold" fill={pbSw.plane === 'LAN_A' ? '#00D2FF' : '#FFC400'}>
+                                {pbSw.ipText}
+                              </tspan>
+                              <tspan>   {pbSw.subText}</tspan>
+                            </text>
+                            <text
+                              x={pbSw.x + 286}
+                              y={pbSw.y + 64}
+                              textAnchor="middle"
+                              fill={pbSw.healthy ? '#22C55E' : '#FF5C65'}
+                              fontSize="11"
+                              fontWeight="bold"
+                            >
+                              {pbSw.healthy ? '● SV 0x88BA & GOOSE ACTIVE — 0% LOSS (< 1 ms SYNC)' : '● FAULTED — PROCESS BUS PLANE OUTAGE'}
+                            </text>
+
+                            {/* Interactive P1–P8 Port Strip (Matches Station Bus Switches) */}
+                            <g transform={`translate(${pbSw.x + 160}, ${pbSw.y + 72})`}>
+                              {[1, 2, 3, 4, 5, 6, 7, 8].map((pNum, pIdx) => (
+                                <g
+                                  key={`${pbSw.id}-P${pNum}`}
+                                  transform={`translate(${pIdx * 31}, 0)`}
+                                  className="cursor-pointer"
+                                  onClick={() => setSelectedSwitchPlane(pbSw.plane)}
+                                >
+                                  <rect
+                                    x={0}
+                                    y={0}
+                                    width={28}
+                                    height={15}
+                                    rx={3}
+                                    fill="#050E1C"
+                                    stroke={pbSw.healthy ? '#264566' : '#FF5C65'}
+                                    strokeWidth={0.9}
+                                  />
+                                  <circle cx={6} cy={7.5} r={2.1} fill={pbSw.healthy && pNum <= 6 ? '#22C55E' : !pbSw.healthy ? '#FF5C65' : '#64748B'} />
+                                  <text x={17} y={10.5} textAnchor="middle" fill="#CFE6FF" fontSize="7.8" fontFamily="monospace" fontWeight="bold">
+                                    P{pNum}
+                                  </text>
+                                </g>
+                              ))}
+                            </g>
+
+                            {/* Visible Physical Cable Termination Anchors on Top (P1..P4) and Bottom (P5..P6) of Switch */}
+                            {[1, 2, 3, 4, 5, 6].map((pNum) => {
+                              const isTop = pNum <= 4;
+                              const ax = isTop ? pbSw.topPortXFn(pNum) : pbSw.botPortXFn(pNum);
+                              const ay = isTop ? pbSw.y + 12 : pbSw.y + 84;
+                              return (
+                                <rect
+                                  key={`${pbSw.id}-ANCHOR-${pNum}`}
+                                  x={ax - 5}
+                                  y={ay - 4}
+                                  width={10}
+                                  height={8}
+                                  rx={1}
+                                  stroke="#FFFFFF"
+                                  strokeWidth={0.8}
+                                  fill={pbSw.healthy ? (pbSw.plane === 'LAN_A' ? '#00E5FF' : '#FFC400') : '#FF5C65'}
+                                  className="cursor-pointer"
+                                  onClick={() => setSelectedSwitchPlane(pbSw.plane)}
+                                >
+                                  <title>{`${pbSw.title} Port P${pNum}`}</title>
+                                </rect>
+                              );
+                            })}
+                          </g>
+                        ))}
+
+                        {/* ==================== 10. MERGING UNITS (ZERO BACKGROUND BOXES — TRANSPARENT PNG CUTOUTS + PORTS) ==================== */}
+                        {[
+                          {
+                            id: 'MU-33-F03-SV',
+                            title: 'Merging Unit (MU-01)',
+                            sub: 'IEC 61850-9-2LE SAMU',
+                            ip: '192.168.110.11',
+                            badge: 'SV 4800 Hz · CT/VT',
+                            imgBox: { x: 86, y: 732, w: 126, h: 66 },
+                            textX: 306,
+                          },
+                          {
+                            id: 'MU-33-F03-CB',
+                            title: 'Switchgear MU (SCU-02)',
+                            sub: 'GOOSE Trip & 52a/52b',
+                            ip: '192.168.110.12',
+                            badge: 'GOOSE 0x88B8 · 110V DC',
+                            imgBox: { x: 544, y: 732, w: 126, h: 66 },
+                            textX: 766,
+                          },
+                        ].map((mu) => {
+                          const ax = mu.imgBox.x + mu.imgBox.w * 0.32;
+                          const bx = mu.imgBox.x + mu.imgBox.w * 0.68;
+                          const upA = planeAHealthy;
+                          const upB = planeBHealthy;
+                          return (
+                            <g key={mu.id}>
+                              <g className="cursor-pointer" onClick={() => handleSelectDevice(mu.id, true)}>
+                                <image
+                                  href={TOPO_EXACT_IMAGES.MERGING_UNIT}
+                                  x={mu.imgBox.x}
+                                  y={mu.imgBox.y}
+                                  width={mu.imgBox.w}
+                                  height={mu.imgBox.h}
+                                  preserveAspectRatio="xMidYMid meet"
+                                />
+                                <text x={mu.textX} y={mu.imgBox.y + 14} textAnchor="middle" fill="#FFFFFF" fontSize="12.5" fontWeight="bold">
+                                  {mu.title}
+                                </text>
+                                <text x={mu.textX} y={mu.imgBox.y + 29} textAnchor="middle" fill="#DCEAF5" fontSize="10" fontWeight="600">
+                                  {mu.sub}
+                                </text>
+                                <text x={mu.textX} y={mu.imgBox.y + 44} textAnchor="middle" fill="#00D2FF" fontSize="11" fontFamily="monospace" fontWeight="bold">
+                                  {mu.ip} · {mu.badge}
+                                </text>
+                                <text
+                                  x={mu.textX}
+                                  y={mu.imgBox.y + 60}
+                                  textAnchor="middle"
+                                  fill={
+                                    !upA && !upB
+                                      ? '#FF5C65'
+                                      : timeSyncFailActive
+                                      ? '#FFC400'
+                                      : upA && upB
+                                      ? '#22C55E'
+                                      : '#FFC400'
+                                  }
+                                  fontSize="10"
+                                  fontWeight="bold"
+                                >
+                                  {!upA && !upB
+                                    ? '● PB OFFLINE · smpSynch=0'
+                                    : timeSyncFailActive
+                                    ? '▲ HOLDOVER · smpSynch=1'
+                                    : upA && upB
+                                    ? '● PB A/B · smpSynch=2 (GPS)'
+                                    : '● SINGLE PB · smpSynch=2'}
+                                </text>
+                              </g>
+                              {/* Top On-Device PB-A & PB-B Port Jacks */}
+                              <rect x={ax - 5} y={mu.imgBox.y - 4} width={10} height={8} rx={1} fill="#07111F" stroke={upA ? '#168BFF' : '#FF5C65'} strokeWidth={1.5} />
+                              <text x={ax} y={mu.imgBox.y - 8} textAnchor="middle" fontSize="7.5" fontWeight="bold" fill={upA ? '#38BDF8' : '#FF5C65'}>PB-A</text>
+                              <rect x={bx - 5} y={mu.imgBox.y - 4} width={10} height={8} rx={1} fill="#07111F" stroke={upB ? '#FFC400' : '#FF5C65'} strokeWidth={1.5} />
+                              <text x={bx} y={mu.imgBox.y - 8} textAnchor="middle" fontSize="7.5" fontWeight="bold" fill={upB ? '#FFC400' : '#FF5C65'}>PB-B</text>
+                            </g>
+                          );
+                        })}
+
+                        {/* ==================== 11. PROCESS LEVEL FIELD EQUIPMENT (ZERO BACKGROUND BOXES — TRANSPARENT PNGs + HARDWIRED PORT-TO-PORT) ==================== */}
+                        {[
+                          {
+                            id: 'FLD-CTVT-01',
+                            title: 'Instrument Transformers',
+                            sub: '3-Ph CT (400/1A) & VT',
+                            status: '● 33.1 kV · 142.5 A',
+                            statusCol: '#4ADE80',
+                            img: TOPO_EXACT_IMAGES.INSTRUMENT_XFMR,
+                            imgBox: { x: 48, y: 856, w: 120, h: 92 },
+                            textX: 248,
+                            srcX: 149,
+                            srcY: 798,
+                            dstX: 108,
+                            dstY: 856,
+                            wireCol: '#00DFFF',
+                            portLabel: 'CT/VT',
+                          },
+                          {
+                            id: 'FLD-CB-XCBR1',
+                            title: 'Circuit Breaker (XCBR1)',
+                            sub: '33 kV SF6 CB · 52a/52b',
+                            status: '● CB CLOSED · SF6 OK',
+                            statusCol: '#4ADE80',
+                            img: TOPO_EXACT_IMAGES.CIRCUIT_BREAKER,
+                            imgBox: { x: 374, y: 856, w: 120, h: 92 },
+                            textX: 572,
+                            srcX: 586,
+                            srcY: 798,
+                            dstX: 434,
+                            dstY: 856,
+                            wireCol: '#FACC15',
+                            portLabel: '52a/52b',
+                          },
+                          {
+                            id: 'FLD-DISC-XSWI1',
+                            title: 'Disconnector & Earth Sw',
+                            sub: 'XSWI1 Isolator · XSWI2 ES',
+                            status: '● ISO CLOSED · ES OPEN',
+                            statusCol: '#38BDF8',
+                            img: TOPO_EXACT_IMAGES.DISCONNECTOR,
+                            imgBox: { x: 706, y: 856, w: 120, h: 92 },
+                            textX: 904,
+                            srcX: 628,
+                            srcY: 798,
+                            dstX: 766,
+                            dstY: 856,
+                            wireCol: '#FACC15',
+                            portLabel: '110V DI',
+                          },
+                        ].map((fld, fIdx) => {
+                          const dWire = `M ${fld.srcX} ${fld.srcY} C ${fld.srcX} 830, ${fld.dstX} 826, ${fld.dstX} ${fld.dstY}`;
+                          return (
+                            <g key={fld.id}>
+                              {/* Smooth Hardwired Copper/Analog Connection */}
+                              <path d={dWire} fill="none" stroke={fld.wireCol} strokeWidth={5.5} opacity={0.18} strokeLinecap="round" />
+                              <path d={dWire} fill="none" stroke={fld.wireCol} strokeWidth={2.6} strokeDasharray="5 3" strokeLinecap="round" />
+                              {packetsPlaying && (
+                                <circle r={3} fill={fld.wireCol} stroke="#FFFFFF" strokeWidth={0.8}>
+                                  <animateMotion path={dWire} dur={`${Math.max(1.3, packetDuration * 0.9)}s`} begin={`${fIdx * 0.35}s`} repeatCount="indefinite" />
+                                </circle>
+                              )}
+                              {/* Top & Bottom Terminal Port Jacks */}
+                              <rect x={fld.srcX - 4.5} y={fld.srcY - 4} width={9} height={8} rx={1} fill="#07111F" stroke={fld.wireCol} strokeWidth={1.4} />
+                              <rect x={fld.dstX - 4.5} y={fld.dstY - 4} width={9} height={8} rx={1} fill="#07111F" stroke={fld.wireCol} strokeWidth={1.4} />
+                              <text x={fld.dstX + 26} y={fld.dstY - 6} textAnchor="start" fontSize="7.8" fontFamily="monospace" fontWeight="bold" fill={fld.wireCol}>
+                                {fld.portLabel}
+                              </text>
+
+                              <g className="cursor-pointer" onClick={() => handleSelectDevice(fld.id, true)}>
+                                <image
+                                  href={fld.img}
+                                  x={fld.imgBox.x}
+                                  y={fld.imgBox.y}
+                                  width={fld.imgBox.w}
+                                  height={fld.imgBox.h}
+                                  preserveAspectRatio="xMidYMid meet"
+                                />
+                                <text x={fld.textX} y={fld.imgBox.y + 28} textAnchor="middle" fill="#FFFFFF" fontSize="12" fontWeight="bold">
+                                  {fld.title}
+                                </text>
+                                <text x={fld.textX} y={fld.imgBox.y + 46} textAnchor="middle" fill="#DCEAF5" fontSize="10" fontFamily="monospace">
+                                  {fld.sub}
+                                </text>
+                                <text x={fld.textX} y={fld.imgBox.y + 66} textAnchor="middle" fill={fld.statusCol} fontSize="10.5" fontWeight="bold" fontFamily="monospace">
+                                  {fld.status}
+                                </text>
                               </g>
                             </g>
                           );
@@ -7049,6 +7546,42 @@ export const NetworkTopologyPage: React.FC = () => {
                           vlan: '10/20/30/40',
                           proto: '—',
                           online: planeAHealthy,
+                        },
+                        {
+                          key: 'MU-33-F03-SV',
+                          name: 'Merging Unit (MU-01)',
+                          iface: 'PB A/B',
+                          ip: '192.168.110.11',
+                          vlan: '50/20',
+                          proto: 'SV 0x88BA',
+                          online: planeAHealthy || planeBHealthy,
+                        },
+                        {
+                          key: 'MU-33-F03-CB',
+                          name: 'Switchgear MU (SCU-02)',
+                          iface: 'PB A/B',
+                          ip: '192.168.110.12',
+                          vlan: '20',
+                          proto: 'GOOSE/110V',
+                          online: planeAHealthy || planeBHealthy,
+                        },
+                        {
+                          key: 'CLK-PTP-GM',
+                          name: 'GPS / GNSS Antenna',
+                          iface: 'RF Coax',
+                          ip: 'L1/L2 11 Sat',
+                          vlan: '40 (PTP)',
+                          proto: '1588v2/1PPS',
+                          online: !timeSyncFailActive,
+                        },
+                        {
+                          key: 'FLD-CB-XCBR1',
+                          name: 'Breaker XCBR1 & CT/VT',
+                          iface: 'Field I/O',
+                          ip: '110V DC / CT',
+                          vlan: 'Field',
+                          proto: '52a/52b/SV',
+                          online: true,
                         },
                       ]
                   ).map((row) => (
