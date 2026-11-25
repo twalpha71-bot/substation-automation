@@ -1,3 +1,4 @@
+import { LabFaultWorkbench } from '../components/LabFaultWorkbench';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { buildOpcUaAddressSpace, OpcUaNodeEntry } from '../data/protocolRegistry';
@@ -963,8 +964,22 @@ export const OpcUaLabPage: React.FC = () => {
     return <div className="p-6 text-slate-300 bg-[#030B18] rounded-xl">Loading OPC UA Lab V3...</div>;
   }
 
+  const guidedExercises = OPC_UA_SCENARIOS.filter(test => [
+    'T06_SESSION_TIMEOUT', 'T11_INVALID_NODE', 'T16_SUB_TIMEOUT', 'T20_EXPIRED_CERT', 'T21_UNTRUSTED_CERT',
+    'T23_WRONG_CREDS', 'T29_PRP_BOTH_FAIL', 'T33_FIREWALL_BLOCK', 'T38_HIST_LOSS', 'T42_CLOUD_LOSS',
+  ].includes(test.id)).map(test => {
+    const observation = observeInjectedFault(test);
+    return { id: test.id, label: test.name, expected: test.expectedResult,
+      checks: scenarioGuides[test.id]?.steps || categoryGuides[test.category],
+      active: isOn(test.id), observed: isOn(test.id) && observation.status === 'PASSED',
+      recovered: !isOn(test.id) && dataDeliveryActive && historianOk && cloudOk && !readError(),
+      evidence: `${observation.actualResult} | Live: session ${sessionActive}; subscription ${subscriptionActive}; field ${fieldAcquisitionUp}; historian ${historianOk}; cloud ${cloudOk}`,
+      busy: !!pendingScenario, inject: () => runScenario(test), clear: () => resetScenario(test),
+    };
+  });
   return (
     <div style={{ backgroundColor: '#030B18', color: '#E9F3FF' }} className="space-y-3 pb-8 text-xs select-none overflow-x-hidden">
+      <LabFaultWorkbench lab="OPCUA_LAB" target={endpointUrl} exercises={guidedExercises} />
       {/* 1. HEADER BAR */}
       <div
         style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }}

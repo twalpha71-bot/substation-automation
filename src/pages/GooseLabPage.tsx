@@ -1,3 +1,4 @@
+import { LabFaultWorkbench } from '../components/LabFaultWorkbench';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import type { BayEquipment, GooseControlBlock, IedDataset, NetworkLink } from '../types/substation';
@@ -1217,7 +1218,7 @@ export const GooseLabPage: React.FC = () => {
       previous = time;
     };
     request = window.requestAnimationFrame(advance);
-    return () => window.cancelAnimationFrame(request);
+  return () => window.cancelAnimationFrame(request);
   }, [playing, publishingActive, gocb?.id, speed, activeTab, transportKey]);
 
   const visualFrame = publishingActive && animation.frame?.context === transportKey ? animation.frame : undefined;
@@ -1245,8 +1246,31 @@ export const GooseLabPage: React.FC = () => {
     return drawPacket(`gl-${lan.toLowerCase()}-${idx}`, (progress - 0.27) / (0.23 + order * 0.07), lan);
   };
 
+  const guidedExercises = [...protocolScenarios, ...additionalScenarios].filter(item => item.value !== 'NONE').map(item => {
+    const subscribers = evaluatedNodes.filter(node => node.subscribed && membersFor(node.iedId).length > 0);
+    const received = subscribers.some(node => node.accepted);
+    const acceptedCurrent = frame?.context === transportKey && subscribers.some(node => frame.decisions[node.iedId] === 'Accepted');
+    const expired = subscribers.some(node => node.statusLabel === 'TAL Timeout');
+    const expectedRejection: Record<string, string> = { VLAN_MISMATCH: 'VLAN Drop', APPID_MISMATCH: 'APPID Mismatch', CONFREV_MISMATCH: 'confRev Mismatch', DATASET_MISSING: 'DataSet Mismatch' };
+    const rejected = frame?.context === transportKey && subscribers.some(node => frame.decisions[node.iedId] === expectedRejection[item.value]);
+    const conditionObserved = item.value === 'LAN_A_DOWN' ? !lanAUp && lanBUp && acceptedCurrent
+      : item.value === 'LAN_B_DOWN' ? lanAUp && !lanBUp && acceptedCurrent
+      : item.value === 'TRIP_BLOCKED' ? testModeSub && received
+      : ['TIMEOUT', 'BOTH_LANS_DOWN', 'PUBLISHER_OFF'].includes(item.value) ? expired
+      : rejected;
+    return { id: item.value, label: item.label, expected: item.effect,
+      checks: ['Check publisher GoEna and the active LAN paths.', 'Compare VLAN, APPID, confRev, DataSet and ExtRef; inspect the actual subscriber rejection or TAL expiry.', 'Clear the condition and wait for a newly accepted frame before verification.'],
+      active: activeConditions.some(([, id]) => id === item.value), observed: conditionObserved,
+      busy: subscribers.length === 0,
+      recovered: activeScenario === 'NONE' && received && frame?.context === transportKey && subscribers.every(node => node.accepted && frame.decisions[node.iedId] === 'Accepted'),
+      evidence: `GoEna ${goEna}; LAN A ${lanAUp}; LAN B ${lanBUp}; stNum ${currentStNum}; sqNum ${simSqNum}. ${evaluatedNodes.filter(node => node.subscribed).map(node => `${node.iedId}: ${node.statusLabel} / ${node.rx?.status || 'No frame'}`).join('; ')}`,
+      inject: () => { setPlaying(true); applyFaultScenario(item.value); }, clear: () => applyFaultScenario('NONE'),
+    };
+  });
+
   return (
     <div style={{ backgroundColor: '#020B16', color: '#E2F1FC' }} className="space-y-2.5 pb-4 text-xs select-none">
+      <LabFaultWorkbench key={gocb?.id} lab="GOOSE" target={`${gocb?.gocbRef || "No publisher"} - bound subscribers only; ${evaluatedNodes.filter(node => node.subscribed && membersFor(node.iedId).length === 0).length} unbound subscription(s) excluded from recovery`} exercises={guidedExercises} />
       {/* 1. TOP HEADER BAR MATCHING REFERENCE */}
       <div
         className="rounded-xl border px-4 py-2.5 flex flex-wrap items-center justify-between gap-3"

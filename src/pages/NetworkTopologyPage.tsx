@@ -1,3 +1,4 @@
+import { LabFaultWorkbench } from '../components/LabFaultWorkbench';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { iedImages, getIedImageByModel } from '../data/iedImageRegistry';
@@ -1323,6 +1324,26 @@ export const NetworkTopologyPage: React.FC = () => {
     return port.allowedVlans.includes(selectedVlan) || port.nativeVlan === selectedVlan;
   };
 
+  const guidedNetworkExercises = [
+    { id: 'LAN_A', label: 'PRP LAN A failure', active: lanAFaultActive, observed: !planeAHealthy && planeBHealthy,
+      inject: () => { setActiveView('PRP_DUAL'); if (!lanAFaultActive) toggleFaultScenario('FLT-11'); },
+      clear: () => { if (lanAFaultActive) toggleFaultScenario('FLT-11'); }, expected: 'LAN A fails; LAN B retains delivery.' },
+    { id: 'LAN_B', label: 'PRP LAN B failure', active: lanBFaultActive, observed: planeAHealthy && !planeBHealthy,
+      inject: () => { setActiveView('PRP_DUAL'); if (!lanBFaultActive) toggleFaultScenario('FLT-12'); },
+      clear: () => { if (lanBFaultActive) toggleFaultScenario('FLT-12'); }, expected: 'LAN B fails; LAN A retains delivery.' },
+    { id: 'HSR_ONE', label: 'HSR single segment cut', active: hsrCutSegments.length === 1,
+      observed: hsrCutSegments.length === 1 && hsrSimulation.isolatedNodeIndices.length === 0,
+      inject: () => { setActiveView('HSR_RING'); applyHsrFiberCuts([0]); }, clear: () => applyHsrFiberCuts([]),
+      expected: 'The ring opens but the alternate route retains reachability.' },
+    { id: 'HSR_TWO', label: 'HSR two segment partition', active: hsrCutSegments.length > 1,
+      observed: hsrSimulation.isolatedNodeIndices.length > 0,
+      inject: () => { setActiveView('HSR_RING'); applyHsrFiberCuts([0, 1]); }, clear: () => applyHsrFiberCuts([]),
+      expected: 'Two cuts partition the ring; isolated IEDs lose reachability.' },
+  ].map(item => ({ ...item, checks: ['Inspect the actual failed link or ring segment.', 'Compare surviving paths and isolated-node counts; distinguish redundancy loss from communication loss.', 'Restore the injected condition and verify both LANs or a closed ring.'],
+    recovered: planeAHealthy && planeBHealthy && hsrCutSegments.length === 0 && hsrSimulation.isolatedNodeIndices.length === 0,
+    evidence: `PRP A ${planeAHealthy}; PRP B ${planeBHealthy}; HSR cuts ${hsrCutSegments.join(', ') || 'none'}; isolated IEDs ${hsrSimulation.isolatedNodeIndices.length}`,
+  }));
+
   return (
     <div
       className={`text-[#E9F3FF] select-none ${
@@ -1331,6 +1352,7 @@ export const NetworkTopologyPage: React.FC = () => {
           : 'space-y-3'
       }`}
     >
+      <LabFaultWorkbench lab="NETWORK" target="PRP station LANs / eight-node HSR ring" exercises={guidedNetworkExercises} />
       {/* 1. PREMIUM HEADER & HORIZONTAL TOOLBAR */}
       <div className="rounded-xl bg-gradient-to-r from-[#061529] via-[#081A30] to-[#061529] border border-[#183B5E] px-3.5 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.55)]">
         <div className="flex flex-wrap items-center justify-between gap-3">

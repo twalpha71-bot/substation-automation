@@ -1,3 +1,4 @@
+import { LabFaultWorkbench } from '../components/LabFaultWorkbench';
 import './ModbusTcpLabPage.css';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ProtocolTroubleshootingPanel } from '../components/ProtocolTroubleshootingPanel';
@@ -484,7 +485,7 @@ export const Iec104LabPage: React.FC = () => {
   useEffect(() => {
     if (activeTab === 'TOPOLOGY_LIVE') {
       setCycleProgress(0);
-      setActiveIedIdx(0);
+      setActiveIedIdx(p2Offline ? 1 : 0);
       setGatewayPinned(false);
       setGatewayManuallyClosed(false);
     }
@@ -794,8 +795,26 @@ export const Iec104LabPage: React.FC = () => {
       ? 'STAGE 3: IEC-104 I-FRAME WAN TX (2404)'
       : 'FAULT: IEC-104 WAN / 2404 BLOCKED';
 
+  const guidedEffects: Record<string, boolean> = {
+    'T05_PORT2404_DOWN': !wanHealthy,
+    'T06_STARTDT_T1_TO': !wanHealthy,
+    'T10_P2_OFFLINE': activeIed.id === 'P2' && iedOfflineNow,
+    'T11_SWITCH_DOWN': !mmsHealthy,
+    'T12_MMS_LOST': !mmsHealthy,
+    'T16_MISSING_IOA': !convHealthy,
+    'T17_BAD_QUALITY': badQuality,
+    'T18_COA_MISMATCH': !endToEndOk
+  };
+  const guidedExercises = IEC104_TESTS.filter(test => test.id in guidedEffects).map(test => ({
+    id: test.id, label: test.name, expected: test.expectedResult, checks: ['Confirm the source device and transport status before checking downstream mapping.', 'Compare the first failed stage, frame/quality evidence and expected effect.', 'Clear this fault; verify the path recovers and inspect the next received value.'],
+    active: isOn(test.id), observed: isOn(test.id) && guidedEffects[test.id],
+    recovered: !isOn(test.id) && endToEndOk && !badQuality && !p2Offline, evidence: `Device ${activeIed.id}; MMS ${mmsHealthy}; conversion ${convHealthy}; WAN ${wanHealthy}; CA mismatch ${coaMismatch}; invalid quality ${badQuality}; N(S) ${nsSeq}`,
+    inject: () => { if (!isOn(test.id)) { setSelectedTestId(test.id); setPlaying(true); setActiveIedIdx(test.id === 'T10_P2_OFFLINE' ? 1 : 0); setCycleProgress(0); setActiveTab('TOPOLOGY_LIVE'); handleToggleTest(test); } },
+    clear: () => { if (isOn(test.id)) handleToggleTest(test); },
+  }));
   return (
     <div className="space-y-3 pb-8 text-[#E8F4FF]">
+      <LabFaultWorkbench lab="IEC104_LAB" target="Four-device protocol training architecture" exercises={guidedExercises} />
       {/* 1. TOP HEADER BAR */}
       <div
         className="rounded-xl border px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5"

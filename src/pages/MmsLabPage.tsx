@@ -1,3 +1,4 @@
+import { LabFaultWorkbench } from '../components/LabFaultWorkbench';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../simulation/useSubstationStore';
 import { getIedImageByModel } from '../data/iedImageRegistry';
@@ -598,7 +599,8 @@ export const MmsLabPage: React.FC = () => {
   };
 
   const scenario = MMS_SCENARIOS.find(item => item.id === scenarioId) ?? MMS_SCENARIOS[0];
-  const runScenario = () => {
+  const executeGuidedScenario = (scenario: MmsScenario) => {
+    setScenarioId(scenario.id);
     setScenarioResult(null);
     setFaultMode(scenario.fault);
     setInFlight104(null);
@@ -606,6 +608,8 @@ export const MmsLabPage: React.FC = () => {
     setFlowState('IDLE');
     setScenarioToRun(scenario);
   };
+
+  const runScenario = () => executeGuidedScenario(scenario);
 
   useEffect(() => {
     if (!scenarioToRun) return;
@@ -697,8 +701,18 @@ export const MmsLabPage: React.FC = () => {
     </section>
   );
 
+  const guidedExercises = MMS_SCENARIOS.filter(item => item.fault !== 'NONE').map(item => ({
+    id: item.id, label: item.label, expected: item.expected, checks: item.checks,
+    active: faultMode === item.fault,
+    observed: scenarioResult?.id === item.id && scenarioResult.passed,
+    recovered: faultMode === 'NONE' && mmsConnected && reportingAvailable && iec104Connected && qualFlag === 'Good',
+    evidence: `MMS ${mmsConnected}; reporting ${reportingAvailable}; IEC-104 ${iec104Connected}; source quality ${qualFlag}; RCC receive count ${rccState.rxCount}. ${scenarioResult?.detail || ''}`,
+    busy: !!scenarioToRun,
+    inject: () => executeGuidedScenario(item), clear: clearScenario,
+  }));
   return (
     <div style={{ backgroundColor: '#020B16', color: '#E2F1FC' }} className="space-y-2.5 pb-4 text-xs select-none">
+      <LabFaultWorkbench key={selectedIed?.id} lab="MMS" target={selectedIed?.name || "No IED"} exercises={guidedExercises} />
       {/* 1. TOP HEADER BAR MATCHING REFERENCE */}
       <div
         className="rounded-xl border px-4 py-2.5 flex flex-wrap items-center justify-between gap-3"

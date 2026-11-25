@@ -1091,10 +1091,6 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
           <button
             type="button"
             onClick={() => {
-              if (!isBreakerClosed && activeFault?.scenario.tripsBreaker) {
-                setChainFaultMode('NONE');
-                return;
-              }
               onToggleBreaker(bay.id, isBreakerClosed ? 'OPEN' : 'CLOSED');
             }}
             title="Click to command Breaker OPEN/CLOSED via SBO"
@@ -1308,51 +1304,101 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                     title="GOOSE L2 Publisher Port (0x88B8)"
                     className="absolute -right-2 top-[42%] -translate-y-1/2 w-3.5 h-3.5 rounded-[3px] border-[1.5px] border-[#00E5FF] bg-[#04243B] shadow-[0_0_8px_rgba(0,229,255,0.8)]"
                   />
-                  {/* Dynamic Backlit LCD Overlay */}
-                  <div
-                    className="absolute px-2 py-1 rounded border font-mono text-[8.5px] font-extrabold leading-tight shadow-inner pointer-events-none"
-                    style={{
-                      top: isDefaultMiComP143 ? '31%' : '14%',
-                      left: '50%',
-                      transform: 'translateX(-50%)',
-                      backgroundColor: isIedFailed || activeFault || bay.protectionTripActive ? '#7F1D1D' : '#B4D455',
-                      borderColor: isIedFailed || activeFault || bay.protectionTripActive ? '#EF4444' : '#3F6212',
-                      color: isIedFailed || activeFault || bay.protectionTripActive ? '#FEE2E2' : '#0F1F05',
-                      minWidth: '90px',
-                      boxShadow: activeFault || bay.protectionTripActive ? '0 0 12px rgba(239,68,68,0.75)' : undefined,
-                    }}
-                  >
-                    <div>{bay.bayCode}</div>
-                    <div className="truncate max-w-[96px]">
-                      {isIedFailed
-                        ? 'IED FAIL'
-                        : activeFault
-                        ? activeFault.scenario.lcdText
-                        : bay.protectionTripActive
-                        ? 'TRIP 50/51'
-                        : `CB ${bay.breakerState}`}
-                    </div>
-                  </div>
+                  {/* Dynamic Backlit LCD & Real-Time LED Indication Strip */}
+                  {(() => {
+                    const is86Latched = Boolean(bay.masterTripLockout ?? bay.protectionTripActive);
+                    const isFaultRed = Boolean(isIedFailed || activeFault || is86Latched);
+                    const isTargetAmber = !isFaultRed && Boolean(bay.protectionTripActive);
+                    const lcdBg = isFaultRed ? '#7F1D1D' : isTargetAmber ? '#451A03' : '#064E3B';
+                    const lcdBorder = isFaultRed ? '#EF4444' : isTargetAmber ? '#F59E0B' : '#22C55E';
+                    const lcdColor = isFaultRed ? '#FEE2E2' : isTargetAmber ? '#FEF3C7' : '#D1FAE5';
+                    const lcdShadow = isFaultRed
+                      ? '0 0 12px rgba(239,68,68,0.75)'
+                      : isTargetAmber
+                      ? '0 0 10px rgba(245,158,11,0.55)'
+                      : '0 0 10px rgba(34,197,94,0.45)';
+                    return (
+                      <>
+                        <div
+                          className="absolute px-2 py-1 rounded border font-mono text-[8.5px] font-extrabold leading-tight shadow-inner pointer-events-none"
+                          style={{
+                            top: isDefaultMiComP143 ? '31%' : '14%',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            backgroundColor: lcdBg,
+                            borderColor: lcdBorder,
+                            color: lcdColor,
+                            minWidth: '90px',
+                            boxShadow: lcdShadow,
+                          }}
+                        >
+                          <div>{bay.bayCode}</div>
+                          <div className="truncate max-w-[96px]">
+                            {isIedFailed
+                              ? 'IED FAIL'
+                              : activeFault
+                              ? activeFault.scenario.lcdText
+                              : is86Latched
+                              ? 'TRIP 50/51 · 86'
+                              : `CB ${bay.breakerState}`}
+                          </div>
+                        </div>
 
-                  {/* Real-Time LED Fault Indication Strip Mounted Directly ON the IED Faceplate */}
-                  {(activeFault || bay.protectionTripActive) && (
-                    <div
-                      className="absolute bottom-[6px] left-1/2 -translate-x-1/2 z-30 w-[92%] max-w-[106px] rounded border px-1.5 py-0.5 text-left font-mono text-[7.2px] leading-tight pointer-events-none shadow-[0_0_12px_rgba(239,68,68,0.7)]"
-                      style={{
-                        backgroundColor: 'rgba(32, 6, 12, 0.94)',
-                        borderColor: '#EF4444',
-                      }}
-                    >
-                      <div className="flex items-center gap-1 text-[#FCA5A5] font-extrabold">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#EF4444] sas-led-blink shadow-[0_0_5px_#EF4444] shrink-0" />
-                        <span className="truncate">{activeFault?.scenario.tripsBreaker || bay.protectionTripActive ? 'TRIP' : 'ALARM'} · {activeFault ? activeFault.scenario.ledBadge : 'OVERCURRENT'}</span>
-                      </div>
-                      <div className="flex items-center gap-1 text-[#FDE68A] mt-0.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] sas-led-blink shrink-0" />
-                        <span className="truncate">{activeFault?.scenario.tripsBreaker || bay.protectionTripActive ? '86 LATCHED · CB OPEN' : 'QUALITY FAULT'}</span>
-                      </div>
-                    </div>
-                  )}
+                        {/* Real-Time LED Status Strip Mounted Directly ON the IED Faceplate */}
+                        <div
+                          className="absolute bottom-[6px] left-1/2 -translate-x-1/2 z-30 w-[92%] max-w-[108px] rounded border px-1.5 py-0.5 text-left font-mono text-[7.2px] leading-tight pointer-events-none"
+                          style={{
+                            backgroundColor: isFaultRed
+                              ? 'rgba(32, 6, 12, 0.94)'
+                              : isTargetAmber
+                              ? 'rgba(38, 22, 4, 0.94)'
+                              : 'rgba(5, 36, 22, 0.94)',
+                            borderColor: lcdBorder,
+                            boxShadow: lcdShadow,
+                          }}
+                        >
+                          {isFaultRed ? (
+                            <>
+                              <div className="flex items-center gap-1 text-[#FCA5A5] font-extrabold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#EF4444] sas-led-blink shadow-[0_0_5px_#EF4444] shrink-0" />
+                                <span className="truncate">
+                                  {activeFault?.scenario.tripsBreaker || is86Latched ? 'TRIP' : 'ALARM'} · {activeFault ? activeFault.scenario.ledBadge : 'OVERCURRENT'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 text-[#FDE68A] mt-0.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] sas-led-blink shrink-0" />
+                                <span className="truncate">
+                                  {is86Latched ? `86 LATCHED · CB ${bay.breakerState}` : 'QUALITY FAULT'}
+                                </span>
+                              </div>
+                            </>
+                          ) : isTargetAmber ? (
+                            <>
+                              <div className="flex items-center gap-1 text-[#FDE68A] font-extrabold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] shrink-0" />
+                                <span className="truncate">TARGET · UNRESET</span>
+                              </div>
+                              <div className="flex items-center gap-1 text-[#86EFAC] mt-0.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] shrink-0" />
+                                <span className="truncate">86 RESET · CB {bay.breakerState}</span>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-1 text-[#4ADE80] font-extrabold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] shadow-[0_0_5px_#22C55E] shrink-0" />
+                                <span className="truncate">RUN · IED HEALTHY</span>
+                              </div>
+                              <div className="flex items-center gap-1 text-[#A7F3D0] mt-0.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E] shrink-0" />
+                                <span className="truncate">86 RESET · CB {bay.breakerState}</span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
               {/* Physical PRP Dual-Homing Ethernet Ports */}

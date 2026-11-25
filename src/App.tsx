@@ -1,5 +1,6 @@
+import { StationFaultWorkbench } from './components/StationFaultWorkbench';
 import { ScadaAlarmAudio } from './components/ScadaAlarmAudio';
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useDeferredValue, useEffect, useLayoutEffect, useRef, useState, useTransition } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useSubstationStore, ActiveWorkspaceTab } from './simulation/useSubstationStore';
 import { useAuthStore, computeUserInitials, ProfileSectionTab } from './auth/useAuthStore';
@@ -45,31 +46,149 @@ import {
 
 import { UI_TRANSLATIONS, translateOfflineText, setOnlineLanguage, SUPPORTED_LANGUAGE_LIST, LANGUAGE_CODES, normalizeLanguageCode, SupportedLanguageCode } from './i18n/offlineTranslation';
 
-const BayConfigurationManager = React.lazy(() => import('./pages/BayConfigurationManager').then(module => ({ default: module.BayConfigurationManager })));
-const AlarmsEventsPage = React.lazy(() => import('./pages/AlarmsEventsPage').then(module => ({ default: module.AlarmsEventsPage })));
-const SchemePage = React.lazy(() => import('./pages/SchemePage'));
-const WiresharkAnalyzerPage = React.lazy(() => import('./pages/WiresharkAnalyzerPage').then(module => ({ default: module.WiresharkAnalyzerPage })));
-const OsiModelPage = React.lazy(() => import('./pages/OsiModelPage').then(module => ({ default: module.OsiModelPage })));
-const SldWorkspacePage = React.lazy(() => import('./pages/SldWorkspacePage').then(module => ({ default: module.SldWorkspacePage })));
-const ScadaHmiPage = React.lazy(() => import('./pages/ScadaHmiPage').then(module => ({ default: module.ScadaHmiPage })));
-const IedExplorerPage = React.lazy(() => import('./pages/IedExplorerPage').then(module => ({ default: module.IedExplorerPage })));
-const NetworkTopologyPage = React.lazy(() => import('./pages/NetworkTopologyPage').then(module => ({ default: module.NetworkTopologyPage })));
-const GooseLabPage = React.lazy(() => import('./pages/GooseLabPage').then(module => ({ default: module.GooseLabPage })));
-const MmsLabPage = React.lazy(() => import('./pages/MmsLabPage').then(module => ({ default: module.MmsLabPage })));
-const ModbusTcpLabPage = React.lazy(() => import('./pages/ModbusTcpLabPage').then(module => ({ default: module.ModbusTcpLabPage })));
-const Iec104LabPage = React.lazy(() => import('./pages/Iec104LabPage').then(module => ({ default: module.Iec104LabPage })));
-const OpcUaLabPage = React.lazy(() => import('./pages/OpcUaLabPage').then(module => ({ default: module.OpcUaLabPage })));
-const SignalMappingSclPage = React.lazy(() => import('./pages/SignalMappingSclPage').then(module => ({ default: module.SignalMappingSclPage })));
-const FaultTroubleshootingPage = React.lazy(() => import('./pages/FaultTroubleshootingPage').then(module => ({ default: module.FaultTroubleshootingPage })));
-const FatSatLabPage = React.lazy(() => import('./pages/FatSatLabPage').then(module => ({ default: module.FatSatLabPage })));
-const TestingGuidancePage = React.lazy(() => import('./pages/TestingGuidancePage').then(module => ({ default: module.TestingGuidancePage })));
-const LearningAcademyPage = React.lazy(() => import('./pages/LearningAcademyPage').then(module => ({ default: module.LearningAcademyPage })));
-const Iec61850AcademyPage = React.lazy(() => import('./pages/Iec61850AcademyPage').then(module => ({ default: module.Iec61850AcademyPage })));
-const InterviewPrepPage = React.lazy(() => import('./pages/InterviewPrepPage').then(module => ({ default: module.InterviewPrepPage })));
-const CcnaAcademyPage = React.lazy(() => import('./pages/CcnaAcademyPage').then(module => ({ default: module.CcnaAcademyPage })));
-const AuthPortalPage = React.lazy(() => import('./pages/AuthAndAdminPages').then(module => ({ default: module.AuthPortalPage })));
-const UserProfilePage = React.lazy(() => import('./pages/AuthAndAdminPages').then(module => ({ default: module.UserProfilePage })));
-const AdminDashboardPage = React.lazy(() => import('./pages/AuthAndAdminPages').then(module => ({ default: module.AdminDashboardPage })));
+const CHUNK_RELOAD_KEY = 'sas-chunk-reload-attempted-v1';
+
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  loader: () => Promise<{ default: T }>
+): React.LazyExoticComponent<T> {
+  return React.lazy(async () => {
+    try {
+      const mod = await loader();
+      try { sessionStorage.removeItem(CHUNK_RELOAD_KEY); } catch { /* optional */ }
+      return mod;
+    } catch (err) {
+      // Retry once after brief delay; if still failing (e.g. stale Vercel chunk after redeploy), reload once.
+      try {
+        await new Promise((r) => setTimeout(r, 350));
+        const mod = await loader();
+        try { sessionStorage.removeItem(CHUNK_RELOAD_KEY); } catch { /* optional */ }
+        return mod;
+      } catch (retryErr) {
+        let alreadyReloaded = false;
+        try { alreadyReloaded = sessionStorage.getItem(CHUNK_RELOAD_KEY) === '1'; } catch { /* optional */ }
+        if (!alreadyReloaded && typeof window !== 'undefined') {
+          try { sessionStorage.setItem(CHUNK_RELOAD_KEY, '1'); } catch { /* optional */ }
+          window.location.reload();
+          return new Promise(() => {});
+        }
+        throw retryErr;
+      }
+    }
+  });
+}
+
+const PAGE_LOADERS: Record<string, () => Promise<any>> = {
+  BAY_MANAGER: () => import('./pages/BayConfigurationManager').then(m => ({ default: m.BayConfigurationManager })),
+  ALARMS_EVENTS: () => import('./pages/AlarmsEventsPage').then(m => ({ default: m.AlarmsEventsPage })),
+  SCHEME: () => import('./pages/SchemePage'),
+  WIRESHARK: () => import('./pages/WiresharkAnalyzerPage').then(m => ({ default: m.WiresharkAnalyzerPage })),
+  OSI_MODEL: () => import('./pages/OsiModelPage').then(m => ({ default: m.OsiModelPage })),
+  SLD: () => import('./pages/SldWorkspacePage').then(m => ({ default: m.SldWorkspacePage })),
+  SCADA: () => import('./pages/ScadaHmiPage').then(m => ({ default: m.ScadaHmiPage })),
+  IED: () => import('./pages/IedExplorerPage').then(m => ({ default: m.IedExplorerPage })),
+  NETWORK: () => import('./pages/NetworkTopologyPage').then(m => ({ default: m.NetworkTopologyPage })),
+  GOOSE: () => import('./pages/GooseLabPage').then(m => ({ default: m.GooseLabPage })),
+  MMS: () => import('./pages/MmsLabPage').then(m => ({ default: m.MmsLabPage })),
+  MODBUS_LAB: () => import('./pages/ModbusTcpLabPage').then(m => ({ default: m.ModbusTcpLabPage })),
+  IEC104_LAB: () => import('./pages/Iec104LabPage').then(m => ({ default: m.Iec104LabPage })),
+  OPCUA_LAB: () => import('./pages/OpcUaLabPage').then(m => ({ default: m.OpcUaLabPage })),
+  SIGNALS: () => import('./pages/SignalMappingSclPage').then(m => ({ default: m.SignalMappingSclPage })),
+  IED_SIGNAL_CHAIN: () => import('./pages/SignalMappingSclPage').then(m => ({ default: m.SignalMappingSclPage })),
+  FAULTS: () => import('./pages/FaultTroubleshootingPage').then(m => ({ default: m.FaultTroubleshootingPage })),
+  FATSAT: () => import('./pages/FatSatLabPage').then(m => ({ default: m.FatSatLabPage })),
+  TESTING_GUIDANCE: () => import('./pages/TestingGuidancePage').then(m => ({ default: m.TestingGuidancePage })),
+  LEARNING: () => import('./pages/LearningAcademyPage').then(m => ({ default: m.LearningAcademyPage })),
+  IEC61850_ACADEMY: () => import('./pages/Iec61850AcademyPage').then(m => ({ default: m.Iec61850AcademyPage })),
+  INTERVIEW_PREP: () => import('./pages/InterviewPrepPage').then(m => ({ default: m.InterviewPrepPage })),
+  CCNA_ACADEMY: () => import('./pages/CcnaAcademyPage').then(m => ({ default: m.CcnaAcademyPage })),
+  USER_PROFILE: () => import('./pages/AuthAndAdminPages').then(m => ({ default: m.UserProfilePage })),
+  ADMIN_DASHBOARD: () => import('./pages/AuthAndAdminPages').then(m => ({ default: m.AdminDashboardPage })),
+};
+
+const preloadedPromises = new Map<string, Promise<any>>();
+function preloadRoute(routeKey: string): Promise<any> {
+  const existing = preloadedPromises.get(routeKey);
+  if (existing) return existing;
+  const loader = PAGE_LOADERS[routeKey];
+  if (!loader) return Promise.resolve();
+  const promise = loader().catch((err) => {
+    preloadedPromises.delete(routeKey);
+    throw err;
+  });
+  preloadedPromises.set(routeKey, promise);
+  return promise;
+}
+
+class WorkspaceErrorBoundary extends React.Component<
+  { onGoHome: () => void; children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { onGoHome: () => void; children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error: unknown) {
+    console.error('Workspace module load error:', error);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div role="alert" className="rounded-xl border border-rose-500/60 bg-[#1B0912]/90 p-5 text-sm text-rose-100 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="font-extrabold text-white">Module failed to load</div>
+            <div className="text-xs text-rose-200/90 mt-0.5">A network hiccup or updated deployment interrupted loading this page.</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { this.setState({ hasError: false }); this.props.onGoHome(); }}
+              className="px-3 py-1.5 rounded-lg border border-cyan-400/70 bg-[#07223B] text-cyan-200 text-xs font-bold hover:brightness-110"
+            >
+              Go to Home
+            </button>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="px-3 py-1.5 rounded-lg bg-cyan-400 text-[#031322] text-xs font-extrabold hover:brightness-110"
+            >
+              Reload Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const BayConfigurationManager = lazyWithRetry(PAGE_LOADERS.BAY_MANAGER);
+const AlarmsEventsPage = lazyWithRetry(PAGE_LOADERS.ALARMS_EVENTS);
+const SchemePage = lazyWithRetry(PAGE_LOADERS.SCHEME);
+const WiresharkAnalyzerPage = lazyWithRetry(PAGE_LOADERS.WIRESHARK);
+const OsiModelPage = lazyWithRetry(PAGE_LOADERS.OSI_MODEL);
+const SldWorkspacePage = lazyWithRetry(PAGE_LOADERS.SLD);
+const ScadaHmiPage = lazyWithRetry(PAGE_LOADERS.SCADA);
+const IedExplorerPage = lazyWithRetry(PAGE_LOADERS.IED);
+const NetworkTopologyPage = lazyWithRetry(PAGE_LOADERS.NETWORK);
+const GooseLabPage = lazyWithRetry(PAGE_LOADERS.GOOSE);
+const MmsLabPage = lazyWithRetry(PAGE_LOADERS.MMS);
+const ModbusTcpLabPage = lazyWithRetry(PAGE_LOADERS.MODBUS_LAB);
+const Iec104LabPage = lazyWithRetry(PAGE_LOADERS.IEC104_LAB);
+const OpcUaLabPage = lazyWithRetry(PAGE_LOADERS.OPCUA_LAB);
+const SignalMappingSclPage = lazyWithRetry(PAGE_LOADERS.SIGNALS);
+const FaultTroubleshootingPage = lazyWithRetry(PAGE_LOADERS.FAULTS);
+const FatSatLabPage = lazyWithRetry(PAGE_LOADERS.FATSAT);
+const TestingGuidancePage = lazyWithRetry(PAGE_LOADERS.TESTING_GUIDANCE);
+const LearningAcademyPage = lazyWithRetry(PAGE_LOADERS.LEARNING);
+const Iec61850AcademyPage = lazyWithRetry(PAGE_LOADERS.IEC61850_ACADEMY);
+const InterviewPrepPage = lazyWithRetry(PAGE_LOADERS.INTERVIEW_PREP);
+const CcnaAcademyPage = lazyWithRetry(PAGE_LOADERS.CCNA_ACADEMY);
+const AuthPortalPage = lazyWithRetry(() => import('./pages/AuthAndAdminPages').then(module => ({ default: module.AuthPortalPage })));
+const UserProfilePage = lazyWithRetry(PAGE_LOADERS.USER_PROFILE);
+const AdminDashboardPage = lazyWithRetry(PAGE_LOADERS.ADMIN_DASHBOARD);
 
 export default function App() {
   useSimulationLoop();
@@ -110,48 +229,99 @@ export default function App() {
     setUserLanguage,
   } = useAuthStore();
 
+  const [isPagePending, startPageTransition] = useTransition();
+  const [isChunkLoading, setIsChunkLoading] = useState(false);
+  const deferredActiveTab = useDeferredValue(activeTab);
   const [testingGuidanceOpen, setTestingGuidanceOpen] = useState(() => window.location.hash === '#/workspace/TESTING_GUIDANCE');
   const [showLanding, setShowLanding] = useState(false);
-  const [specialPage, setSpecialPage] = useState<'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME' | null>(null);
+  const [specialPage, setSpecialPage] = useState<'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME' | null>(() => {
+    const m = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK|BAY_MANAGER|SCHEME)$/);
+    return m ? (m[1] as 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME') : null;
+  });
+  // Quietly warm up the most-used workspace chunks after first paint so page switches are instant.
+  useEffect(() => {
+    const warmKeys = ['SLD', 'SCADA', 'NETWORK', 'SIGNALS', 'IED', 'SCHEME', 'ALARMS_EVENTS'];
+    const timer = window.setTimeout(() => {
+      warmKeys.forEach((k, idx) => {
+        window.setTimeout(() => preloadRoute(k), idx * 250);
+      });
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, []);
   const openSpecialPage = (page: 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME') => {
     clearScadaVisitOnExit();
-    setSpecialPage(page);
-    setTestingGuidanceOpen(false);
-    setShowLanding(false);
     setTopMenuOpen(null);
     if (page === 'SCHEME') {
       setMobileNavOpen(false);
       setNavSearch('');
     }
-    window.history.pushState(null, '', `#/workspace/${page}`);
-    window.scrollTo(0, 0);
+    const commit = () => {
+      window.history.pushState(null, '', `#/workspace/${page}`);
+      startPageTransition(() => {
+        setSpecialPage(page);
+        setTestingGuidanceOpen(false);
+        setShowLanding(false);
+      });
+      window.scrollTo(0, 0);
+    };
+    if (preloadedPromises.has(page)) {
+      commit();
+      return;
+    }
+    setIsChunkLoading(true);
+    preloadRoute(page)
+      .catch(() => {})
+      .finally(() => {
+        setIsChunkLoading(false);
+        commit();
+      });
   };
   // Deep-link the active workspace: refreshing /workspace/GOOSE stays in GOOSE Lab.
   useLayoutEffect(() => {
     const restoreLocation = () => {
       const special = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK|BAY_MANAGER|SCHEME)$/);
-      if (special) { setSpecialPage(special[1] as 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME'); setTestingGuidanceOpen(false); setShowLanding(false); return; }
-      setSpecialPage(null);
-      if (window.location.hash === '#/workspace/TESTING_GUIDANCE') {
-        setTestingGuidanceOpen(true);
-        setShowLanding(false);
+      if (special) {
+        const targetSpecial = special[1] as 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME';
+        preloadRoute(targetSpecial);
+        startPageTransition(() => {
+          setSpecialPage(targetSpecial);
+          setTestingGuidanceOpen(false);
+          setShowLanding(false);
+        });
         return;
       }
-      setTestingGuidanceOpen(false);
+      if (window.location.hash === '#/workspace/TESTING_GUIDANCE') {
+        preloadRoute('TESTING_GUIDANCE');
+        startPageTransition(() => {
+          setSpecialPage(null);
+          setTestingGuidanceOpen(true);
+          setShowLanding(false);
+        });
+        return;
+      }
       const match = window.location.hash.match(/^#\/workspace\/([A-Z0-9_]+)$/);
       if (match) {
         const requested = match[1] as ActiveWorkspaceTab;
         if (requested !== 'SCADA') { try { sessionStorage.removeItem('sas-scada-navigation-v1'); } catch { /* optional */ } }
         const valid = ['HERO','OSI_MODEL','IEC61850_ACADEMY','INTERVIEW_PREP','CCNA_ACADEMY','SLD','SCADA','IED','IED_SIGNAL_CHAIN','NETWORK','GOOSE','MMS','MODBUS_LAB','IEC104_LAB','OPCUA_LAB','SIGNALS','FAULTS','FATSAT','LEARNING','USER_PROFILE','ADMIN_DASHBOARD'];
         if (valid.includes(requested)) {
-          setActiveTab(requested);
-          setShowLanding(false);
+          preloadRoute(requested);
+          startPageTransition(() => {
+            setSpecialPage(null);
+            setTestingGuidanceOpen(false);
+            setActiveTab(requested);
+            setShowLanding(false);
+          });
           return;
         }
       }
       // Unknown or root URL: go directly to the main dashboard.
-      setActiveTab('HERO');
-      setShowLanding(false);
+      startPageTransition(() => {
+        setSpecialPage(null);
+        setTestingGuidanceOpen(false);
+        setActiveTab('HERO');
+        setShowLanding(false);
+      });
       if (window.location.hash !== '#/workspace/HERO') {
         window.history.replaceState(null, '', '#/workspace/HERO');
       }
@@ -376,25 +546,40 @@ export default function App() {
 
   const navigate = (tab: ActiveWorkspaceTab) => {
     if (tab !== 'SCADA') clearScadaVisitOnExit();
-    setSpecialPage(null);
-    if (tab === ('TESTING_GUIDANCE' as ActiveWorkspaceTab)) {
-      window.history.pushState(null, '', '#/workspace/TESTING_GUIDANCE');
-      setTestingGuidanceOpen(true);
-      setShowLanding(false);
-      setMobileNavOpen(false);
-      setTopMenuOpen(null);
-      setNavSearch('');
-      return;
-    }
-    setTestingGuidanceOpen(false);
-    window.history.pushState(null, '', `#/workspace/${tab}`);
-    setShowLanding(false);
-    setActiveTab(tab);
     setMobileNavOpen(false);
     setTopMenuOpen(null);
     setNavSearch('');
     setProfileMenuOpen(false);
     setNotifMenuOpen(false);
+    const commit = () => {
+      if (tab === ('TESTING_GUIDANCE' as ActiveWorkspaceTab)) {
+        window.history.pushState(null, '', '#/workspace/TESTING_GUIDANCE');
+        startPageTransition(() => {
+          setSpecialPage(null);
+          setTestingGuidanceOpen(true);
+          setShowLanding(false);
+        });
+        return;
+      }
+      window.history.pushState(null, '', `#/workspace/${tab}`);
+      startPageTransition(() => {
+        setSpecialPage(null);
+        setTestingGuidanceOpen(false);
+        setShowLanding(false);
+        setActiveTab(tab);
+      });
+    };
+    if (tab === 'HERO' || preloadedPromises.has(tab) || !PAGE_LOADERS[tab]) {
+      commit();
+      return;
+    }
+    setIsChunkLoading(true);
+    preloadRoute(tab)
+      .catch(() => {})
+      .finally(() => {
+        setIsChunkLoading(false);
+        commit();
+      });
   };
 
   const openProfileSection = (section: ProfileSectionTab) => {
@@ -505,6 +690,8 @@ export default function App() {
                 type="button"
                 className={`sas-top-group-trigger ${specialPage === 'SCHEME' ? 'is-active' : ''}`}
                 aria-current={specialPage === 'SCHEME' ? 'page' : undefined}
+                onMouseEnter={() => preloadRoute('SCHEME')}
+                onFocus={() => preloadRoute('SCHEME')}
                 onClick={() => openSpecialPage('SCHEME')}
               >
                 <FileCode2 className="h-4 w-4" aria-hidden="true" />
@@ -522,7 +709,7 @@ export default function App() {
                     </button>
                     {topMenuOpen === group.key && <div className="sas-top-dropdown" role="menu">
                       {navItems.filter(item => group.ids.includes(item.id)).map(item =>
-                        <button type="button" role="menuitem" key={item.id} onClick={() => navigate(item.id)}
+                        <button type="button" role="menuitem" key={item.id} onMouseEnter={() => preloadRoute(item.id)} onFocus={() => preloadRoute(item.id)} onClick={() => navigate(item.id)}
                           className={`sas-top-dropdown-item ${(testingGuidanceOpen ? item.id === ('TESTING_GUIDANCE' as ActiveWorkspaceTab) : activeTab === item.id) ? 'is-active' : ''}`}>
                           {item.icon}<span>{item.label}</span>
                           {!!item.badge && <span className="sas-top-badge">{item.badge}</span>}
@@ -537,8 +724,8 @@ export default function App() {
                   </div>
                 );
               })}
-              <button type="button" className={`sas-top-group-trigger ${specialPage === 'ALARMS_EVENTS' ? 'is-active' : ''}`} onClick={() => openSpecialPage('ALARMS_EVENTS')}><Bell className="h-4 w-4" /><span>Alarms / Events</span></button>
-              <button type="button" className={`sas-top-group-trigger ${specialPage === 'WIRESHARK' ? 'is-active' : ''}`} onClick={() => openSpecialPage('WIRESHARK')}><Network className="h-4 w-4" /><span>Wireshark</span></button>
+              <button type="button" className={`sas-top-group-trigger ${specialPage === 'ALARMS_EVENTS' ? 'is-active' : ''}`} onMouseEnter={() => preloadRoute('ALARMS_EVENTS')} onFocus={() => preloadRoute('ALARMS_EVENTS')} onClick={() => openSpecialPage('ALARMS_EVENTS')}><Bell className="h-4 w-4" /><span>Alarms / Events</span></button>
+              <button type="button" className={`sas-top-group-trigger ${specialPage === 'WIRESHARK' ? 'is-active' : ''}`} onMouseEnter={() => preloadRoute('WIRESHARK')} onFocus={() => preloadRoute('WIRESHARK')} onClick={() => openSpecialPage('WIRESHARK')}><Network className="h-4 w-4" /><span>Wireshark</span></button>
             </div>
             <div className="sas-top-search">
               <input ref={navSearchRef} aria-label="Search navigation" placeholder="Search menu..."
@@ -805,32 +992,49 @@ export default function App() {
           </div>
         )}
 
+        {/* Subtle top transition bar while a background chunk loads (keeps current page visible) */}
+        {(isPagePending || isChunkLoading) && (
+          <div aria-hidden="true" className="fixed top-0 inset-x-0 z-50 h-0.5 bg-cyan-950/60 overflow-hidden pointer-events-none">
+            <div className="h-full w-1/2 bg-gradient-to-r from-transparent via-[#00E5FF] to-transparent animate-pulse" />
+          </div>
+        )}
+
         {/* Main Workspace Container */}
         <main className="sas-workspace-main flex-1 p-2.5 sm:p-5 xl:p-6 w-full min-w-0">
-          <React.Suspense fallback={<div role="status" className="rounded-xl border border-cyan-900 bg-[#061829] p-5 text-sm text-[#9bdcf3]">{t('Loading workspace…')}</div>}>
+          <WorkspaceErrorBoundary onGoHome={() => navigate('HERO')}>
+          <React.Suspense
+            fallback={
+              <div role="status" className="rounded-xl border border-cyan-500/30 bg-[#061829]/80 p-5 flex items-center gap-3 text-sm text-[#9bdcf3]">
+                <span className="h-4 w-4 rounded-full border-2 border-[#00E5FF] border-t-transparent animate-spin shrink-0" />
+                <span>{t('Opening module…')}</span>
+              </div>
+            }
+          >
           {specialPage === 'SCHEME' ? <SchemePage onNavigate={navigate} /> : specialPage === 'BAY_MANAGER' ? <BayConfigurationManager /> : specialPage === 'ALARMS_EVENTS' ? <AlarmsEventsPage /> : specialPage === 'WIRESHARK' ? <WiresharkAnalyzerPage /> : testingGuidanceOpen ? <TestingGuidancePage /> : <>
-          {activeTab === 'HERO' && <HeroDashboardPage />}
-          {activeTab === 'OSI_MODEL' && <OsiModelPage />}
-          {activeTab === 'IEC61850_ACADEMY' && <Iec61850AcademyPage />}
-          {activeTab === 'INTERVIEW_PREP' && <InterviewPrepPage />}
-          {activeTab === 'CCNA_ACADEMY' && <CcnaAcademyPage />}
-          {activeTab === 'SLD' && <SldWorkspacePage />}
-          {activeTab === 'SCADA' && <ScadaHmiPage />}
-          {activeTab === 'IED' && <IedExplorerPage />}
-          {activeTab === 'NETWORK' && <NetworkTopologyPage />}
-          {activeTab === 'GOOSE' && <GooseLabPage />}
-          {activeTab === 'MMS' && <MmsLabPage />}
-          {activeTab === 'MODBUS_LAB' && <ModbusTcpLabPage />}
-          {activeTab === 'IEC104_LAB' && <Iec104LabPage />}
-          {activeTab === 'OPCUA_LAB' && <OpcUaLabPage />}
-          {(activeTab === 'SIGNALS' || activeTab === 'IED_SIGNAL_CHAIN') && <SignalMappingSclPage />}
-          {activeTab === 'FAULTS' && <FaultTroubleshootingPage />}
-          {activeTab === 'FATSAT' && <FatSatLabPage />}
-          {activeTab === 'LEARNING' && <LearningAcademyPage />}
-          {activeTab === 'ADMIN_DASHBOARD' && <AdminDashboardPage />}
-          {activeTab === 'USER_PROFILE' && <UserProfilePage />}
+          {['SLD', 'SCADA', 'IED', 'FATSAT', 'FAULTS'].includes(deferredActiveTab) && <StationFaultWorkbench key={deferredActiveTab} context={deferredActiveTab} />}
+          {deferredActiveTab === 'HERO' && <HeroDashboardPage />}
+          {deferredActiveTab === 'OSI_MODEL' && <OsiModelPage />}
+          {deferredActiveTab === 'IEC61850_ACADEMY' && <Iec61850AcademyPage />}
+          {deferredActiveTab === 'INTERVIEW_PREP' && <InterviewPrepPage />}
+          {deferredActiveTab === 'CCNA_ACADEMY' && <CcnaAcademyPage />}
+          {deferredActiveTab === 'SLD' && <SldWorkspacePage />}
+          {deferredActiveTab === 'SCADA' && <ScadaHmiPage />}
+          {deferredActiveTab === 'IED' && <IedExplorerPage />}
+          {deferredActiveTab === 'NETWORK' && <NetworkTopologyPage />}
+          {deferredActiveTab === 'GOOSE' && <GooseLabPage />}
+          {deferredActiveTab === 'MMS' && <MmsLabPage />}
+          {deferredActiveTab === 'MODBUS_LAB' && <ModbusTcpLabPage />}
+          {deferredActiveTab === 'IEC104_LAB' && <Iec104LabPage />}
+          {deferredActiveTab === 'OPCUA_LAB' && <OpcUaLabPage />}
+          {(deferredActiveTab === 'SIGNALS' || deferredActiveTab === 'IED_SIGNAL_CHAIN') && <SignalMappingSclPage />}
+          {deferredActiveTab === 'FAULTS' && <FaultTroubleshootingPage />}
+          {deferredActiveTab === 'FATSAT' && <FatSatLabPage />}
+          {deferredActiveTab === 'LEARNING' && <LearningAcademyPage />}
+          {deferredActiveTab === 'ADMIN_DASHBOARD' && <AdminDashboardPage />}
+          {deferredActiveTab === 'USER_PROFILE' && <UserProfilePage />}
           </>}
           </React.Suspense>
+          </WorkspaceErrorBoundary>
         </main>
 
         <footer className="sas-app-footer px-4 sm:px-6 py-3 pb-14 sm:pb-3 border-t border-cyan-300/40 text-[10px] text-[#bde3f5] flex flex-wrap justify-between gap-2">

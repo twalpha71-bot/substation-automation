@@ -1,3 +1,4 @@
+import { LabFaultWorkbench } from '../components/LabFaultWorkbench';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ProtocolTroubleshootingPanel } from '../components/ProtocolTroubleshootingPanel';
 import { useSubstationStore } from '../simulation/useSubstationStore';
@@ -466,7 +467,7 @@ export const ModbusTcpLabPage: React.FC = () => {
   useEffect(() => {
     if (activeTab === 'TOPOLOGY_LIVE') {
       setCycleProgress(0);
-      setActiveIedIdx(0);
+      setActiveIedIdx(p2Offline ? 1 : 0);
       setGatewayPinned(false);
       setGatewayManuallyClosed(false);
     }
@@ -781,8 +782,26 @@ export const ModbusTcpLabPage: React.FC = () => {
       ? 'STAGE 4: IEC-104 WAN TX (2404)'
       : 'FAULT: WAN / TCP 2404 BLOCKED';
 
+  const guidedEffects: Record<string, boolean> = {
+    'T03_PORT502_CLOSED': !stationBusOk,
+    'T04_SWITCH_DOWN': !stationBusOk,
+    'T05_P2_OFFLINE': activeIed.id === 'P2' && iedOfflineNow,
+    'T13_EX02_ILLEGAL_ADDR': ex02 && !modbusHealthy,
+    'T16_WORD_SWAP_FAULT': wordSwapFault && effectiveOrder === 'CDAB',
+    'T24_MISSING_IOA': missingIoa && !conversionHealthy,
+    'T25_BAD_QDS': badQds,
+    'T30_WAN_LINK_LOSS': !wanHealthy
+  };
+  const guidedExercises = MODBUS_TESTS.filter(test => test.id in guidedEffects).map(test => ({
+    id: test.id, label: test.name, expected: test.expectedResult, checks: ['Confirm the source device and transport status before checking downstream mapping.', 'Compare the first failed stage, frame/quality evidence and expected effect.', 'Clear this fault; verify the path recovers and inspect the next received value.'],
+    active: isTestOn(test.id), observed: isTestOn(test.id) && guidedEffects[test.id],
+    recovered: !isTestOn(test.id) && endToEndHealthy && !wordSwapFault && !badQds && !p2Offline, evidence: `Device ${activeIed.id}; TCP/Modbus ${modbusHealthy}; conversion ${conversionHealthy}; WAN ${wanHealthy}; word order ${effectiveOrder}; QDS invalid ${badQds}; TID ${tidCounter}`,
+    inject: () => { if (!isTestOn(test.id)) { setSelectedTestId(test.id); setPlaying(true); setActiveIedIdx(test.id === 'T05_P2_OFFLINE' ? 1 : 0); setCycleProgress(0); setActiveTab('TOPOLOGY_LIVE'); handleToggleTest(test); } },
+    clear: () => { if (isTestOn(test.id)) handleToggleTest(test); },
+  }));
   return (
     <div className="space-y-3 pb-8 text-[#E8F4FF]">
+      <LabFaultWorkbench lab="MODBUS_LAB" target="Four-device protocol training architecture" exercises={guidedExercises} />
       {/* 1. TOP HEADER BAR */}
       <div
         className="rounded-xl border px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5"

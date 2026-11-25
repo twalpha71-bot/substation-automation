@@ -207,7 +207,19 @@ function parseSclXmlString(fileName: string, fileType: string, xmlString: string
   };
 }
 
-function RecloseTrainingPanel({ bayId, onAfterResetTrip }: { bayId: string; onAfterResetTrip?: () => void }) {
+function RecloseTrainingPanel({
+  bayId,
+  externalFaultActive = false,
+  externalFaultLabel,
+  onClearExternalFault,
+  onAfterResetTrip,
+}: {
+  bayId: string;
+  externalFaultActive?: boolean;
+  externalFaultLabel?: string;
+  onClearExternalFault?: () => void;
+  onAfterResetTrip?: () => void;
+}) {
   const {
     bays, feederProtection, startRecloseDemo, clearRecloseDemoFault,
     cancelRecloseDemo, resetRecloseDemo79, resetRecloseDemo86, resetProtectionTrip,
@@ -226,11 +238,16 @@ function RecloseTrainingPanel({ bayId, onAfterResetTrip }: { bayId: string; onAf
   if (!bay) return null;
 
   const lockout86 = bay.masterTripLockout ?? bay.protectionTripActive;
+  const effectiveFaultActive = faultActive || externalFaultActive;
   const recloseConfigured = hasConfiguredFeederReclose(bay);
-  const canStart = bay.breakerState === 'CLOSED' && phase === 'READY' && !faultActive && !lockout86;
-  const canReset = bay.breakerState === 'OPEN' && !faultActive;
+  const canStart = bay.breakerState === 'CLOSED' && phase === 'READY' && !effectiveFaultActive && !lockout86;
+  const canReset = bay.breakerState === 'OPEN' && !effectiveFaultActive;
   const buttonClass = 'rounded-md border border-[#26617A] bg-[#081F31] px-2.5 py-1.5 font-semibold text-[#B5ECFA] hover:border-cyan-400 disabled:opacity-40 disabled:hover:border-[#26617A]';
   const phaseLabel = { READY: 'READY', DEAD_TIME: 'DEAD TIME', RETRIP_PENDING: 'RETRIP PENDING', RECLAIM: 'RECLAIM', LOCKOUT: 'LOCKOUT' }[phase];
+  const displayReason =
+    !faultActive && externalFaultActive && externalFaultLabel
+      ? `Active fault on ${bay.bayCode}: ${externalFaultLabel}. Clear fault first, then reset ANSI 86 lockout before closing CB.`
+      : reason;
 
   return (
     <section aria-label={`${bay.bayCode} protection training`} className="sas-feeder-simulation rounded-xl border border-[#26617A] bg-[#0A263A] px-3 py-2.5 text-xs text-[#B5ECFA]">
@@ -241,18 +258,28 @@ function RecloseTrainingPanel({ bayId, onAfterResetTrip }: { bayId: string; onAf
         {recloseConfigured && <span>Shots {shots}/1</span>}
         <span className={lockout86 ? 'text-rose-300' : 'text-emerald-300'}>ANSI 86 · {lockout86 ? 'LATCHED' : 'RESET'}</span>
         <span>CB · {bay.breakerState}</span>
-        <span className={faultActive ? 'text-amber-300' : ''}>Fault · {faultActive ? 'ACTIVE' : 'CLEAR'}</span>
+        <span className={effectiveFaultActive ? 'text-amber-300' : ''}>Fault · {effectiveFaultActive ? 'ACTIVE' : 'CLEAR'}</span>
       </div>
-      <p className="mt-1.5 text-[11px]" aria-live="polite">{reason}</p>
+      <p className="mt-1.5 text-[11px]" aria-live="polite">{displayReason}</p>
       <div className="mt-2 flex flex-wrap gap-2">
         <button type="button" className={buttonClass} disabled={!canStart} onClick={() => startRecloseDemo(bayId, 'TEMPORARY')}>Temporary fault</button>
         <button type="button" className={buttonClass} disabled={!canStart} onClick={() => startRecloseDemo(bayId, 'PERMANENT')}>Permanent fault</button>
         <button type="button" className={buttonClass} disabled={!canStart} onClick={() => startRecloseDemo(bayId, 'MASTER_TRIP')}>Master trip (86)</button>
-        <button type="button" className={buttonClass} disabled={!faultActive} onClick={() => clearRecloseDemoFault(bayId)}>Clear fault</button>
+        <button
+          type="button"
+          className={buttonClass}
+          disabled={!effectiveFaultActive}
+          onClick={() => {
+            if (faultActive) clearRecloseDemoFault(bayId);
+            if (externalFaultActive) onClearExternalFault?.();
+          }}
+        >
+          Clear fault
+        </button>
         <button type="button" className={buttonClass} disabled={phase !== 'DEAD_TIME'} onClick={() => cancelRecloseDemo(bayId)}>Cancel 79</button>
         <button type="button" className={buttonClass} disabled={!canReset || phase !== 'LOCKOUT'} onClick={() => resetRecloseDemo79(bayId)}>Reset 79 lockout</button>
         <button type="button" className={buttonClass} disabled={!canReset || !lockout86} onClick={() => resetRecloseDemo86(bayId)}>Reset 86 lockout</button>
-        <button type="button" className={buttonClass} disabled={faultActive || !bay.protectionTripActive} onClick={() => { resetProtectionTrip(bay.id); onAfterResetTrip?.(); }}>Reset trip indication</button>
+        <button type="button" className={buttonClass} disabled={effectiveFaultActive || !bay.protectionTripActive} onClick={() => { resetProtectionTrip(bay.id); onAfterResetTrip?.(); }}>Reset trip indication</button>
       </div>
     </section>
   );
@@ -929,6 +956,30 @@ export const SignalMappingSclPage: React.FC = () => {
         <RecloseTrainingPanel
           key={activeChain.bay.id}
           bayId={activeChain.bay.id}
+          externalFaultActive={Boolean(activeFault?.scenario.tripsBreaker)}
+          externalFaultLabel={activeFault?.scenario.label}
+          onClearExternalFault={() => {
+            const iedId = traceBay.iedId;
+            setFaultsByIed((previous) => {
+              const next = { ...previous };
+              delete next[iedId];
+              return next;
+            });
+            try {
+              const raw = window.sessionStorage.getItem(FAULTS_STORAGE_KEY);
+              if (raw) {
+                const parsed = JSON.parse(raw);
+                delete parsed[iedId];
+                if (Object.keys(parsed).length > 0) {
+                  window.sessionStorage.setItem(FAULTS_STORAGE_KEY, JSON.stringify(parsed));
+                } else {
+                  window.sessionStorage.removeItem(FAULTS_STORAGE_KEY);
+                }
+              }
+            } catch {
+              // Ignore storage errors
+            }
+          }}
           onAfterResetTrip={() => {
             if (activeFault?.scenario.tripsBreaker) {
               setFaultsByIed(previous => { const next = { ...previous }; delete next[traceBay.iedId]; return next; });
@@ -965,7 +1016,41 @@ export const SignalMappingSclPage: React.FC = () => {
         selectedStageIndex={selectedStageIndex}
         setSelectedStageIndex={setSelectedStageIndex}
         liveClockStr={tracedPoint?.timestamp || liveClockStr}
-        onToggleBreaker={(bayId, target) => commandBreaker(bayId, target, 'SCADA_SBO')}
+        onToggleBreaker={(bayId, target) => {
+          if (target === 'CLOSED' && activeFault?.scenario.tripsBreaker) {
+            const st = useSubstationStore.getState();
+            const bay = st.bays.find((b) => b.id === bayId);
+            const ts = new Date().toISOString();
+            const msg = `Close blocked on ${bay?.bayCode || bayId}: ${activeFault.scenario.label} is still active. Clear the fault and reset ANSI 86 lockout first.`;
+            useSubstationStore.setState({
+              lastCommandFeedback: { type: 'ERROR', message: msg, timestamp: ts },
+              soeLog: [
+                {
+                  id: `SOE-FLT-BLOCK-${ts}`,
+                  timestampMs: ts,
+                  bayId,
+                  bayName: bay?.name || bayId,
+                  iedId: bay?.iedId || '',
+                  sourceRef: `${(bay?.iedId || 'IED').replace(/-/g, '_')}/CILO1.EnaCls`,
+                  eventDescription: msg,
+                  valueChange: 'Requested=CLOSED • Blocked (Fault Active)',
+                  quality: bay?.quality || 'GOOD',
+                  cause: 'INTERLOCK_BLOCK',
+                },
+                ...st.soeLog,
+              ],
+            });
+            return false;
+          }
+          const ok = commandBreaker(bayId, target, 'SCADA_SBO');
+          if (ok && target === 'CLOSED') {
+            const latestBay = useSubstationStore.getState().bays.find((b) => b.id === bayId);
+            if (latestBay?.protectionTripActive && !latestBay.masterTripLockout) {
+              resetProtectionTrip(bayId);
+            }
+          }
+          return ok;
+        }}
         onTriggerTrip={triggerProtectionTrip}
         onResetTrip={resetProtectionTrip}
       />
