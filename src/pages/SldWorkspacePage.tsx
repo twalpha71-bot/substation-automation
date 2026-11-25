@@ -512,7 +512,7 @@ export const SldWorkspacePage: React.FC = () => {
   const [newBayMvar, setNewBayMvar] = useState<number>(0.8);
   const [newBayVendor, setNewBayVendor] = useState<VendorName>('ABB / Hitachi Energy');
 
-  const [compactView, setCompactView] = useState<boolean>(false);
+  const [compactView, setCompactView] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth < 1200 : false));
   const [fullscreenSld, setFullscreenSld] = useState<boolean>(false);
   const [clockText, setClockText] = useState<string>('12:57:24');
   const [telemetryTimeText, setTelemetryTimeText] = useState<string>('11:30:05');
@@ -1683,8 +1683,12 @@ export const SldWorkspacePage: React.FC = () => {
         >
           <svg
             viewBox={`${sldViewBoxX} 0 ${sldCanvasWidth} 690`}
-            className="block max-w-none h-auto select-none"
-            style={{ width: `${sldCanvasWidth * zoom}px`, minWidth: `${sldCanvasWidth * zoom}px` }}
+            className={`block h-auto select-none ${compactView && zoom <= 1 ? 'w-full max-w-full' : 'max-w-none'}`}
+            style={
+              compactView && zoom <= 1
+                ? { width: '100%', minWidth: 0 }
+                : { width: `${sldCanvasWidth * zoom}px`, minWidth: `${sldCanvasWidth * zoom}px` }
+            }
           >
             <defs>
               {/* Engineering Millimeter Grid Pattern (20px minor + 100px major) */}

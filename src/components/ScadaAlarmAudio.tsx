@@ -58,7 +58,7 @@ export function ScadaAlarmAudio() {
     id: a.id, timestamp: a.timestamp, label: `${a.bayName}: ${a.signalName}`, severity: a.severity,
     state: a.state, source: 'station' as const, firstOut: firstOut === a.id,
   })), [alarms, firstOut]);
-  const entries = useMemo(() => [...stationEntries, ...local].sort((a, b) => b.timestamp.localeCompare(a.timestamp)), [stationEntries, local]);
+  const entries = useMemo(() => [...stationEntries, ...local].sort((a, b) => String(b.timestamp ?? '').localeCompare(String(a.timestamp ?? ''))), [stationEntries, local]);
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('sas:annunciator-snapshot', { detail: { entries, history, firstOut, hornSilenced, enabled, muted } }));
   }, [entries, history, firstOut, hornSilenced, enabled, muted]);

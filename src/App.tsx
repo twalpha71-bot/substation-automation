@@ -234,6 +234,19 @@ export default function App() {
   const deferredActiveTab = useDeferredValue(activeTab);
   const [testingGuidanceOpen, setTestingGuidanceOpen] = useState(() => window.location.hash === '#/workspace/TESTING_GUIDANCE');
   const [showLanding, setShowLanding] = useState(false);
+  const SAS_TEST_TOOLS = [
+    { id: 'IEDSCOUT', label: 'IEDScout (OMICRON)', subtitle: 'IEC 61850 MMS & GOOSE Client' },
+    { id: 'IEC_BROWSER', label: 'IEC Browser (V02.21)', subtitle: 'MMS Read/Write, DataSets & GI' },
+    { id: 'SCL_VALIDATOR', label: 'SCL Validation Tool', subtitle: 'ICD / IID / SCD / CID Schema Audit' },
+    { id: 'MODSCAN', label: 'ModScan64 / ModScan-IP', subtitle: 'Modbus TCP Master Poller' },
+    { id: 'MODBUS_SLAVE_POLL', label: 'Modbus Slave / Poll', subtitle: 'Slave Simulator & Modpoll CLI' },
+    { id: 'IEC_TEST', label: 'IEC_TEST (V1.02)', subtitle: 'IEC 60870-5-104 / 101 Test Master' },
+    { id: 'VINCI', label: 'VINCI Protocol Analyser', subtitle: 'Multi-Protocol Master/Slave Analyzer' },
+    { id: 'HIVIEW', label: 'HiView (Hirschmann)', subtitle: 'RSP35 / RED25 Switch Manager' },
+    { id: 'HYPER_TERMINAL', label: 'Hyper Terminal', subtitle: 'Serial / Console CLI Terminal' },
+  ] as const;
+  type SasTestToolId = typeof SAS_TEST_TOOLS[number]['id'];
+  const [activeTestTool, setActiveTestTool] = useState<SasTestToolId>('IEDSCOUT');
   const [specialPage, setSpecialPage] = useState<'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME' | null>(() => {
     const m = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK|BAY_MANAGER|SCHEME)$/);
     return m ? (m[1] as 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME') : null;
@@ -275,6 +288,10 @@ export default function App() {
         setIsChunkLoading(false);
         commit();
       });
+  };
+  const openTestTool = (toolId: SasTestToolId) => {
+    setActiveTestTool(toolId);
+    openSpecialPage('SCHEME');
   };
   // Deep-link the active workspace: refreshing /workspace/GOOSE stays in GOOSE Lab.
   useLayoutEffect(() => {
@@ -600,7 +617,7 @@ export default function App() {
   const activeBreadcrumbLabel = () => {
     if (specialPage === 'ALARMS_EVENTS') return 'Alarms / Events';
     if (specialPage === 'WIRESHARK') return 'Wireshark';
-    if (specialPage === 'SCHEME') return 'Scheme';
+    if (specialPage === 'SCHEME') return 'SAS Test Tools';
     if (specialPage === 'BAY_MANAGER') return 'Bay Configuration Manager';
     if (testingGuidanceOpen) return 'Testing Guidance';
     if (activeTab === 'HERO') return t('Substation Workspace');
@@ -686,17 +703,37 @@ export default function App() {
                 <Home className="h-4 w-4" aria-hidden="true" />
                 <span>{t('Home')}</span>
               </button>
-              <button
-                type="button"
-                className={`sas-top-group-trigger ${specialPage === 'SCHEME' ? 'is-active' : ''}`}
-                aria-current={specialPage === 'SCHEME' ? 'page' : undefined}
-                onMouseEnter={() => preloadRoute('SCHEME')}
-                onFocus={() => preloadRoute('SCHEME')}
-                onClick={() => openSpecialPage('SCHEME')}
-              >
-                <FileCode2 className="h-4 w-4" aria-hidden="true" />
-                <span>Scheme</span>
-              </button>
+              <div className="sas-top-group">
+                <button
+                  type="button"
+                  className={`sas-top-group-trigger ${specialPage === 'SCHEME' ? 'is-active' : ''}`}
+                  aria-expanded={topMenuOpen === 'testTools'}
+                  aria-haspopup="menu"
+                  onMouseEnter={() => preloadRoute('SCHEME')}
+                  onFocus={() => preloadRoute('SCHEME')}
+                  onClick={() => setTopMenuOpen(prev => prev === 'testTools' ? null : 'testTools')}
+                >
+                  <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
+                  <span>SAS Test Tools</span>
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+                {topMenuOpen === 'testTools' && (
+                  <div className="sas-top-dropdown" role="menu">
+                    {SAS_TEST_TOOLS.map(tool => (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        key={tool.id}
+                        onClick={() => openTestTool(tool.id)}
+                        className={`sas-top-dropdown-item ${specialPage === 'SCHEME' && activeTestTool === tool.id ? 'is-active' : ''}`}
+                      >
+                        <FileCode2 className="w-4 h-4 shrink-0" />
+                        <span>{tool.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               {topNavGroups.map(group => {
                 const Icon = group.icon;
                 const active = group.ids.includes(testingGuidanceOpen ? 'TESTING_GUIDANCE' : activeTab);
@@ -733,7 +770,9 @@ export default function App() {
               <kbd>Ctrl + K</kbd>
               {navSearch.trim() && <div className="sas-top-search-results" role="menu">
                 {navSearch.toLowerCase().includes('alarm') && <button type="button" onClick={() => { openSpecialPage('ALARMS_EVENTS'); setNavSearch(''); }}><Bell className="w-4 h-4"/> Alarms / Events</button>}
-                {'scheme'.includes(navSearch.trim().toLowerCase()) && <button role="menuitem" type="button" onClick={() => openSpecialPage('SCHEME')}><FileCode2 className="w-4 h-4" /> Scheme</button>}
+                {SAS_TEST_TOOLS.filter(tool => `${tool.label} ${tool.subtitle}`.toLowerCase().includes(navSearch.trim().toLowerCase())).map(tool => (
+                  <button key={tool.id} role="menuitem" type="button" onClick={() => openTestTool(tool.id)}><ClipboardCheck className="w-4 h-4" /> {tool.label}</button>
+                ))}
                 {'wireshark'.includes(navSearch.toLowerCase()) && <button type="button" onClick={() => { openSpecialPage('WIRESHARK'); setNavSearch(''); }}><Network className="w-4 h-4"/> Wireshark</button>}
                 {filteredNavItems.length ? filteredNavItems.map(item =>
                   <button key={item.id} role="menuitem" type="button" onClick={() => navigate(item.id)}>
@@ -1010,7 +1049,7 @@ export default function App() {
               </div>
             }
           >
-          {specialPage === 'SCHEME' ? <SchemePage onNavigate={navigate} /> : specialPage === 'BAY_MANAGER' ? <BayConfigurationManager /> : specialPage === 'ALARMS_EVENTS' ? <AlarmsEventsPage /> : specialPage === 'WIRESHARK' ? <WiresharkAnalyzerPage /> : testingGuidanceOpen ? <TestingGuidancePage /> : <>
+          {specialPage === 'SCHEME' ? <SchemePage onNavigate={navigate} activeTool={activeTestTool} onSelectTool={setActiveTestTool} /> : specialPage === 'BAY_MANAGER' ? <BayConfigurationManager /> : specialPage === 'ALARMS_EVENTS' ? <AlarmsEventsPage /> : specialPage === 'WIRESHARK' ? <WiresharkAnalyzerPage /> : testingGuidanceOpen ? <TestingGuidancePage /> : <>
           {deferredActiveTab === 'HERO' && <HeroDashboardPage />}
           {deferredActiveTab === 'OSI_MODEL' && <OsiModelPage />}
           {deferredActiveTab === 'IEC61850_ACADEMY' && <Iec61850AcademyPage />}

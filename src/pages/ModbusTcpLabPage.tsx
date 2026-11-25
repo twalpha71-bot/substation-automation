@@ -1,3 +1,4 @@
+import { CompactArchitectureFrame } from '../components/CompactArchitectureFrame';
 import { LabFaultWorkbench } from '../components/LabFaultWorkbench';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ProtocolTroubleshootingPanel } from '../components/ProtocolTroubleshootingPanel';
@@ -991,6 +992,7 @@ export const ModbusTcpLabPage: React.FC = () => {
             </div>
 
             {/* 4-COLUMN HARDWARE STAGE WITH RESIZE-OBSERVER PORT-TO-PORT SVG */}
+            <CompactArchitectureFrame designWidth={1120} label="Modbus TCP Architecture">
             <div
               ref={stageRef}
               className="min-w-[1120px] relative pt-2 pb-2"
@@ -1623,6 +1625,7 @@ export const ModbusTcpLabPage: React.FC = () => {
                 );
               })()}
             </div>
+            </CompactArchitectureFrame>
 
             {/* Bottom Active Path Bar */}
             <div className="mt-2 rounded-xl border border-[#17466B] bg-[#041424]/95 px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">

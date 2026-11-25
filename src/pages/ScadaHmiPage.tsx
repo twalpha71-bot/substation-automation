@@ -208,7 +208,11 @@ export const ScadaHmiPage: React.FC = () => {
   // Direction-specific evidence. Events must belong to the same ordered transfer cycle.
   const transferReport = useMemo(() => {
     const latest = useSubstationStore.getState();
-    const ordered = [...latest.soeLog].sort((a, b) => a.timestampMs.localeCompare(b.timestampMs));
+    const ordered = [...latest.soeLog].sort((a, b) => {
+      const ta = typeof a.timestampMs === 'number' ? a.timestampMs : Number(a.timestampMs) || Date.parse(String(a.timestampMs ?? '')) || 0;
+      const tb = typeof b.timestampMs === 'number' ? b.timestampMs : Number(b.timestampMs) || Date.parse(String(b.timestampMs ?? '')) || 0;
+      return ta - tb;
+    });
     const from = transferDirection === 'FORWARD' ? '132-L2' : '132-L3';
     const to = transferDirection === 'FORWARD' ? '132-L3' : '132-L2';
     const prefix = transferDirection === 'FORWARD' ? 'ST' : 'RST';
@@ -1397,12 +1401,18 @@ export const ScadaHmiPage: React.FC = () => {
         .reference-sld .reference-sld-workspace > div:nth-child(2) > div:first-child span { font-size:14px; }
         /* Keep alternative view content visible; only the SLD legend is hidden by its own class. */
         .reference-sld .reference-sld-workspace .reference-iec-legend { display:none; }
-        .reference-sld .reference-sld-workspace .sld-main-svg { min-width:600px; }
+        .reference-sld .reference-sld-workspace .sld-main-svg { min-width:0; width:100%; }
         .reference-sld .reference-sld-workspace aside svg { min-width:0 !important; max-width:100%; flex-shrink:0; }
         .reference-sld .reference-sld-workspace > aside { overflow-x:hidden; }
-        .reference-sld .reference-sld-workspace > div:nth-child(2) > div:nth-child(3) { height:570px; padding:0; }
+        .reference-sld .reference-sld-workspace > div:nth-child(2) > div:nth-child(3) { flex:1 1 auto; min-height:570px; height:100%; padding:0; }
         .reference-sld .reference-sld-workspace > div:last-child { padding:8px; gap:6px; }
-        @media(max-width:1100px){.reference-sld .reference-sld-workspace{grid-template-columns:180px minmax(650px,1fr) 285px;overflow-x:auto;}}
+        @media(max-width:1180px){
+          .reference-sld .reference-sld-workspace{grid-template-columns:1fr !important;overflow-x:hidden !important;gap:10px !important;}
+          .reference-sld .reference-sld-workspace > aside,
+          .reference-sld .reference-sld-workspace > div{grid-column:1 !important;grid-row:auto !important;min-width:0 !important;width:100% !important;}
+          .reference-sld .reference-sld-workspace > div:nth-child(2) > div:nth-child(3){height:auto !important;max-height:none !important;}
+          .reference-sld .reference-sld-workspace svg.scada-operator-sld-svg{width:100% !important;height:auto !important;max-width:100% !important;}
+        }
       `}</style>
       <div className="runtime-panel flex flex-wrap items-center justify-between gap-3 px-3 py-2">
         <div className="flex items-center gap-3"><div className="rounded border border-blue-500 bg-[#164b81] p-2"><GitBranch className="h-6 w-6 text-white"/></div>
@@ -1920,13 +1930,13 @@ export const ScadaHmiPage: React.FC = () => {
             <div
               ref={sldViewportRef}
               onWheel={(event) => { if (event.shiftKey && sldViewportRef.current) { sldViewportRef.current.scrollLeft += event.deltaY; event.preventDefault(); } }}
-              className={`overflow-x-auto overflow-y-auto relative p-1.5 ${sldOnlyFullScreen ? 'flex-1 min-h-0' : 'h-[540px] sm:h-[620px] xl:h-[680px]'}`}
+              className={`overflow-x-auto overflow-y-auto relative p-0 ${sldOnlyFullScreen ? 'flex-1 min-h-0' : 'flex-1 min-h-[540px] sm:min-h-[600px]'}`}
               style={{
                 background: '#071b33',
               }}
             >
-              <svg viewBox={`${-extraLeft} 0 ${operatorCanvasWidth} 820`} preserveAspectRatio="xMidYMin meet" className="select-none block" style={{ width: `${operatorCanvasWidth * sldZoom}px`, height: `${820 * sldZoom}px`, maxWidth: 'none', transform: `translate(${sldPanX}px, ${sldPanY}px)`, transformOrigin: 'top left' }}>
-                <rect x={-extraLeft} width={operatorCanvasWidth} height="820" fill="#071b33" />
+              <svg viewBox={`${-extraLeft} 0 ${operatorCanvasWidth} 820`} preserveAspectRatio="xMidYMid meet" className="scada-operator-sld-svg select-none block" style={{ width: `max(100%, ${Math.round(operatorCanvasWidth * sldZoom)}px)`, height: `max(100%, ${Math.round(820 * sldZoom)}px)`, maxWidth: 'none', transform: `translate(${sldPanX}px, ${sldPanY}px)`, transformOrigin: 'center center' }}>
+                <rect x={-extraLeft - 1400} y={-700} width={operatorCanvasWidth + 2800} height={2220} fill="#071b33" />
                 <text x="600" y="32" fill="#e9f3ff" fontSize="22" fontWeight="bold" textAnchor="middle">132 / 33 / 11 kV SUBSTATION – SINGLE LINE DIAGRAM</text>
                 <g fontFamily="Arial, sans-serif" fontSize="13" fill="#e9f3ff" fontWeight="bold">
                   <text x="32" y="153">132 kV</text><text x="88" y="219">132 kV BUS SECTION A</text><text x="965" y="219">132 kV BUS SECTION B</text>
