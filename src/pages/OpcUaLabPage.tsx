@@ -979,7 +979,6 @@ export const OpcUaLabPage: React.FC = () => {
   });
   return (
     <div style={{ backgroundColor: '#030B18', color: '#E9F3FF' }} className="space-y-3 pb-8 text-xs select-none overflow-x-hidden">
-      <LabFaultWorkbench lab="OPCUA_LAB" target={endpointUrl} exercises={guidedExercises} />
       {/* 1. HEADER BAR */}
       <div
         style={{ backgroundColor: '#07192C', borderColor: '#1B4B72' }}
@@ -1958,6 +1957,7 @@ export const OpcUaLabPage: React.FC = () => {
           )}
         </div>
       )}
+      <LabFaultWorkbench lab="OPCUA_LAB" target={endpointUrl} exercises={guidedExercises} />
     </div>
   );
 };

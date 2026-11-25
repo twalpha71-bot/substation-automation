@@ -1011,7 +1011,6 @@ export default function App() {
             }
           >
           {specialPage === 'SCHEME' ? <SchemePage onNavigate={navigate} /> : specialPage === 'BAY_MANAGER' ? <BayConfigurationManager /> : specialPage === 'ALARMS_EVENTS' ? <AlarmsEventsPage /> : specialPage === 'WIRESHARK' ? <WiresharkAnalyzerPage /> : testingGuidanceOpen ? <TestingGuidancePage /> : <>
-          {['SLD', 'SCADA', 'IED', 'FATSAT', 'FAULTS'].includes(deferredActiveTab) && <StationFaultWorkbench key={deferredActiveTab} context={deferredActiveTab} />}
           {deferredActiveTab === 'HERO' && <HeroDashboardPage />}
           {deferredActiveTab === 'OSI_MODEL' && <OsiModelPage />}
           {deferredActiveTab === 'IEC61850_ACADEMY' && <Iec61850AcademyPage />}
@@ -1032,6 +1031,7 @@ export default function App() {
           {deferredActiveTab === 'LEARNING' && <LearningAcademyPage />}
           {deferredActiveTab === 'ADMIN_DASHBOARD' && <AdminDashboardPage />}
           {deferredActiveTab === 'USER_PROFILE' && <UserProfilePage />}
+          {['SLD', 'SCADA', 'IED', 'FATSAT', 'FAULTS'].includes(deferredActiveTab) && <StationFaultWorkbench key={deferredActiveTab} context={deferredActiveTab} />}
           </>}
           </React.Suspense>
           </WorkspaceErrorBoundary>

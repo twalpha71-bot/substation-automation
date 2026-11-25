@@ -1270,7 +1270,6 @@ export const GooseLabPage: React.FC = () => {
 
   return (
     <div style={{ backgroundColor: '#020B16', color: '#E2F1FC' }} className="space-y-2.5 pb-4 text-xs select-none">
-      <LabFaultWorkbench key={gocb?.id} lab="GOOSE" target={`${gocb?.gocbRef || "No publisher"} - bound subscribers only; ${evaluatedNodes.filter(node => node.subscribed && membersFor(node.iedId).length === 0).length} unbound subscription(s) excluded from recovery`} exercises={guidedExercises} />
       {/* 1. TOP HEADER BAR MATCHING REFERENCE */}
       <div
         className="rounded-xl border px-4 py-2.5 flex flex-wrap items-center justify-between gap-3"
@@ -2374,6 +2373,7 @@ ${evaluatedNodes.filter(node => node.subscribed).map(node => {
           </div>
         </div>
       )}
+      <LabFaultWorkbench key={gocb?.id} lab="GOOSE" target={`${gocb?.gocbRef || "No publisher"} - bound subscribers only; ${evaluatedNodes.filter(node => node.subscribed && membersFor(node.iedId).length === 0).length} unbound subscription(s) excluded from recovery`} exercises={guidedExercises} />
     </div>
   );
 };

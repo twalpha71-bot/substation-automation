@@ -712,7 +712,6 @@ export const MmsLabPage: React.FC = () => {
   }));
   return (
     <div style={{ backgroundColor: '#020B16', color: '#E2F1FC' }} className="space-y-2.5 pb-4 text-xs select-none">
-      <LabFaultWorkbench key={selectedIed?.id} lab="MMS" target={selectedIed?.name || "No IED"} exercises={guidedExercises} />
       {/* 1. TOP HEADER BAR MATCHING REFERENCE */}
       <div
         className="rounded-xl border px-4 py-2.5 flex flex-wrap items-center justify-between gap-3"
@@ -1622,6 +1621,7 @@ export const MmsLabPage: React.FC = () => {
       )}
 
       {activeTab === 'DIAGNOSTICS' && renderScenarioPanel(false)}
+      <LabFaultWorkbench key={selectedIed?.id} lab="MMS" target={selectedIed?.name || "No IED"} exercises={guidedExercises} />
     </div>
   );
 };

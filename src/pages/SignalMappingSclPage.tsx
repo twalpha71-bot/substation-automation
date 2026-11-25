@@ -242,7 +242,7 @@ function RecloseTrainingPanel({
   const recloseConfigured = hasConfiguredFeederReclose(bay);
   const canStart = bay.breakerState === 'CLOSED' && phase === 'READY' && !effectiveFaultActive && !lockout86;
   const canReset = bay.breakerState === 'OPEN' && !effectiveFaultActive;
-  const buttonClass = 'rounded-md border border-[#26617A] bg-[#081F31] px-2.5 py-1.5 font-semibold text-[#B5ECFA] hover:border-cyan-400 disabled:opacity-40 disabled:hover:border-[#26617A]';
+  const buttonClass = 'rounded-md border border-[#26617A] bg-[#081F31] px-2 py-1 sm:px-2.5 sm:py-1.5 text-[10.5px] sm:text-xs font-semibold text-[#B5ECFA] hover:border-cyan-400 disabled:opacity-40 disabled:hover:border-[#26617A]';
   const phaseLabel = { READY: 'READY', DEAD_TIME: 'DEAD TIME', RETRIP_PENDING: 'RETRIP PENDING', RECLAIM: 'RECLAIM', LOCKOUT: 'LOCKOUT' }[phase];
   const displayReason =
     !faultActive && externalFaultActive && externalFaultLabel
@@ -320,6 +320,36 @@ export const SignalMappingSclPage: React.FC = () => {
 
   // Interactive Signal-Chain Fault Simulation (Section 11) — persisted in sessionStorage across page navigation
   const FAULTS_STORAGE_KEY = 'sas_signal_chain_faults_by_ied_v1';
+  const CLEARED_FAULTS_STORAGE_KEY = 'sas_signal_chain_cleared_trip_faults_v1';
+  const readClearedMap = (): Record<string, boolean> => {
+    try {
+      const raw = window.sessionStorage.getItem(CLEARED_FAULTS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {
+      // Ignore storage access errors
+    }
+    return {};
+  };
+  const setClearedFlag = (iedId: string, cleared: boolean) => {
+    try {
+      const map = readClearedMap();
+      if (cleared) {
+        map[iedId] = true;
+      } else {
+        delete map[iedId];
+      }
+      if (Object.keys(map).length > 0) {
+        window.sessionStorage.setItem(CLEARED_FAULTS_STORAGE_KEY, JSON.stringify(map));
+      } else {
+        window.sessionStorage.removeItem(CLEARED_FAULTS_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage write errors
+    }
+  };
   const [faultsByIed, setFaultsByIed] = useState<Record<string, IedFaultInjection>>(() => {
     try {
       const raw = window.sessionStorage.getItem(FAULTS_STORAGE_KEY);
@@ -427,8 +457,12 @@ export const SignalMappingSclPage: React.FC = () => {
       prevMap[bay.id] = isTripped;
 
       if (isInitialMount) {
-        // On mount, if store has an active trip with no stored fault, sync it once
-        if (isTripped && !faultsByIed[bay.iedId]) {
+        // On mount, if store has an active trip with no stored fault, only sync if the user did NOT already clear the fault
+        const clearedMap = readClearedMap();
+        const is86AlreadyReset = bay.masterTripLockout === false;
+        if (!isTripped && clearedMap[bay.iedId]) {
+          setClearedFlag(bay.iedId, false);
+        } else if (isTripped && !faultsByIed[bay.iedId] && !clearedMap[bay.iedId] && !is86AlreadyReset) {
           const activeFn = (bay.activeTripFunctions[0] || '').toLowerCase();
           const inferred =
             scenariosByIed[bay.iedId]?.find(s => activeFn && s.lcdText.toLowerCase() === activeFn) ||
@@ -441,7 +475,8 @@ export const SignalMappingSclPage: React.FC = () => {
       }
 
       if (wasTripped && !isTripped) {
-        // Trip was cleared externally (SLD or Protection Simulation panel) -> clear matching trip fault
+        // Trip was cleared externally (SLD or Protection Simulation panel) -> clear matching trip fault & cleared flag
+        setClearedFlag(bay.iedId, false);
         const curFault = (nextFaults ?? faultsByIed)[bay.iedId];
         if (curFault?.scenario.tripsBreaker) {
           const copy = { ...(nextFaults ?? faultsByIed) };
@@ -449,7 +484,8 @@ export const SignalMappingSclPage: React.FC = () => {
           nextFaults = copy;
         }
       } else if (!wasTripped && isTripped) {
-        // Trip was triggered externally (SLD or Protection Simulation panel) -> reflect in dropdown once
+        // Brand-new trip triggered externally (SLD or Protection Simulation panel) -> clear old flag and reflect once
+        setClearedFlag(bay.iedId, false);
         const curFault = (nextFaults ?? faultsByIed)[bay.iedId];
         if (!curFault) {
           const activeFn = (bay.activeTripFunctions[0] || '').toLowerCase();
@@ -484,6 +520,7 @@ export const SignalMappingSclPage: React.FC = () => {
     if (modeOrId === 'NONE') {
       const bayId = traceBay.id;
       const iedId = traceBay.iedId;
+      setClearedFlag(iedId, false);
       const hadBreakerTrip = Boolean(activeFault?.scenario.tripsBreaker || traceBay.protectionTripActive || traceBay.masterTripLockout);
       setFaultsByIed(previous => {
         const next = { ...previous };
@@ -529,6 +566,7 @@ export const SignalMappingSclPage: React.FC = () => {
     if (!target) return;
     setSelectedPointId(target.id);
     setSelectedCatalogNo(target.catalogNumber);
+    setClearedFlag(traceBay.iedId, false);
     setFaultsByIed(previous => ({ ...previous, [traceBay.iedId]: injectIedFault(scenario, signals) }));
     if (scenario.tripsBreaker) {
       triggerProtectionTrip(traceBay.id, scenario.lcdText);
@@ -843,7 +881,7 @@ export const SignalMappingSclPage: React.FC = () => {
               borderColor: viewMode === 'CATALOGUE_50' ? '#00E5FF' : '#1E466E',
               boxShadow: viewMode === 'CATALOGUE_50' ? '0 0 18px rgba(0, 229, 255, 0.55)' : 'none',
             }}
-            className="px-4 py-2 rounded-lg text-xs sm:text-[13px] font-extrabold border transition"
+            className="px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-lg text-[11px] sm:text-[13px] font-extrabold border transition"
           >
             50 Common SAS Signals Master Catalogue
           </button>
@@ -857,7 +895,7 @@ export const SignalMappingSclPage: React.FC = () => {
               borderColor: viewMode === 'INSTANTIATED_BAY' ? '#00E5FF' : '#1E466E',
               boxShadow: viewMode === 'INSTANTIATED_BAY' ? '0 0 18px rgba(0, 229, 255, 0.55)' : 'none',
             }}
-            className="px-4 py-2 rounded-lg text-xs sm:text-[13px] font-bold border transition"
+            className="px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-lg text-[11px] sm:text-[13px] font-bold border transition"
           >
             Live Per-Bay Signal Mapping ({signals.length} Total Points)
           </button>
@@ -871,7 +909,7 @@ export const SignalMappingSclPage: React.FC = () => {
               borderColor: viewMode === 'SCL_WORKSPACE' ? '#00E5FF' : '#1E466E',
               boxShadow: viewMode === 'SCL_WORKSPACE' ? '0 0 18px rgba(0, 229, 255, 0.55)' : 'none',
             }}
-            className="px-4 py-2 rounded-lg text-xs sm:text-[13px] font-bold border transition"
+            className="px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-lg text-[11px] sm:text-[13px] font-bold border transition"
           >
             SCL XML Engineering Workspace (ICD / IID / SCD / CID)
           </button>
@@ -960,6 +998,7 @@ export const SignalMappingSclPage: React.FC = () => {
           externalFaultLabel={activeFault?.scenario.label}
           onClearExternalFault={() => {
             const iedId = traceBay.iedId;
+            setClearedFlag(iedId, true);
             setFaultsByIed((previous) => {
               const next = { ...previous };
               delete next[iedId];
@@ -1218,7 +1257,7 @@ export const SignalMappingSclPage: React.FC = () => {
               })}
             </div>
 
-            <div className="relative min-w-[250px] sm:min-w-[290px]">
+            <div className="relative w-full sm:w-auto sm:min-w-[260px]">
               <Search className="w-3.5 h-3.5 text-[#77E7FF] absolute left-3 top-2" />
               <input
                 type="text"
@@ -1536,14 +1575,7 @@ export const SignalMappingSclPage: React.FC = () => {
                 <h3 className="text-xs sm:text-[13px] font-extrabold text-white">IED Signal Chain Details</h3>
               </div>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0, 1fr) 168px",
-                  gap: "10px",
-                  alignItems: "stretch",
-                }}
-              >
+              <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_215px] xl:grid-cols-[minmax(0,1fr)_172px] gap-2.5 items-stretch">
                 {/* Left Metadata List */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "3px", fontSize: "10.2px" }}>
                   {[
@@ -1609,7 +1641,7 @@ export const SignalMappingSclPage: React.FC = () => {
                     backgroundColor: '#041222',
                     borderColor: '#1E5280',
                   }}
-                  className="sm:col-span-5 rounded-xl border p-2.5 flex flex-col justify-between"
+                  className="rounded-xl border p-2.5 flex flex-col justify-between"
                 >
                   <div className="text-[10.5px] font-extrabold text-white border-b border-[#163A5C] pb-1.5 mb-2 text-center">
                     Signal Path (IED Signal Chain)

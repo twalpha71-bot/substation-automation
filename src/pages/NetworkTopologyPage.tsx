@@ -1352,7 +1352,6 @@ export const NetworkTopologyPage: React.FC = () => {
           : 'space-y-3'
       }`}
     >
-      <LabFaultWorkbench lab="NETWORK" target="PRP station LANs / eight-node HSR ring" exercises={guidedNetworkExercises} />
       {/* 1. PREMIUM HEADER & HORIZONTAL TOOLBAR */}
       <div className="rounded-xl bg-gradient-to-r from-[#061529] via-[#081A30] to-[#061529] border border-[#183B5E] px-3.5 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.55)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -8548,6 +8547,7 @@ export const NetworkTopologyPage: React.FC = () => {
           </div>
         </div>
       )}
+      <LabFaultWorkbench lab="NETWORK" target="PRP station LANs / eight-node HSR ring" exercises={guidedNetworkExercises} />
     </div>
   );
 };

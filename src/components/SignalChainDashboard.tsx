@@ -651,7 +651,11 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
     if (activeFault) setTroubleshootExpanded(true);
   }, [activeFault?.scenario.id, bay.id]);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const sceneOuterRef = useRef<HTMLDivElement | null>(null);
   const diagramWrapRef = useRef<HTMLDivElement | null>(null);
+  const [fitToScreen, setFitToScreen] = useState<boolean>(true);
+  const [fitScale, setFitScale] = useState<number>(1);
+  const [isCompactViewport, setIsCompactViewport] = useState<boolean>(false);
   const portRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const setPortRef = (id: string) => (el: HTMLSpanElement | null) => {
     portRefs.current[id] = el;
@@ -832,23 +836,34 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
   const isDefaultMiComP143 = iedImageSrc === 'assets/signal-chain/protection-ied.png';
 
   useEffect(() => {
+    const updateFitScale = () => {
+      const outer = sceneOuterRef.current;
+      if (!outer) return;
+      const availW = Math.max(260, outer.clientWidth - 24);
+      const compact = availW < 1140;
+      setIsCompactViewport(compact);
+      const nextScale = compact && fitToScreen ? Math.max(0.25, Math.min(1, availW / 1140)) : 1;
+      setFitScale((prev) => (Math.abs(prev - nextScale) < 0.005 ? prev : nextScale));
+    };
     const measurePorts = () => {
+      updateFitScale();
       const wrap = diagramWrapRef.current;
       if (!wrap) return;
       const wr = wrap.getBoundingClientRect();
-      if (wr.width < 100) return;
+      const naturalW = wrap.offsetWidth || Math.round(wr.width);
+      const naturalH = wrap.offsetHeight || Math.round(wr.height);
+      if (naturalW < 100) return;
+      const activeScale = wr.width > 0 && naturalW > 0 ? wr.width / naturalW : 1;
       const next: Record<string, { x: number; y: number }> = {};
       Object.entries(portRefs.current).forEach(([k, el]) => {
         if (!el) return;
         const r = el.getBoundingClientRect();
         next[k] = {
-          x: r.left - wr.left + r.width / 2,
-          y: r.top - wr.top + r.height / 2,
+          x: (r.left - wr.left + r.width / 2) / activeScale,
+          y: (r.top - wr.top + r.height / 2) / activeScale,
         };
       });
-      const nextW = Math.round(wr.width);
-      const nextH = Math.round(wr.height);
-      setDiagSize((prev) => (prev.w === nextW && prev.h === nextH ? prev : { w: nextW, h: nextH }));
+      setDiagSize((prev) => (prev.w === naturalW && prev.h === naturalH ? prev : { w: naturalW, h: naturalH }));
       setPortCoords((prev) => {
         const prevKeys = Object.keys(prev);
         const nextKeys = Object.keys(next);
@@ -865,6 +880,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
     const t1 = window.setTimeout(measurePorts, 150);
     const t2 = window.setTimeout(measurePorts, 450);
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measurePorts) : null;
+    if (ro && sceneOuterRef.current) ro.observe(sceneOuterRef.current);
     if (ro && diagramWrapRef.current) ro.observe(diagramWrapRef.current);
     window.addEventListener('resize', measurePorts);
     return () => {
@@ -873,7 +889,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
       ro?.disconnect();
       window.removeEventListener('resize', measurePorts);
     };
-  }, [bay.id, iedImageSrc, networkRedundancyMode, imgLoadTick]);
+  }, [bay.id, iedImageSrc, networkRedundancyMode, imgLoadTick, fitToScreen]);
 
   // Control SVG native SMIL animations on Pause/Resume
   useEffect(() => {
@@ -1011,7 +1027,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
     <div className="space-y-3">
       {/* Top Signal Chain Header Bar matching Reference */}
       <div
-        className="sas-signal-chain-summary rounded-xl border px-4 py-2.5 flex flex-wrap items-center justify-between gap-3"
+        className="sas-signal-chain-summary rounded-xl border px-2.5 sm:px-4 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 sm:gap-3"
         style={{
           background: 'linear-gradient(90deg, #041628 0%, #07223B 50%, #041628 100%)',
           borderColor: '#00DFFF',
@@ -1029,7 +1045,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
               aria-label="Select Bay / IED"
               value={bay.id}
               onChange={(e) => onSelectBay(e.target.value)}
-              className="px-2.5 py-1 rounded-lg border border-[#00DFFF] bg-[#04182B] text-white font-mono text-[11px] font-bold focus:outline-none focus:ring-1 focus:ring-[#00E5FF]"
+              className="w-full sm:w-auto max-w-full px-2 py-1 rounded-lg border border-[#00DFFF] bg-[#04182B] text-white font-mono text-[10.5px] sm:text-[11px] font-bold focus:outline-none focus:ring-1 focus:ring-[#00E5FF]"
             >
               {bays.map((b) => {
                 const matchedIed = ieds.find((x) => x.id === b.iedId);
@@ -1087,7 +1103,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
         </div>
 
         {/* Right KPI Status Pills + Quick Breaker Toggle */}
-        <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[10px] sm:text-[11px] font-mono">
           <button
             type="button"
             onClick={() => {
@@ -1137,7 +1153,8 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
 
       {/* Main 6-Device Hardware Signal Chain + Physical SVG Cabling */}
       <div
-        className="sas-signal-chain-scene rounded-xl border p-3 relative overflow-x-auto"
+        ref={sceneOuterRef}
+        className={`sas-signal-chain-scene rounded-xl border p-2.5 sm:p-3 relative ${fitScale < 1 ? 'overflow-hidden' : 'overflow-x-auto'}`}
         style={{
           borderColor: '#00DFFF',
           background: 'radial-gradient(ellipse 62% 44% at 50% 38%, rgba(28, 92, 126, 0.74) 0%, rgba(14, 52, 78, 0.86) 58%, rgba(10, 38, 58, 0.92) 100%)',
@@ -1150,7 +1167,27 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
           .sas-paused .sas-led-blink { animation-play-state: paused; }
         `}</style>
 
-        <div ref={diagramWrapRef} className={`min-w-[1140px] relative ${playing ? '' : 'sas-paused'}`}>
+        {isCompactViewport && (
+          <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-mono">
+            <span className="text-[#9ED8F6]">
+              {fitToScreen ? `Full 6-Device Architecture (${Math.round(fitScale * 100)}% Fit)` : '100% Zoom (Swipe Left/Right)'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setFitToScreen((v) => !v)}
+              className="px-2 py-0.5 rounded border border-[#00DFFF] bg-[#04182B] text-[#7DD3FC] font-bold"
+            >
+              {fitToScreen ? '100% Zoom' : 'Fit to Screen'}
+            </button>
+          </div>
+        )}
+
+        <div style={fitScale < 1 ? { height: Math.ceil(diagSize.h * fitScale), overflow: 'hidden' } : undefined}>
+        <div
+          ref={diagramWrapRef}
+          className={`min-w-[1140px] relative ${playing ? '' : 'sas-paused'}`}
+          style={fitScale < 1 ? { width: 1140, transform: `scale(${fitScale})`, transformOrigin: 'top left' } : undefined}
+        >
           {/* 6 Device Columns — Side Ports Hug Exact Hardware Chassis Edges (Measured via ResizeObserver) */}
           <div className={`grid grid-cols-6 gap-2.5 items-start relative z-10 ${showGooseDemo ? 'pb-[414px]' : 'pb-[140px]'}`}>
             {/* DEVICE 1: FIELD I/O */}
@@ -1852,6 +1889,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
             </span>
           </div>
         </div>
+        </div>
       </div>
 
       {/* INTERACTIVE STEP-BY-STEP FAULT TROUBLESHOOTING & ISOLATION GUIDE (Shown when a fault is active) */}
@@ -1927,7 +1965,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
                 </div>
 
                 {/* 5-Step Interactive Fault Isolation Checklist */}
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
                   {guide.steps.map((s) => {
                     const checked = Boolean(checkedTroubleshootSteps[s.step]);
                     return (
@@ -1990,7 +2028,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
       })()}
 
       {/* MIDDLE ROW: 3 Monitoring Panels */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.45fr_1fr] gap-3">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.45fr_1fr] gap-3">
         {/* Panel 1: Live Signal Trace */}
         <div className="rounded-xl border border-[#0E6A94] bg-[#041626] overflow-hidden shadow-lg">
           <div className="px-3 py-2 border-b border-[#0E6A94] bg-gradient-to-r from-[#07304A] to-[#041829] flex items-center justify-between">
@@ -2037,7 +2075,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
             </span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-[10.5px] text-left border-collapse">
+            <table className="w-full min-w-[560px] text-[10.5px] text-left border-collapse whitespace-nowrap">
               <thead>
                 <tr className="bg-[#092740] text-[#BAE6FD] border-b border-[#164463]">
                   <th className="py-1.5 px-2">Signal (IEC 61850)</th>
@@ -2116,7 +2154,7 @@ export const SignalChainDashboard: React.FC<SignalChainDashboardProps> = ({
             </span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-[10.5px] text-left border-collapse">
+            <table className="w-full min-w-[560px] text-[10.5px] text-left border-collapse whitespace-nowrap">
               <thead>
                 <tr className="bg-[#092740] text-[#BAE6FD] border-b border-[#164463]">
                   <th className="py-1.5 px-2">Protocol</th>

@@ -814,7 +814,6 @@ export const Iec104LabPage: React.FC = () => {
   }));
   return (
     <div className="space-y-3 pb-8 text-[#E8F4FF]">
-      <LabFaultWorkbench lab="IEC104_LAB" target="Four-device protocol training architecture" exercises={guidedExercises} />
       {/* 1. TOP HEADER BAR */}
       <div
         className="rounded-xl border px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5"
@@ -1849,6 +1848,7 @@ export const Iec104LabPage: React.FC = () => {
           )}
         </div>
       )}
+      <LabFaultWorkbench lab="IEC104_LAB" target="Four-device protocol training architecture" exercises={guidedExercises} />
     </div>
   );
 };
