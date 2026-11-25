@@ -594,13 +594,20 @@ export const Iec104LabPage: React.FC = () => {
       if (!wrap) return;
       const wr = wrap.getBoundingClientRect();
       if (wr.width < 100) return;
+      const baseW = wrap.offsetWidth || wr.width;
+      const baseH = wrap.offsetHeight || wr.height;
+      const scaleX = wr.width / baseW || 1;
+      const scaleY = wr.height / baseH || 1;
       const next: Record<string, { x: number; y: number }> = {};
       Object.entries(portRefs.current).forEach(([k, el]) => {
         if (!el) return;
         const r = el.getBoundingClientRect();
-        next[k] = { x: r.left - wr.left + r.width / 2, y: r.top - wr.top + r.height / 2 };
+        next[k] = {
+          x: (r.left - wr.left + r.width / 2) / scaleX,
+          y: (r.top - wr.top + r.height / 2) / scaleY,
+        };
       });
-      setStageSize({ w: Math.round(wr.width), h: Math.round(wr.height) });
+      setStageSize({ w: Math.round(baseW), h: Math.round(baseH) });
       setPorts(next);
     };
     measure();
@@ -1555,7 +1562,7 @@ export const Iec104LabPage: React.FC = () => {
             <div className="mt-2 rounded-xl border border-[#17466B] bg-[#041424]/95 px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
               <div className="flex items-center gap-2">
                 <span className={`w-2.5 h-2.5 rounded-full ${endToEndOk ? 'bg-[#22C55E] shadow-[0_0_8px_#22C55E]' : 'bg-[#EF4444] shadow-[0_0_8px_#EF4444]'}`} />
-                <span className="font-extrabold text-[#4ADE80]">ACTIVE PATH:</span>
+                <span className="font-extrabold text-[#4ADE80] shrink-0 whitespace-nowrap">ACTIVE PATH:</span>
                 <span className="text-[#E0F2FE] font-semibold">
                   {activeIed.fullName} (MMS/102) → RSP35 (Port {activeIed.portNum} → P5) → GTW-01 (ETH0 → ETH1) → RCC/SLDC (IEC-104/2404)
                 </span>

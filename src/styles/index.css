@@ -1021,3 +1021,52 @@ html{scroll-behavior:auto}.sas-app-shell{background:var(--sas-bg);color:var(--sa
 .sas-app-header .sas-top-group-trigger.is-active:hover {
   background: #0a3550 !important;
 }
+
+
+/* === GLOBAL MOBILE & TABLET COMPACT VIEW (<= 1180px) === */
+@media (max-width: 1180px) {
+  html, body, #root {
+    max-width: 100vw !important;
+    overflow-x: clip !important;
+  }
+
+  /* Prevent flex/grid children from overflowing mobile screens */
+  main:not(:has(.iedscout-app)),
+  main:not(:has(.iedscout-app)) > div,
+  main:not(:has(.iedscout-app)) section,
+  main:not(:has(.iedscout-app)) article,
+  main:not(:has(.iedscout-app)) [class*="grid"] > *,
+  main:not(:has(.iedscout-app)) [class*="flex"] > * {
+    min-width: 0;
+  }
+
+  /* Fit ALL standalone SVG diagrams (GOOSE, Network Topology, PRP/HSR/RSTP, VLAN, MMS, OPC UA, Tests 2-15) to 100% mobile width */
+  main:not(:has(.iedscout-app)) svg[viewBox]:not(.lucide):not(.recharts-surface) {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+  main:not(:has(.iedscout-app)) :not(.sas-compact-arch-inner) > svg[viewBox]:not(.lucide):not(.recharts-surface) {
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Remove fixed min-w-[...] on wide diagram wrappers (GooseLabPage 590px, NetworkTopologyPage 780px-960px, etc.) except inside CompactArchitectureFrame */
+  main:not(:has(.iedscout-app)) div[class*="min-w-["]:not(.sas-compact-arch-inner):not(.sas-compact-arch-inner *) {
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Stack 2-column Rack-A / Rack-B diagrams cleanly on mobile phones */
+  @media (max-width: 768px) {
+    main:not(:has(.iedscout-app)) div.grid-cols-2[class*="min-w-["]:not(.sas-compact-arch-inner *) {
+      grid-template-columns: 1fr !important;
+    }
+  }
+
+  /* Compact padding & spacing for mobile cards */
+  main:not(:has(.iedscout-app)) .p-5,
+  main:not(:has(.iedscout-app)) .p-6 {
+    padding: 0.75rem !important;
+  }
+}
