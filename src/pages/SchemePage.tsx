@@ -2,6 +2,14 @@ import React from 'react';
 import { ClipboardCheck } from 'lucide-react';
 import type { ActiveWorkspaceTab } from '../simulation/useSubstationStore';
 import { IedScoutTool } from '../components/test-tools/IedScoutTool';
+import { IecBrowserTool } from '../components/test-tools/IecBrowserTool';
+import { SclValidationTool } from '../components/test-tools/SclValidationTool';
+import { ModScanTool } from '../components/test-tools/ModScanTool';
+import { ModbusSlavePollTool } from '../components/test-tools/ModbusSlavePollTool';
+import { IecTestTool } from '../components/test-tools/IecTestTool';
+import { VinciProtocolTool } from '../components/test-tools/VinciProtocolTool';
+import { HiViewTool } from '../components/test-tools/HiViewTool';
+import { HyperTerminalTool } from '../components/test-tools/HyperTerminalTool';
 
 const TOOL_META: Record<string, { title: string; subtitle: string }> = {
   IEDSCOUT: { title: 'IEDScout (OMICRON)', subtitle: 'IEC 61850 MMS Client, SBO Control, RCB Reporting & GOOSE Simulator' },
@@ -26,6 +34,38 @@ export default function SchemePage({ activeTool = 'IEDSCOUT' }: SchemePageProps)
     return <IedScoutTool />;
   }
 
+  if (activeTool === 'IEC_BROWSER') {
+    return <IecBrowserTool />;
+  }
+
+  if (activeTool === 'SCL_VALIDATOR') {
+    return <SclValidationTool />;
+  }
+
+  if (activeTool === 'MODSCAN') {
+    return <ModScanTool />;
+  }
+
+  if (activeTool === 'MODBUS_SLAVE_POLL') {
+    return <ModbusSlavePollTool />;
+  }
+
+  if (activeTool === 'IEC_TEST') {
+    return <IecTestTool />;
+  }
+
+  if (activeTool === 'VINCI') {
+    return <VinciProtocolTool />;
+  }
+
+  if (activeTool === 'HIVIEW') {
+    return <HiViewTool />;
+  }
+
+  if (activeTool === 'HYPER_TERMINAL') {
+    return <HyperTerminalTool />;
+  }
+
   const meta = TOOL_META[activeTool] || TOOL_META.IEDSCOUT;
 
   return (
@@ -41,18 +81,9 @@ export default function SchemePage({ activeTool = 'IEDSCOUT' }: SchemePageProps)
           </div>
         </div>
         <span className="rounded-full border border-[#00DFFF]/40 bg-[#062238] px-3 py-1 font-mono text-[11px] font-bold text-[#7DD3FC]">
-          SAS Test Tools · Ready for Implementation
+          SAS Test Tools · Ready
         </span>
       </header>
-
-      <div className="flex-1 rounded-xl border border-dashed border-[#1E4B75] bg-[#030D1B]/70 flex items-center justify-center p-8 text-center">
-        <div className="max-w-md space-y-1.5">
-          <div className="text-sm font-bold text-white">{meta.title} Workspace</div>
-          <p className="text-xs text-[#8BB3D4]">
-            Blank workspace ready. Select <strong>IEDScout (OMICRON)</strong> or another tool from the <strong>SAS Test Tools</strong> dropdown.
-          </p>
-        </div>
-      </div>
     </section>
   );
 }

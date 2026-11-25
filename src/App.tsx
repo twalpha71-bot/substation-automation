@@ -246,9 +246,25 @@ export default function App() {
     { id: 'HYPER_TERMINAL', label: 'Hyper Terminal', subtitle: 'Serial / Console CLI Terminal' },
   ] as const;
   type SasTestToolId = typeof SAS_TEST_TOOLS[number]['id'];
-  const [activeTestTool, setActiveTestTool] = useState<SasTestToolId>('IEDSCOUT');
+  const validToolIds = SAS_TEST_TOOLS.map((t) => t.id) as readonly string[];
+  const resolveInitialTestTool = (): SasTestToolId => {
+    const hashMatch = window.location.hash.match(/^#\/workspace\/SCHEME\/([A-Z0-9_]+)$/);
+    if (hashMatch && validToolIds.includes(hashMatch[1])) {
+      return hashMatch[1] as SasTestToolId;
+    }
+    try {
+      const saved = window.localStorage.getItem('sas_active_test_tool');
+      if (saved && validToolIds.includes(saved)) {
+        return saved as SasTestToolId;
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    return 'IEDSCOUT';
+  };
+  const [activeTestTool, setActiveTestTool] = useState<SasTestToolId>(resolveInitialTestTool);
   const [specialPage, setSpecialPage] = useState<'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME' | null>(() => {
-    const m = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK|BAY_MANAGER|SCHEME)$/);
+    const m = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK|BAY_MANAGER|SCHEME)(?:\/[A-Z0-9_]+)?$/);
     return m ? (m[1] as 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME') : null;
   });
   // Quietly warm up the most-used workspace chunks after first paint so page switches are instant.
@@ -261,15 +277,16 @@ export default function App() {
     }, 900);
     return () => window.clearTimeout(timer);
   }, []);
-  const openSpecialPage = (page: 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME') => {
+  const openSpecialPage = (page: 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME', toolIdOverride?: SasTestToolId) => {
     clearScadaVisitOnExit();
     setTopMenuOpen(null);
     if (page === 'SCHEME') {
       setMobileNavOpen(false);
       setNavSearch('');
     }
+    const targetHash = page === 'SCHEME' ? `#/workspace/SCHEME/${toolIdOverride || activeTestTool}` : `#/workspace/${page}`;
     const commit = () => {
-      window.history.pushState(null, '', `#/workspace/${page}`);
+      window.history.pushState(null, '', targetHash);
       startPageTransition(() => {
         setSpecialPage(page);
         setTestingGuidanceOpen(false);
@@ -291,14 +308,28 @@ export default function App() {
   };
   const openTestTool = (toolId: SasTestToolId) => {
     setActiveTestTool(toolId);
-    openSpecialPage('SCHEME');
+    try {
+      window.localStorage.setItem('sas_active_test_tool', toolId);
+    } catch {
+      // Ignore storage errors
+    }
+    openSpecialPage('SCHEME', toolId);
   };
   // Deep-link the active workspace: refreshing /workspace/GOOSE stays in GOOSE Lab.
   useLayoutEffect(() => {
     const restoreLocation = () => {
-      const special = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK|BAY_MANAGER|SCHEME)$/);
+      const special = window.location.hash.match(/^#\/workspace\/(ALARMS_EVENTS|WIRESHARK|BAY_MANAGER|SCHEME)(?:\/([A-Z0-9_]+))?$/);
       if (special) {
         const targetSpecial = special[1] as 'ALARMS_EVENTS' | 'WIRESHARK' | 'BAY_MANAGER' | 'SCHEME';
+        const hashTool = special[2];
+        if (targetSpecial === 'SCHEME' && hashTool && validToolIds.includes(hashTool)) {
+          setActiveTestTool(hashTool as SasTestToolId);
+          try {
+            window.localStorage.setItem('sas_active_test_tool', hashTool);
+          } catch {
+            // Ignore storage errors
+          }
+        }
         preloadRoute(targetSpecial);
         startPageTransition(() => {
           setSpecialPage(targetSpecial);
