@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSubstationStore } from '../../simulation/useSubstationStore';
-import { HiOsWorkspace } from './HiOsWorkspace';
+import { DEFAULT_HIOS_VLANS, HiOsVlanRow, HiOsWorkspace } from './HiOsWorkspace';
 
 // ============================================================================
 // Hirschmann HiView 4.2 + Embedded HiOS-2A-09.4.03 Web GUI + SSH CLI Window
@@ -310,6 +310,7 @@ interface PersistedHiView {
   disabledPorts: Record<string, boolean>;
   ipOverrides: Record<string, { ip: string; netmask: string; gateway: string }>;
   pwChangedMap: Record<string, boolean>;
+  vlansBySwitch?: Record<string, HiOsVlanRow[]>;
 }
 
 const STORAGE_KEY = 'sas_hiview_v3_state';
@@ -507,6 +508,7 @@ export const HiViewTool: React.FC = () => {
   const [igmpGlobal, setIgmpGlobal] = useState<boolean>(() => init.igmpGlobal ?? true);
   const [gooseFilter, setGooseFilter] = useState<boolean>(() => init.gooseFilter ?? true);
   const [disabledPorts, setDisabledPorts] = useState<Record<string, boolean>>(() => init.disabledPorts || {});
+  const [vlansBySwitch, setVlansBySwitch] = useState<Record<string, HiOsVlanRow[]>>(() => init.vlansBySwitch || {});
   const [syslogs, setSyslogs] = useState<SyslogRow[]>([
     { id: 1, time: fmtTs(), sev: 'INFO', msg: 'HiView 4.2 ready. Use Discovery tab or bottom URL bar to manage Hirschmann devices.' },
   ]);
@@ -528,8 +530,9 @@ export const HiViewTool: React.FC = () => {
       disabledPorts,
       ipOverrides,
       pwChangedMap,
+      vlansBySwitch,
     });
-  }, [activeTabId, savedDeviceIds, openWebIds, urlInput, hiosPage, ringBroken, igmpGlobal, gooseFilter, disabledPorts, ipOverrides, pwChangedMap]);
+  }, [activeTabId, savedDeviceIds, openWebIds, urlInput, hiosPage, ringBroken, igmpGlobal, gooseFilter, disabledPorts, ipOverrides, pwChangedMap, vlansBySwitch]);
 
   useEffect(() => {
     const close = () => {
@@ -602,7 +605,7 @@ export const HiViewTool: React.FC = () => {
       return;
     }
     if (low === 'help' || low === '?') {
-      next.push('Commands: show sfp | show sysinfo | show interface | show vlan | show mrp | show prp | show ptp | show lldp | show port-security | ping <ip> | clear | exit');
+      next.push('Commands: show sfp | show sysinfo | show interface | show vlan | vlan add <id> <name> | vlan del <id> | show mrp | show prp | show ptp | show lldp | show port-security | ping <ip> | clear | exit');
     } else if (low === 'show sfp') {
       next.push('       Part ID          Module type  Temp[C/F] TxPower[dBm/mW]  RxPower[dBm/mW]');
       next.push('Intf   Serial number    Connector');
@@ -634,12 +637,54 @@ export const HiViewTool: React.FC = () => {
       next.push(`PTPv2 Status   : ${cliSwitch.ptpStatus}`);
       next.push('Profile        : IEC 61850-9-3 Power Profile (Offset +18 ns)');
     } else if (low === 'show vlan') {
-      next.push('VLAN ID  Name                 Ports               Status');
-      next.push('-------  -------------------  ------------------  ------');
-      next.push('10       StationBus_MMS       1/1,1/2,1/5,1/6     Active');
-      next.push('20       GOOSE_Protection     1/1-1/4,1/5         Active');
-      next.push('50       ProcessBus_SV        1/3,1/4             Active');
-      next.push('100      Management_HiView    1/1,1/2,1/8         Active');
+      const swVlans = vlansBySwitch[cliSwitch.id] || DEFAULT_HIOS_VLANS;
+      next.push('VLAN ID  Name                 Prio  Ports                          Status');
+      next.push('-------  -------------------  ----  -----------------------------  ------');
+      swVlans.forEach((v) => {
+        const members = Object.entries(v.ports)
+          .filter(([, mode]) => mode !== '-')
+          .map(([p, mode]) => `${p}(${mode})`)
+          .join(',');
+        next.push(
+          `${String(v.vid).padEnd(8)} ${v.name.slice(0, 19).padEnd(20)} ${String(v.priority).padEnd(5)} ${(members || '-').slice(0, 29).padEnd(30)} Active`
+        );
+      });
+    } else if (low.startsWith('vlan add ')) {
+      const parts = cmd.split(/\s+/);
+      const vid = Number(parts[2]);
+      const vname = parts[3] || `VLAN_${vid}`;
+      if (!Number.isInteger(vid) || vid < 2 || vid > 4094) {
+        next.push('% Usage: vlan add <2-4094> <name>');
+      } else {
+        const cur = vlansBySwitch[cliSwitch.id] || DEFAULT_HIOS_VLANS;
+        if (cur.some((v) => v.vid === vid)) {
+          next.push(`% VLAN ${vid} already exists.`);
+        } else {
+          const added: HiOsVlanRow = {
+            vid,
+            name: vname,
+            priority: 4,
+            ports: { '1/1': 'T', '1/2': 'T', '1/3': '-', '1/4': '-', '1/5': '-', '1/6': '-', '1/7': '-', '1/8': '-' },
+          };
+          setVlansBySwitch((prev) => ({ ...prev, [cliSwitch.id]: [...cur, added] }));
+          setNvmDirty(true);
+          next.push(`VLAN ${vid} (${vname}) created and synced with HiOS Web GUI.`);
+        }
+      }
+    } else if (low.startsWith('vlan del ')) {
+      const vid = Number(cmd.split(/\s+/)[2]);
+      if (!Number.isInteger(vid) || vid === 1) {
+        next.push('% Cannot delete default VLAN 1. Usage: vlan del <2-4094>');
+      } else {
+        const cur = vlansBySwitch[cliSwitch.id] || DEFAULT_HIOS_VLANS;
+        if (!cur.some((v) => v.vid === vid)) {
+          next.push(`% VLAN ${vid} not found.`);
+        } else {
+          setVlansBySwitch((prev) => ({ ...prev, [cliSwitch.id]: cur.filter((v) => v.vid !== vid) }));
+          setNvmDirty(true);
+          next.push(`VLAN ${vid} deleted from switch configuration.`);
+        }
+      }
     } else if (low === 'show prp' || low === 'show hsr') {
       next.push(`Redundancy Protocol : ${cliSwitch.redundancyRole}`);
       next.push(`LAN A / Ring Port 1 : UP (0% packet loss, 0 duplicate drops)`);
@@ -735,7 +780,7 @@ export const HiViewTool: React.FC = () => {
   };
 
   const handleExportSwitchConfigXml = (sw: SwitchRecord) => {
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<HiOSConfig version="${sw.firmware}" product="${sw.model}">\n  <System name="${sw.name}" mac="${sw.mac}" />\n  <Network ip="${sw.ip}" netmask="${sw.netmask}" gateway="${sw.gateway}" />\n  <Redundancy role="${sw.redundancyRole}" mrp="enabled" prp="enabled" />\n  <TimeSync ptp="${sw.ptpStatus}" profile="IEC-61850-9-3" />\n  <VLANs>10,20,50,100</VLANs>\n</HiOSConfig>`;
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<HiOSConfig version="${sw.firmware}" product="${sw.model}">\n  <System name="${sw.name}" mac="${sw.mac}" />\n  <Network ip="${sw.ip}" netmask="${sw.netmask}" gateway="${sw.gateway}" />\n  <Redundancy role="${sw.redundancyRole}" mrp="enabled" prp="enabled" />\n  <TimeSync ptp="${sw.ptpStatus}" profile="IEC-61850-9-3" />\n  <VLANs>${(vlansBySwitch[sw.id] || DEFAULT_HIOS_VLANS).map((v) => v.vid).join(',')}</VLANs>\n</HiOSConfig>`;
     const blob = new Blob([xml], { type: 'application/xml;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1451,6 +1496,10 @@ export const HiViewTool: React.FC = () => {
                       ? `${activeWebSwitch.name}: Fiber break on Ring Port 1/2 — MRP failover < 8 ms.`
                       : `${activeWebSwitch.name}: Ring Port 1/2 restored — MRP Ring CLOSED.`
                   );
+                }}
+                vlans={vlansBySwitch[activeWebSwitch.id] || DEFAULT_HIOS_VLANS}
+                onChangeVlans={(nextVlans) => {
+                  setVlansBySwitch((prev) => ({ ...prev, [activeWebSwitch.id]: nextVlans }));
                 }}
                 disabledPorts={disabledPorts}
                 onTogglePort={(pid) => {

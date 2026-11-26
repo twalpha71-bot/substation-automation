@@ -52,6 +52,9 @@ export type ActiveWorkspaceTab =
   | 'CCNA_ACADEMY'
   | 'SLD'
   | 'SCADA'
+  | 'CRP_132KV'
+  | 'VCB_33KV'
+  | 'VCB_11KV'
   | 'IED'
   | 'IED_SIGNAL_CHAIN'
   | 'NETWORK'
@@ -831,7 +834,7 @@ export const useSubstationStore = create<SubstationStoreState>()(persist((set, g
   activeTab: (() => {
     if (typeof window === 'undefined') return 'HERO' as ActiveWorkspaceTab;
     const requested = window.location.hash.match(/^#\/workspace\/([A-Z0-9_]+)$/)?.[1];
-    const valid: ActiveWorkspaceTab[] = ['HERO','OSI_MODEL','IEC61850_ACADEMY','INTERVIEW_PREP','CCNA_ACADEMY','SLD','SCADA','IED','IED_SIGNAL_CHAIN','NETWORK','GOOSE','MMS','MODBUS_LAB','IEC104_LAB','OPCUA_LAB','SIGNALS','FAULTS','FATSAT','LEARNING','USER_PROFILE','ADMIN_DASHBOARD'];
+    const valid: ActiveWorkspaceTab[] = ['HERO','OSI_MODEL','IEC61850_ACADEMY','INTERVIEW_PREP','CCNA_ACADEMY','SLD','SCADA','CRP_132KV','VCB_33KV','VCB_11KV','IED','IED_SIGNAL_CHAIN','NETWORK','GOOSE','MMS','MODBUS_LAB','IEC104_LAB','OPCUA_LAB','SIGNALS','FAULTS','FATSAT','LEARNING','USER_PROFILE','ADMIN_DASHBOARD'];
     return valid.includes(requested as ActiveWorkspaceTab) ? requested as ActiveWorkspaceTab : 'HERO';
   })(),
   selectedBayId: 'BAY-33-F03',

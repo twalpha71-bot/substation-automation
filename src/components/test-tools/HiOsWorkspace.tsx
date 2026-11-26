@@ -30,6 +30,34 @@ export interface HiOsSyslogRow {
   msg: string;
 }
 
+export type PortTagMode = 'T' | 'U' | '-';
+
+export interface HiOsVlanRow {
+  vid: number;
+  name: string;
+  priority: number;
+  ports: Record<string, PortTagMode>;
+}
+
+export const DEFAULT_HIOS_VLANS: HiOsVlanRow[] = [
+  {
+    vid: 1, name: 'MGMT', priority: 0,
+    ports: { '1/1': 'U', '1/2': 'U', '1/3': '-', '1/4': '-', '1/5': '-', '1/6': '-', '1/7': '-', '1/8': '-' },
+  },
+  {
+    vid: 100, name: 'STATION_MMS', priority: 2,
+    ports: { '1/1': 'T', '1/2': 'T', '1/3': 'T', '1/4': 'T', '1/5': 'U', '1/6': 'U', '1/7': 'U', '1/8': 'U' },
+  },
+  {
+    vid: 200, name: 'GOOSE_TRIP', priority: 4,
+    ports: { '1/1': 'T', '1/2': 'T', '1/3': 'T', '1/4': '-', '1/5': 'T', '1/6': 'T', '1/7': 'T', '1/8': 'T' },
+  },
+  {
+    vid: 300, name: 'PROCESS_SV', priority: 4,
+    ports: { '1/1': 'T', '1/2': 'T', '1/3': 'T', '1/4': 'T', '1/5': '-', '1/6': '-', '1/7': '-', '1/8': '-' },
+  },
+];
+
 interface HiOsWorkspaceProps {
   sw: HiViewSwitchRecord;
   hiosPage: string;
@@ -38,6 +66,8 @@ interface HiOsWorkspaceProps {
   onToggleRingBreak: () => void;
   disabledPorts: Record<string, boolean>;
   onTogglePort: (portId: string) => void;
+  vlans: HiOsVlanRow[];
+  onChangeVlans: (next: HiOsVlanRow[]) => void;
   syslogs: HiOsSyslogRow[];
   onPushLog: (sev: 'INFO' | 'WARN' | 'CRIT', msg: string) => void;
   onClearLogs: () => void;
@@ -45,15 +75,6 @@ interface HiOsWorkspaceProps {
   onUpdateIp: (ip: string, mask: string, gw: string) => void;
   onMarkDirty: () => void;
   onSaveNvm: () => void;
-}
-
-type PortTagMode = 'T' | 'U' | '-';
-
-interface VlanRow {
-  vid: number;
-  name: string;
-  priority: number;
-  ports: Record<string, PortTagMode>;
 }
 
 interface AclRule {
@@ -91,6 +112,8 @@ export const HiOsWorkspace: React.FC<HiOsWorkspaceProps> = ({
   onToggleRingBreak,
   disabledPorts,
   onTogglePort,
+  vlans,
+  onChangeVlans,
   syslogs,
   onPushLog,
   onClearLogs,
@@ -242,24 +265,10 @@ export const HiOsWorkspace: React.FC<HiOsWorkspaceProps> = ({
   const [newMacVlan, setNewMacVlan] = useState(200);
   const [newMacPorts, setNewMacPorts] = useState('1/1, 1/5, 1/8');
 
-  const [vlans, setVlans] = useState<VlanRow[]>([
-    {
-      vid: 1, name: 'MGMT', priority: 0,
-      ports: { '1/1': 'U', '1/2': 'U', '1/3': '-', '1/4': '-', '1/5': '-', '1/6': '-', '1/7': '-', '1/8': '-' },
-    },
-    {
-      vid: 100, name: 'STATION_MMS', priority: 2,
-      ports: { '1/1': 'T', '1/2': 'T', '1/3': 'T', '1/4': 'T', '1/5': 'U', '1/6': 'U', '1/7': 'U', '1/8': 'U' },
-    },
-    {
-      vid: 200, name: 'GOOSE_TRIP', priority: 4,
-      ports: { '1/1': 'T', '1/2': 'T', '1/3': 'T', '1/4': '-', '1/5': 'T', '1/6': 'T', '1/7': 'T', '1/8': 'T' },
-    },
-    {
-      vid: 300, name: 'PROCESS_SV', priority: 4,
-      ports: { '1/1': 'T', '1/2': 'T', '1/3': 'T', '1/4': 'T', '1/5': '-', '1/6': '-', '1/7': '-', '1/8': '-' },
-    },
-  ]);
+  const setVlans = (updater: HiOsVlanRow[] | ((prev: HiOsVlanRow[]) => HiOsVlanRow[])) => {
+    const next = typeof updater === 'function' ? updater(vlans) : updater;
+    onChangeVlans(next);
+  };
   const [newVid, setNewVid] = useState(400);
   const [newVlanName, setNewVlanName] = useState('PRP_SYNC');
   const [newVlanPrio, setNewVlanPrio] = useState(4);
@@ -347,8 +356,18 @@ export const HiOsWorkspace: React.FC<HiOsWorkspaceProps> = ({
       <div className="bg-[#1b2430] text-[#e2e8f0] border-2 border-[#475569] rounded-[3px] shadow-md overflow-hidden">
         <div className="bg-[#0f172a] border-b border-[#334155] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-extrabold tracking-wider text-[#38bdf8]">HIRSCHMANN</span>
-            <span className="font-mono font-bold text-white">{sw.model}</span>
+            {(() => {
+              const knownVendors = ['Hirschmann', 'Siemens', 'ABB', 'GE', 'Cisco', 'Moxa', 'Schneider'];
+              const matchedVendor = knownVendors.find((v) => sw.model.toLowerCase().startsWith(v.toLowerCase()));
+              const brandLabel = matchedVendor ? matchedVendor.toUpperCase() : 'HIRSCHMANN';
+              const modelLabel = matchedVendor ? sw.model.slice(matchedVendor.length).trim() || sw.model : sw.model;
+              return (
+                <>
+                  <span className="font-extrabold tracking-wider text-[#38bdf8]">{brandLabel}</span>
+                  <span className="font-mono font-bold text-white">{modelLabel}</span>
+                </>
+              );
+            })()}
             <span className="text-[#94a3b8]">|</span>
             <span className="font-mono text-[#4ade80]">Uptime: {liveUptimeStr}</span>
             <span className="text-[#94a3b8]">|</span>
@@ -477,7 +496,15 @@ export const HiOsWorkspace: React.FC<HiOsWorkspaceProps> = ({
                 <span className="font-bold text-[#38bdf8]">Port {selectedFrontPort}</span>
                 <span className="text-[#e2e8f0]">Link: <strong style={{ color: isDown ? '#f87171' : '#4ade80' }}>{isDown ? 'DOWN' : `UP (${pm.speed})`}</strong></span>
                 <span className="text-[#cbd5e1]">Neighbor: <strong>{pm.neighbor}</strong></span>
-                <span className="text-[#cbd5e1]">VLAN: {pm.vlan}</span>
+                <span className="text-[#cbd5e1]">
+                  VLANs:{' '}
+                  {(() => {
+                    const activeForPort = vlans
+                      .filter((v) => v.ports[selectedFrontPort] && v.ports[selectedFrontPort] !== '-')
+                      .map((v) => `${v.vid}(${v.ports[selectedFrontPort]})`);
+                    return activeForPort.length > 0 ? activeForPort.join(', ') : 'None';
+                  })()}
+                </span>
                 <span className="text-[#4ade80]">Rx: {rxMbps} Mbps | Tx: {txMbps} Mbps</span>
                 {pm.media === 'SFP' && (
                   <span style={{ color: sfpLowRx && selectedFrontPort === '1/1' ? '#fbbf24' : '#bae6fd' }}>

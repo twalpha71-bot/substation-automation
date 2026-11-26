@@ -85,6 +85,9 @@ const PAGE_LOADERS: Record<string, () => Promise<any>> = {
   OSI_MODEL: () => import('./pages/OsiModelPage').then(m => ({ default: m.OsiModelPage })),
   SLD: () => import('./pages/SldWorkspacePage').then(m => ({ default: m.SldWorkspacePage })),
   SCADA: () => import('./pages/ScadaHmiPage').then(m => ({ default: m.ScadaHmiPage })),
+  CRP_132KV: () => import('./components/switchgear/SwitchgearCrp132kV'),
+  VCB_33KV: () => import('./components/switchgear/SwitchgearVcb33kV'),
+  VCB_11KV: () => import('./components/switchgear/SwitchgearVcb11kV'),
   IED: () => import('./pages/IedExplorerPage').then(m => ({ default: m.IedExplorerPage })),
   NETWORK: () => import('./pages/NetworkTopologyPage').then(m => ({ default: m.NetworkTopologyPage })),
   GOOSE: () => import('./pages/GooseLabPage').then(m => ({ default: m.GooseLabPage })),
@@ -170,6 +173,9 @@ const WiresharkAnalyzerPage = lazyWithRetry(PAGE_LOADERS.WIRESHARK);
 const OsiModelPage = lazyWithRetry(PAGE_LOADERS.OSI_MODEL);
 const SldWorkspacePage = lazyWithRetry(PAGE_LOADERS.SLD);
 const ScadaHmiPage = lazyWithRetry(PAGE_LOADERS.SCADA);
+const SwitchgearCrp132kV = lazyWithRetry(PAGE_LOADERS.CRP_132KV);
+const SwitchgearVcb33kV = lazyWithRetry(PAGE_LOADERS.VCB_33KV);
+const SwitchgearVcb11kV = lazyWithRetry(PAGE_LOADERS.VCB_11KV);
 const IedExplorerPage = lazyWithRetry(PAGE_LOADERS.IED);
 const NetworkTopologyPage = lazyWithRetry(PAGE_LOADERS.NETWORK);
 const GooseLabPage = lazyWithRetry(PAGE_LOADERS.GOOSE);
@@ -267,7 +273,7 @@ export default function App() {
   });
   // Quietly warm up the most-used workspace chunks after first paint so page switches are instant.
   useEffect(() => {
-    const warmKeys = ['SLD', 'SCADA', 'NETWORK', 'SIGNALS', 'IED', 'SCHEME', 'ALARMS_EVENTS'];
+    const warmKeys = ['SLD', 'SCADA', 'CRP_132KV', 'VCB_33KV', 'VCB_11KV', 'NETWORK', 'SIGNALS', 'IED', 'SCHEME', 'ALARMS_EVENTS'];
     const timer = window.setTimeout(() => {
       warmKeys.forEach((k, idx) => {
         window.setTimeout(() => preloadRoute(k), idx * 250);
@@ -349,7 +355,7 @@ export default function App() {
       if (match) {
         const requested = match[1] as ActiveWorkspaceTab;
         if (requested !== 'SCADA') { try { sessionStorage.removeItem('sas-scada-navigation-v1'); } catch { /* optional */ } }
-        const valid = ['HERO','OSI_MODEL','IEC61850_ACADEMY','INTERVIEW_PREP','CCNA_ACADEMY','SLD','SCADA','IED','IED_SIGNAL_CHAIN','NETWORK','GOOSE','MMS','MODBUS_LAB','IEC104_LAB','OPCUA_LAB','SIGNALS','FAULTS','FATSAT','USER_PROFILE','ADMIN_DASHBOARD'];
+        const valid = ['HERO','OSI_MODEL','IEC61850_ACADEMY','INTERVIEW_PREP','CCNA_ACADEMY','SLD','SCADA','CRP_132KV','VCB_33KV','VCB_11KV','IED','IED_SIGNAL_CHAIN','NETWORK','GOOSE','MMS','MODBUS_LAB','IEC104_LAB','OPCUA_LAB','SIGNALS','FAULTS','FATSAT','USER_PROFILE','ADMIN_DASHBOARD'];
         if (valid.includes(requested)) {
           preloadRoute(requested);
           startPageTransition(() => {
@@ -558,6 +564,9 @@ export default function App() {
     { id: 'HERO', label: t('Substation Workspace'), icon: <Home className="w-4 h-4" /> },
     { id: 'SLD', label: t('132/33/11kV SLD'), icon: <GitBranch className="w-4 h-4" /> },
     { id: 'SCADA', label: t('SCADA / HMI Operator Station'), icon: <Activity className="w-4 h-4" />, badge: unackAlarms },
+    { id: 'CRP_132KV', label: t('132 kV CRP Panel (Front/Back)'), icon: <ShieldCheck className="w-4 h-4" /> },
+    { id: 'VCB_33KV', label: t('33 kV VCB Switchgear (Front/Internal)'), icon: <ShieldCheck className="w-4 h-4" /> },
+    { id: 'VCB_11KV', label: t('11 kV VCB Switchgear (Front/Internal)'), icon: <ShieldCheck className="w-4 h-4" /> },
     { id: 'IED', label: t('IED Explorer'), icon: <Cpu className="w-4 h-4" /> },
     { id: 'IED_SIGNAL_CHAIN', label: t('IED Signal Chain & Mapping'), icon: <Cpu className="w-4 h-4" /> },
     { id: 'NETWORK', label: t('PRP / HSR Network'), icon: <Network className="w-4 h-4" /> },
@@ -577,7 +586,7 @@ export default function App() {
   ];
 
   const topNavGroups = [
-    { key: 'sld', title: t('SLD & Operation'), icon: GitBranch, ids: ['SLD', 'SCADA'] },
+    { key: 'sld', title: t('SLD & Operation'), icon: GitBranch, ids: ['SLD', 'SCADA', 'CRP_132KV', 'VCB_33KV', 'VCB_11KV'] },
     { key: 'ied', title: t('IED & Signals'), icon: Cpu, ids: ['IED', 'IED_SIGNAL_CHAIN'] },
     { key: 'comms', title: t('Communication'), icon: Radio, ids: ['NETWORK', 'GOOSE', 'MMS', 'MODBUS_LAB', 'IEC104_LAB', 'OPCUA_LAB'] },
     { key: 'tools', title: t('Tools & Test'), icon: Settings, ids: ['SIGNALS', 'FAULTS', 'FATSAT', 'IEC61850_ACADEMY', 'TESTING_GUIDANCE', 'OSI_MODEL', 'INTERVIEW_PREP', 'CCNA_ACADEMY'] },
@@ -1085,6 +1094,9 @@ export default function App() {
           {deferredActiveTab === 'CCNA_ACADEMY' && <CcnaAcademyPage />}
           {deferredActiveTab === 'SLD' && <SldWorkspacePage />}
           {deferredActiveTab === 'SCADA' && <ScadaHmiPage />}
+          {deferredActiveTab === 'CRP_132KV' && <SwitchgearCrp132kV />}
+          {deferredActiveTab === 'VCB_33KV' && <SwitchgearVcb33kV />}
+          {deferredActiveTab === 'VCB_11KV' && <SwitchgearVcb11kV />}
           {deferredActiveTab === 'IED' && <IedExplorerPage />}
           {deferredActiveTab === 'NETWORK' && <NetworkTopologyPage />}
           {deferredActiveTab === 'GOOSE' && <GooseLabPage />}
