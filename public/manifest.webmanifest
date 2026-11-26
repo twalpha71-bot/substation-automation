@@ -11,7 +11,7 @@
     "fullscreen",
     "minimal-ui"
   ],
-  "orientation": "landscape",
+  "orientation": "any",
   "background_color": "#06182c",
   "theme_color": "#0284c7",
   "categories": [
