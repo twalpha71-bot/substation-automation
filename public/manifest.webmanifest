@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "SAS Engineering Hub",
-  "short_name": "SAS Hub",
+  "name": "Substation Automation",
+  "short_name": "Substation Automation",
   "description": "Interactive 132/33/11 kV Substation Automation System (SAS), Switchgear, IEC 61850, and SCADA Simulator.",
   "start_url": "/",
   "scope": "/",
