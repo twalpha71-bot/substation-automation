@@ -447,6 +447,7 @@ export const HiViewTool: React.FC = () => {
   }, [infrastructure, ipOverrides, pwChangedMap]);
 
   const [activeTabId, setActiveTabId] = useState<string>(() => init.activeTabId || 'DEVICES');
+  const [discoverySearch, setDiscoverySearch] = useState<string>('');
   const [savedDeviceIds, setSavedDeviceIds] = useState<string[]>(() => init.savedDeviceIds || []);
   const [openWebIds, setOpenWebIds] = useState<string[]>(() => init.openWebIds || []);
   const [urlInput, setUrlInput] = useState<string>(() => init.urlInput || '');
@@ -475,6 +476,7 @@ export const HiViewTool: React.FC = () => {
   const [bannerText, setBannerText] = useState<string>('AUTHORIZED SUBSTATION AUTOMATION PERSONNEL ONLY. All HiOS/SSH sessions are logged.');
 
   const [discoveryScanned, setDiscoveryScanned] = useState<boolean>(false);
+  const [isScanning, setIsScanning] = useState<boolean>(false);
   const [selectedNic, setSelectedNic] = useState<string>('10.132.10.100 / 24: Realtek PCIe GBE Family Controller #1');
   const [selectedDiscId, setSelectedDiscId] = useState<string>('');
   const [blinkingId, setBlinkingId] = useState<string>('');
@@ -600,7 +602,7 @@ export const HiViewTool: React.FC = () => {
       return;
     }
     if (low === 'help' || low === '?') {
-      next.push('Commands: show sfp | show sysinfo | show interface | show mrp | show ptp | clear | exit');
+      next.push('Commands: show sfp | show sysinfo | show interface | show vlan | show mrp | show prp | show ptp | show lldp | show port-security | ping <ip> | clear | exit');
     } else if (low === 'show sfp') {
       next.push('       Part ID          Module type  Temp[C/F] TxPower[dBm/mW]  RxPower[dBm/mW]');
       next.push('Intf   Serial number    Connector');
@@ -631,6 +633,37 @@ export const HiViewTool: React.FC = () => {
     } else if (low === 'show ptp') {
       next.push(`PTPv2 Status   : ${cliSwitch.ptpStatus}`);
       next.push('Profile        : IEC 61850-9-3 Power Profile (Offset +18 ns)');
+    } else if (low === 'show vlan') {
+      next.push('VLAN ID  Name                 Ports               Status');
+      next.push('-------  -------------------  ------------------  ------');
+      next.push('10       StationBus_MMS       1/1,1/2,1/5,1/6     Active');
+      next.push('20       GOOSE_Protection     1/1-1/4,1/5         Active');
+      next.push('50       ProcessBus_SV        1/3,1/4             Active');
+      next.push('100      Management_HiView    1/1,1/2,1/8         Active');
+    } else if (low === 'show prp' || low === 'show hsr') {
+      next.push(`Redundancy Protocol : ${cliSwitch.redundancyRole}`);
+      next.push(`LAN A / Ring Port 1 : UP (0% packet loss, 0 duplicate drops)`);
+      next.push(`LAN B / Ring Port 2 : ${ringBroken ? 'DOWN (Failover Active - 0 ms bump)' : 'UP (Healthy Dual-Path)'}`);
+      next.push('Supervision Frames  : TX=14820  RX=14820  NodeTable=14 DANPs');
+    } else if (low === 'show lldp') {
+      next.push('LocalPort  NeighborSysName      NeighborPort  NeighborIP');
+      next.push('---------  -------------------  ------------  --------------');
+      next.push('1/1        SW-STATION-LAN-B     1/1           10.132.10.2');
+      next.push('1/2        RED25-REDBOX-01      1/1           10.132.10.5');
+      next.push('1/5        IED_132_L1 (7SA87)   ETH-A         10.132.10.11');
+      next.push('1/6        GTW-01 (IEC-104)     ETH0          10.132.10.200');
+    } else if (low === 'show port-security') {
+      next.push('Port   Admin    MaxMAC  LearnedMAC  Action      Status');
+      next.push('1/1    Enabled  4       2           Trap+Drop   Secure');
+      next.push('1/5    Enabled  1       1           Trap+Drop   Secure');
+      next.push('1/8    Enabled  1       1           Trap+Drop   Secure');
+    } else if (low.startsWith('ping ')) {
+      const targetIp = cmd.slice(5).trim() || cliSwitch.ip;
+      next.push(`PING ${targetIp}: 56 data bytes`);
+      next.push(`64 bytes from ${targetIp}: icmp_seq=1 ttl=64 time=0.42 ms`);
+      next.push(`64 bytes from ${targetIp}: icmp_seq=2 ttl=64 time=0.39 ms`);
+      next.push(`64 bytes from ${targetIp}: icmp_seq=3 ttl=64 time=0.45 ms`);
+      next.push(`--- ${targetIp} ping statistics --- 3 transmitted, 3 received, 0% loss`);
     } else if (cmd) {
       next.push(`% Invalid input detected: "${cmd}". Type "help" or "show sfp".`);
     }
@@ -669,10 +702,59 @@ export const HiViewTool: React.FC = () => {
     if (matched) openSwitchWebGui(matched, true);
   };
 
-  const handleScanDiscovery = () => {
+  const handleAddAllDiscovered = () => {
     setDiscoveryScanned(true);
-    if (discoveredCatalog[0]) setSelectedDiscId(discoveredCatalog[0].id);
-    pushLog('INFO', `HiDiscovery v2 scan completed: ${discoveredCatalog.length} device(s) found.`);
+    setSavedDeviceIds(discoveredCatalog.map((s) => s.id));
+    pushLog('INFO', `Added all ${discoveredCatalog.length} discovered Hirschmann switches to Devices.`);
+  };
+
+  const handleExportDiscoveryCsv = () => {
+    const rows = [
+      ['Name', 'Model', 'IP Address', 'Netmask', 'Gateway', 'MAC Address', 'Firmware', 'Redundancy Role', 'PTP Status'],
+      ...discoveredCatalog.map((sw) => [
+        sw.name,
+        sw.model,
+        sw.ip,
+        sw.netmask,
+        sw.gateway,
+        sw.mac,
+        sw.firmware,
+        sw.redundancyRole,
+        sw.ptpStatus,
+      ]),
+    ];
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'hiview_discovery_inventory.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    pushLog('INFO', `Exported ${discoveredCatalog.length} discovered switches to hiview_discovery_inventory.csv.`);
+  };
+
+  const handleExportSwitchConfigXml = (sw: SwitchRecord) => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<HiOSConfig version="${sw.firmware}" product="${sw.model}">\n  <System name="${sw.name}" mac="${sw.mac}" />\n  <Network ip="${sw.ip}" netmask="${sw.netmask}" gateway="${sw.gateway}" />\n  <Redundancy role="${sw.redundancyRole}" mrp="enabled" prp="enabled" />\n  <TimeSync ptp="${sw.ptpStatus}" profile="IEC-61850-9-3" />\n  <VLANs>10,20,50,100</VLANs>\n</HiOSConfig>`;
+    const blob = new Blob([xml], { type: 'application/xml;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${sw.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}_hios_backup.xml`;
+    a.click();
+    URL.revokeObjectURL(url);
+    pushLog('INFO', `Exported HiOS configuration backup XML for ${sw.name} (${sw.ip}).`);
+  };
+
+  const handleScanDiscovery = () => {
+    setIsScanning(true);
+    pushLog('INFO', 'HiDiscovery v2 broadcast scan started on 10.132.10.0/24 (UDP/L2)...');
+    window.setTimeout(() => {
+      setIsScanning(false);
+      setDiscoveryScanned(true);
+      if (discoveredCatalog[0]) setSelectedDiscId(discoveredCatalog[0].id);
+      pushLog('INFO', `HiDiscovery v2 scan completed: ${discoveredCatalog.length} Hirschmann device(s) discovered.`);
+    }, 650);
   };
 
   const activeWebSwitch = activeTabId.startsWith('WEB:')
@@ -994,29 +1076,139 @@ export const HiViewTool: React.FC = () => {
         {/* TAB A: DEVICES */}
         {activeTabId === 'DEVICES' && (
           <div className="h-full overflow-auto p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3 pb-2 border-b border-[#d4d4d4]">
+              <div className="text-[12px] font-semibold text-[#00468c]">
+                Managed Hirschmann Devices ({savedDevices.length})
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button type="button" className="hv-btn" onClick={handleAddAllDiscovered}>
+                  + Add All Discovered ({discoveredCatalog.length})
+                </button>
+                <button
+                  type="button"
+                  className="hv-btn"
+                  onClick={() => {
+                    setActiveTabId('DISCOVERY');
+                    handleScanDiscovery();
+                  }}
+                >
+                  Open HiDiscovery Scan
+                </button>
+              </div>
+            </div>
+
             {savedDevices.length === 0 ? (
-              <div className="h-full w-full" />
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-w-4xl">
-                {savedDevices.map((sw) => (
-                  <div
-                    key={sw.id}
-                    onDoubleClick={() => openSwitchWebGui(sw)}
-                    className="bg-[#ffffff] border border-[#bdbdbd] p-3 shadow-sm hover:border-[#00468c] cursor-pointer flex flex-col gap-1"
+              <div className="h-[68%] flex flex-col items-center justify-center text-center gap-2.5 text-[#334155]">
+                <div className="text-[14px] font-bold text-[#00468c]">No Hirschmann Switches Added to Devices Yet</div>
+                <p className="text-[12px] max-w-md text-[#475569]">
+                  Click <strong>Add All Discovered</strong> to populate your substation RSP35 / RED25 switches, or run a <strong>HiDiscovery</strong> scan to discover and configure switches on VLAN 100.
+                </p>
+                <div className="flex gap-2 mt-1">
+                  <button type="button" className="hv-btn-blue" onClick={handleAddAllDiscovered}>
+                    + Add All Substation Switches
+                  </button>
+                  <button
+                    type="button"
+                    className="hv-btn"
+                    onClick={() => {
+                      setActiveTabId('DISCOVERY');
+                      handleScanDiscovery();
+                    }}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-[13px] text-[#00468c]">{sw.name}</span>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#dcfce7] text-[#166534]">{sw.status}</span>
+                    Scan Network (HiDiscovery)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-w-5xl">
+                {savedDevices.map((sw) => {
+                  const isBlinking = blinkingId === sw.id;
+                  return (
+                    <div
+                      key={sw.id}
+                      onDoubleClick={() => openSwitchWebGui(sw)}
+                      className="bg-[#ffffff] border border-[#bdbdbd] p-3 shadow-sm hover:border-[#00468c] cursor-pointer flex flex-col gap-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-[13px] text-[#00468c] truncate">{sw.name}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {isBlinking && (
+                            <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-[#fef08a] text-[#854d0e] animate-pulse">
+                              SIGNAL
+                            </span>
+                          )}
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#dcfce7] text-[#166534]">
+                            {sw.status}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-[11.5px] text-[#334155]">
+                        {sw.model} · <span className="font-mono">{sw.firmware}</span>
+                      </div>
+                      <div className="font-mono text-[11px] text-[#0369a1]">
+                        {sw.ip} · {sw.mac}
+                      </div>
+                      <div className="text-[10.5px] text-[#475569] flex items-center justify-between">
+                        <span>{sw.redundancyRole}</span>
+                        <span className="font-mono text-[#166534]">{sw.ptpStatus}</span>
+                      </div>
+
+                      {/* Mini Front-Panel Port LED Strip (P1–P8) */}
+                      <div className="flex items-center gap-1 pt-1">
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map((pNum) => {
+                          const down = ringBroken && pNum === 2;
+                          return (
+                            <span
+                              key={pNum}
+                              title={`Port 1/${pNum}: ${down ? 'Link Down' : 'Link UP (1000M)'}`}
+                              className="flex-1 text-center font-mono text-[9px] font-bold py-[1px] border"
+                              style={{
+                                background: down ? '#fee2e2' : isBlinking ? '#fef08a' : '#dcfce7',
+                                borderColor: down ? '#ef4444' : '#86efac',
+                                color: down ? '#991b1b' : '#166534',
+                              }}
+                            >
+                              P{pNum}
+                            </span>
+                          );
+                        })}
+                      </div>
+
+                      <div className="pt-2 mt-1 border-t border-[#e5e5e5] flex flex-wrap justify-between items-center gap-1">
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            className="hv-btn"
+                            title="Flash Front-Panel Signal LEDs to locate switch in rack"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setBlinkingId(isBlinking ? '' : sw.id);
+                              pushLog('INFO', `${isBlinking ? 'Stopped' : 'Started'} Signal LED flash on ${sw.name}.`);
+                            }}
+                          >
+                            {isBlinking ? 'Stop LED' : 'Signal'}
+                          </button>
+                          <button
+                            type="button"
+                            className="hv-btn"
+                            title="Download HiOS XML Configuration Backup"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleExportSwitchConfigXml(sw);
+                            }}
+                          >
+                            Backup
+                          </button>
+                        </div>
+                        <div className="flex gap-1">
+                          <button type="button" className="hv-btn" onClick={(e) => { e.stopPropagation(); openSshCli(sw); }}>CLI</button>
+                          <button type="button" className="hv-btn" onClick={(e) => { e.stopPropagation(); runPing(sw); }}>Ping</button>
+                          <button type="button" className="hv-btn-blue" onClick={(e) => { e.stopPropagation(); openSwitchWebGui(sw); }}>GUI</button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-[11.5px] text-[#334155]">{sw.model} · {sw.firmware}</div>
-                    <div className="font-mono text-[11.5px] text-[#0369a1]">{sw.ip} · {sw.mac}</div>
-                    <div className="pt-2 mt-1 border-t border-[#e5e5e5] flex justify-end gap-1.5">
-                      <button type="button" className="hv-btn" onClick={() => openSshCli(sw)}>CLI</button>
-                      <button type="button" className="hv-btn" onClick={() => runPing(sw)}>Ping</button>
-                      <button type="button" className="hv-btn-blue" onClick={() => openSwitchWebGui(sw)}>GUI</button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1025,6 +1217,35 @@ export const HiViewTool: React.FC = () => {
         {/* TAB B: DISCOVERY — Exact 12-column HiDiscovery v2 table with Right-Click Context Menu */}
         {activeTabId === 'DISCOVERY' && (
           <div className="h-full flex flex-col bg-[#ffffff] overflow-hidden">
+            <div className="bg-[#f4f4f4] border-b border-[#cccccc] px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2 text-[11.5px]">
+                <span className="font-semibold text-[#00468c]">HiDiscovery v2 Filter:</span>
+                <input
+                  type="text"
+                  value={discoverySearch}
+                  onChange={(e) => setDiscoverySearch(e.target.value)}
+                  placeholder="Filter IP, MAC, Name, Model..."
+                  className="h-[22px] w-[200px] px-2 text-[11.5px]"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button type="button" className="hv-btn" onClick={handleScanDiscovery}>
+                  Rescan Network
+                </button>
+                <button type="button" className="hv-btn" onClick={handleAddAllDiscovered}>
+                  Add All to Devices
+                </button>
+                <button type="button" className="hv-btn" onClick={handleExportDiscoveryCsv}>
+                  Export Discovery CSV
+                </button>
+              </div>
+            </div>
+            {isScanning && (
+              <div className="bg-[#e0f2fe] border-b border-[#7dd3fc] px-3 py-1.5 flex items-center gap-2 text-[11.5px] font-semibold text-[#0369a1] shrink-0">
+                <span className="inline-block w-3 h-3 rounded-full border-2 border-[#0284c7] border-t-transparent animate-spin" />
+                <span>Scanning subnet via HiDiscovery v2 (L2 Multicast 01:80:63:00:00:01)...</span>
+              </div>
+            )}
             <div className="flex-1 overflow-auto bg-[#ffffff]">
               <table>
                 <thead>
@@ -1048,7 +1269,12 @@ export const HiViewTool: React.FC = () => {
                 </thead>
                 <tbody>
                   {discoveryScanned ? (
-                    discoveredCatalog.map((sw) => {
+                    discoveredCatalog
+                      .filter((sw) => {
+                        const q = discoverySearch.trim().toLowerCase();
+                        return !q || `${sw.name} ${sw.ip} ${sw.mac} ${sw.model} ${sw.firmware}`.toLowerCase().includes(q);
+                      })
+                      .map((sw) => {
                       const sel = selectedDiscId === sw.id;
                       const blink = blinkingId === sw.id;
                       const ipv6 = `fe80::280:63ff:fe${sw.mac.slice(9, 11).toLowerCase()}:${sw.mac.slice(12, 14).toLowerCase()}${sw.mac.slice(15, 17).toLowerCase()}`;

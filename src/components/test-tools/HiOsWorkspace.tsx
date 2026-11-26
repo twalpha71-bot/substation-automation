@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSubstationStore } from '../../simulation/useSubstationStore';
 
 // ============================================================================
@@ -99,6 +99,40 @@ export const HiOsWorkspace: React.FC<HiOsWorkspaceProps> = ({
   onMarkDirty,
   onSaveNvm,
 }) => {
+  const [liveSec, setLiveSec] = useState<number>(0);
+  const [selectedFrontPort, setSelectedFrontPort] = useState<string | null>(null);
+  const [psu2Fault, setPsu2Fault] = useState<boolean>(false);
+  const [sfpLowRx, setSfpLowRx] = useState<boolean>(false);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setLiveSec((s) => s + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const liveCpuPct = 18 + ((liveSec * 3) % 9);
+  const liveTempC = 31 + ((liveSec >> 2) % 3);
+  const livePtpNs = 14 + ((liveSec * 5) % 9);
+  const liveUptimeStr = useMemo(() => {
+    const total = 42 * 86400 + 7 * 3600 + 18 * 60 + liveSec;
+    const d = Math.floor(total / 86400);
+    const h = Math.floor((total % 86400) / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d}d ${p(h)}h ${p(m)}m ${p(s)}s`;
+  }, [liveSec]);
+
+  const frontPortMeta: Record<string, { media: 'SFP' | 'RJ45'; speed: string; vlan: string; neighbor: string; baseMbps: number }> = {
+    '1/1': { media: 'SFP', speed: '1000M-LX', vlan: '10,20,100', neighbor: 'SW-LAN-B-01 (Ring P1)', baseMbps: 142.4 },
+    '1/2': { media: 'SFP', speed: '1000M-LX', vlan: '10,20,100', neighbor: 'RED25-REDBOX-01 (Ring P2)', baseMbps: 118.9 },
+    '1/3': { media: 'SFP', speed: '1000M-SX', vlan: '50 (SV)', neighbor: 'MU-132-L1 (Process Bus)', baseMbps: 215.6 },
+    '1/4': { media: 'SFP', speed: '1000M-LX', vlan: '10,20', neighbor: 'Uplink Station Core', baseMbps: 164.2 },
+    '1/5': { media: 'RJ45', speed: '100M-FD', vlan: '10,20', neighbor: 'IED_132_L1 (SIPROTEC 5)', baseMbps: 12.8 },
+    '1/6': { media: 'RJ45', speed: '100M-FD', vlan: '10,20', neighbor: 'IED_132_T1 (REL670)', baseMbps: 11.4 },
+    '1/7': { media: 'RJ45', speed: '100M-FD', vlan: '10,20', neighbor: 'GTW-01 (IEC-104)', baseMbps: 18.2 },
+    '1/8': { media: 'RJ45', speed: '1000M-FD', vlan: '100 (Mgmt)', neighbor: 'Engineering PC (HiView)', baseMbps: 6.5 },
+  };
+
   const { ieds } = useSubstationStore();
 
   // Basic Settings -> System
@@ -309,6 +343,173 @@ export const HiOsWorkspace: React.FC<HiOsWorkspaceProps> = ({
 
   return (
     <div className="flex-1 overflow-auto p-3.5 space-y-3 bg-[#eaeaea] relative pb-16">
+      {/* LIVE REAL-TIME HIRSCHMANN RSP35 / RED25 FRONT-PANEL HARDWARE CHASSIS */}
+      <div className="bg-[#1b2430] text-[#e2e8f0] border-2 border-[#475569] rounded-[3px] shadow-md overflow-hidden">
+        <div className="bg-[#0f172a] border-b border-[#334155] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-extrabold tracking-wider text-[#38bdf8]">HIRSCHMANN</span>
+            <span className="font-mono font-bold text-white">{sw.model}</span>
+            <span className="text-[#94a3b8]">|</span>
+            <span className="font-mono text-[#4ade80]">Uptime: {liveUptimeStr}</span>
+            <span className="text-[#94a3b8]">|</span>
+            <span className="font-mono text-[#bae6fd]">CPU: {liveCpuPct}% · Temp: {liveTempC}°C · PTP: +{livePtpNs} ns</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onToggleRingBreak}
+              className="px-2 py-0.5 rounded-[2px] text-[10.5px] font-bold cursor-pointer border"
+              style={{
+                background: ringBroken ? '#dc2626' : '#1e293b',
+                color: '#ffffff',
+                borderColor: ringBroken ? '#f87171' : '#475569',
+              }}
+            >
+              {ringBroken ? 'Restore Fiber 1/2' : 'Sim Fiber Break (1/2)'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const next = !psu2Fault;
+                setPsu2Fault(next);
+                onPushLog(next ? 'CRIT' : 'INFO', next ? `${sw.name}: Power Supply 2 (PSU2) DC input lost — Signal Contact 1 OPEN.` : `${sw.name}: Power Supply 2 (PSU2) restored OK.`);
+              }}
+              className="px-2 py-0.5 rounded-[2px] text-[10.5px] font-bold cursor-pointer border"
+              style={{
+                background: psu2Fault ? '#dc2626' : '#1e293b',
+                color: '#ffffff',
+                borderColor: psu2Fault ? '#f87171' : '#475569',
+              }}
+            >
+              {psu2Fault ? 'Restore PSU2' : 'Sim PSU2 Fail'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const next = !sfpLowRx;
+                setSfpLowRx(next);
+                onPushLog(next ? 'WARN' : 'INFO', next ? `${sw.name}: SFP Port 1/1 Rx optical power low (-19.8 dBm warning threshold).` : `${sw.name}: SFP Port 1/1 Rx optical power normal (-5.6 dBm).`);
+              }}
+              className="px-2 py-0.5 rounded-[2px] text-[10.5px] font-bold cursor-pointer border"
+              style={{
+                background: sfpLowRx ? '#d97706' : '#1e293b',
+                color: '#ffffff',
+                borderColor: sfpLowRx ? '#fbbf24' : '#475569',
+              }}
+            >
+              {sfpLowRx ? 'Clear SFP Warn' : 'Sim SFP Low Rx'}
+            </button>
+          </div>
+        </div>
+
+        {/* PHYSICAL LEDs + CLICKABLE PORTS */}
+        <div className="px-3 py-2.5 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2.5 bg-[#0f172a] border border-[#334155] px-2.5 py-1.5 rounded-[2px]">
+            {[
+              { label: 'P1', color: '#22c55e', title: 'PSU 1: 110V DC Present' },
+              { label: 'P2', color: psu2Fault ? '#ef4444' : '#22c55e', title: psu2Fault ? 'PSU 2: FAILED' : 'PSU 2: 110V DC Present' },
+              { label: 'STATUS', color: ringBroken || psu2Fault ? '#ef4444' : sfpLowRx ? '#f59e0b' : '#22c55e', title: 'Device Overall Status' },
+              { label: 'RM', color: ringBroken ? '#f59e0b' : '#22c55e', title: ringBroken ? 'MRP Ring OPEN (Failover)' : 'MRP Ring Manager Active' },
+              { label: 'ACA', color: '#22c55e', title: 'ACA22 USB Backup Ready' },
+            ].map((led) => (
+              <div key={led.label} title={led.title} className="flex flex-col items-center gap-0.5">
+                <span
+                  className="w-2.5 h-2.5 rounded-full inline-block"
+                  style={{ background: led.color, boxShadow: `0 0 7px ${led.color}` }}
+                />
+                <span className="font-mono text-[9px] text-[#cbd5e1]">{led.label}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex-1 flex flex-wrap items-center gap-1.5">
+            {PORT_IDS.map((pid, idx) => {
+              const meta = frontPortMeta[pid];
+              const isDis = Boolean(disabledPorts[`${sw.id}:${pid}`]);
+              const isDown = isDis || (ringBroken && pid === '1/2');
+              const isWarn = sfpLowRx && pid === '1/1';
+              const isSel = selectedFrontPort === pid;
+              const actBlink = !isDown && (liveSec + idx) % 2 === 0;
+              return (
+                <button
+                  key={pid}
+                  type="button"
+                  onClick={() => setSelectedFrontPort((cur) => (cur === pid ? null : pid))}
+                  title={`Click to inspect Port ${pid} (${meta.media} ${meta.speed} — ${meta.neighbor})`}
+                  className="px-2 py-1 rounded-[2px] border flex flex-col items-center min-w-[54px] cursor-pointer transition"
+                  style={{
+                    background: isSel ? '#0369a1' : meta.media === 'SFP' ? '#1e293b' : '#0f172a',
+                    borderColor: isSel ? '#38bdf8' : isDown ? '#ef4444' : isWarn ? '#f59e0b' : '#475569',
+                  }}
+                >
+                  <div className="flex items-center gap-1 mb-0.5">
+                    <span
+                      className="w-2 h-2 rounded-full inline-block"
+                      style={{
+                        background: isDown ? '#ef4444' : isWarn ? '#f59e0b' : '#22c55e',
+                        boxShadow: isDown ? 'none' : `0 0 5px ${isWarn ? '#f59e0b' : '#22c55e'}`,
+                      }}
+                    />
+                    <span
+                      className="w-1.5 h-1.5 rounded-full inline-block"
+                      style={{ background: actBlink ? '#facc15' : '#334155' }}
+                    />
+                  </div>
+                  <span className="font-mono text-[10px] font-bold text-white">{pid}</span>
+                  <span className="font-mono text-[8.5px] text-[#94a3b8]">{meta.media}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* CLICKED PORT LIVE INSPECTOR DRAWER */}
+        {selectedFrontPort && frontPortMeta[selectedFrontPort] && (() => {
+          const pm = frontPortMeta[selectedFrontPort];
+          const isDis = Boolean(disabledPorts[`${sw.id}:${selectedFrontPort}`]);
+          const isDown = isDis || (ringBroken && selectedFrontPort === '1/2');
+          const rxMbps = isDown ? 0 : +(pm.baseMbps + ((liveSec * 7) % 15) * 0.4).toFixed(1);
+          const txMbps = isDown ? 0 : +(pm.baseMbps * 0.85 + ((liveSec * 5) % 11) * 0.3).toFixed(1);
+          const rxDbm = sfpLowRx && selectedFrontPort === '1/1' ? '-19.8 dBm (LOW WARN)' : '-5.6 dBm (OK)';
+          return (
+            <div className="bg-[#0f172a] border-t border-[#334155] px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <div className="flex flex-wrap items-center gap-3 font-mono">
+                <span className="font-bold text-[#38bdf8]">Port {selectedFrontPort}</span>
+                <span className="text-[#e2e8f0]">Link: <strong style={{ color: isDown ? '#f87171' : '#4ade80' }}>{isDown ? 'DOWN' : `UP (${pm.speed})`}</strong></span>
+                <span className="text-[#cbd5e1]">Neighbor: <strong>{pm.neighbor}</strong></span>
+                <span className="text-[#cbd5e1]">VLAN: {pm.vlan}</span>
+                <span className="text-[#4ade80]">Rx: {rxMbps} Mbps | Tx: {txMbps} Mbps</span>
+                {pm.media === 'SFP' && (
+                  <span style={{ color: sfpLowRx && selectedFrontPort === '1/1' ? '#fbbf24' : '#bae6fd' }}>
+                    DOM Rx: {rxDbm}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onTogglePort(selectedFrontPort)}
+                  className="px-2 py-0.5 rounded-[2px] text-[10.5px] font-bold cursor-pointer"
+                  style={{
+                    background: isDis ? '#16a34a' : '#dc2626',
+                    color: '#ffffff',
+                    border: 'none',
+                  }}
+                >
+                  {isDis ? 'Enable Port' : 'Disable Port'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFrontPort(null)}
+                  className="px-2 py-0.5 rounded-[2px] text-[10.5px] bg-[#334155] text-white cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
       {/* 1. BASIC SETTINGS -> SYSTEM */}
       {hiosPage === 'SYS_SYSTEM' && (
         <>
