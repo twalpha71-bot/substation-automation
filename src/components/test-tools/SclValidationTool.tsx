@@ -810,6 +810,9 @@ export const SclValidationTool: React.FC = () => {
   const [sectionFilter, setSectionFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedIssueId, setSelectedIssueId] = useState<string>('');
+  const [editXmlMode, setEditXmlMode] = useState<boolean>(false);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [autoFixBanner, setAutoFixBanner] = useState<string>('');
   const [highlightLine, setHighlightLine] = useState<number | null>(null);
   const [statusBanner, setStatusBanner] = useState<string>('Ready. Open an .icd/.cid/.scd/.iid file or audit the live substation SCD.');
 
@@ -1064,6 +1067,85 @@ ${lntXml}
     URL.revokeObjectURL(url);
   };
 
+
+  const handleAutoFixScl = () => {
+    if (!xmlText.trim()) return;
+    let fixed = xmlText;
+    const fixes: string[] = [];
+
+    if (!fixed.includes('xmlns="http://www.iec.ch/61850/2003/SCL"')) {
+      fixed = fixed.replace(/<SCL(\s|>)/, '<SCL xmlns="http://www.iec.ch/61850/2003/SCL"$1');
+      fixes.push('Added IEC 61850-6 SCL namespace');
+    }
+    if (!/\bversion="2007"/.test(fixed)) {
+      fixed = fixed.replace(/<SCL([^>]*)>/, (m, attrs) =>
+        attrs.includes('version=') ? m : `<SCL${attrs} version="2007" revision="B" release="4">`
+      );
+      fixes.push('Set SCL version="2007" revision="B" release="4"');
+    }
+    if (/confRev="0"/.test(fixed)) {
+      fixed = fixed.replace(/confRev="0"/g, 'confRev="1"');
+      fixes.push('Corrected confRev="0" -> "1"');
+    }
+    if (/minTime[^>]*>0</.test(fixed)) {
+      fixed = fixed.replace(/(<MinTime[^>]*>)0(<\/MinTime>)/g, '$14$2');
+      fixes.push('Set GOOSE MinTime to 4 ms');
+    }
+    if (/maxTime[^>]*>0</.test(fixed)) {
+      fixed = fixed.replace(/(<MaxTime[^>]*>)0(<\/MaxTime>)/g, '$11000$2');
+      fixes.push('Set GOOSE MaxTime to 1000 ms');
+    }
+    if (fixed !== xmlText) {
+      setXmlText(fixed);
+      setAutoFixBanner(`Auto-Fix applied (${fixes.length}): ${fixes.join(' | ')}`);
+    } else {
+      setAutoFixBanner('No auto-fixable schema syntax issues detected — check remaining semantic findings manually or use Edit XML.');
+    }
+  };
+
+  const handleExportPdfReport = () => {
+    if (!xmlText) return;
+    const esc = (v: unknown) =>
+      String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c));
+    const rows = issues.length
+      ? issues
+          .map(
+            (it) =>
+              `<tr><td class="${it.severity.toLowerCase()}">${esc(it.severity)}</td><td><code>${esc(it.ruleId)}</code></td><td>${it.line}</td><td>${esc(it.section)}</td><td>${esc(it.target)}</td><td>${esc(it.message)}<br/><small>${esc(it.remedy)}</small></td></tr>`
+          )
+          .join('')
+      : '<tr><td colspan="6" style="color:#166534;font-weight:bold;">0 Validation Errors / Warnings — SCL Compliant.</td></tr>';
+    const html = `<!doctype html><html><head><meta charset="utf-8"/><title>IEC 61850-6 SCL Validation Certificate — ${esc(fileName)}</title><style>
+      @page{size:A4 portrait;margin:12mm}body{font:10px "Segoe UI",Arial,sans-serif;color:#111827;margin:0}
+      header{border-bottom:3px solid #0f3d6e;padding-bottom:8px;margin-bottom:12px}
+      h1{margin:0 0 4px;font-size:15px;color:#0f3d6e}
+      .meta{font-size:9px;color:#475569;display:flex;gap:14px;flex-wrap:wrap}
+      .kpis{display:flex;gap:8px;margin:10px 0}.kpi{flex:1;border:1px solid #cbd5e1;background:#f8fafc;padding:6px 8px;border-radius:3px}
+      .kpi strong{font-size:13px;display:block;color:#0f3d6e}
+      table{width:100%;border-collapse:collapse;font-size:8.5px}th{background:#0f3d6e;color:#fff;text-align:left}
+      th,td{border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}
+      .error{color:#b91c1c;font-weight:bold}.warning{color:#b45309;font-weight:bold}.info{color:#0369a1;font-weight:bold}
+    </style></head><body>
+      <header><h1>IEC 61850-6 SCL Schema & Semantic Validation Audit Report</h1>
+        <div class="meta"><span><b>File:</b> ${esc(fileName)}</span><span><b>Schema:</b> ${esc(summary.sclVersion)}${esc(summary.sclRevision)}</span><span><b>Verdict:</b> ${esc(verdict)}</span><span><b>Date:</b> ${esc(new Date().toLocaleString())}</span></div>
+      </header>
+      <div class="kpis">
+        <div class="kpi"><strong>${errorCount}</strong>Errors</div>
+        <div class="kpi"><strong>${warnCount}</strong>Warnings</div>
+        <div class="kpi"><strong>${summary.iedCount}</strong>IEDs</div>
+        <div class="kpi"><strong>${summary.datasetCount} / ${summary.rcbCount} / ${summary.gcbCount}</strong>DS / RCB / GCB</div>
+      </div>
+      <table><thead><tr><th>Severity</th><th>Rule ID</th><th>Line</th><th>Section</th><th>Target</th><th>Message & Remedy</th></tr></thead><tbody>${rows}</tbody></table>
+    </body></html>`;
+    const popup = window.open('', '_blank');
+    if (!popup) return;
+    popup.document.open();
+    popup.document.write(html);
+    popup.document.close();
+    popup.focus();
+    setTimeout(() => popup.print(), 250);
+  };
+
   const verdict = !xmlText ? 'IDLE' : errorCount > 0 ? 'FAIL' : warnCount > 0 ? 'PASS_WARN' : 'PASS';
 
   return (
@@ -1176,6 +1258,26 @@ ${lntXml}
           background-color: #dbeafe !important;
           color: #0f172a !important;
         }
+        #root .sclval-app p,
+        #root .sclval-app span,
+        #root .sclval-app div {
+          text-shadow: none !important;
+        }
+        #root .sclval-app .scl-empty-hint {
+          color: #475569 !important;
+        }
+        #root .sclval-app .scl-menu-btn {
+          background: transparent !important;
+          color: #1e293b !important;
+          border: 1px solid transparent !important;
+          padding: 2px 8px !important;
+          font-size: 11.5px !important;
+          border-radius: 2px !important;
+        }
+        #root .sclval-app .scl-menu-btn:hover {
+          background: #dbeafe !important;
+          border-color: #93c5fd !important;
+        }
       `}</style>
 
       <input
@@ -1194,9 +1296,74 @@ ${lntXml}
           </span>
           <span>IEC 61850-6 SCL Validation Tool — ICD / IID / SCD / CID Schema Audit</span>
         </div>
-        <div className="text-[11px] opacity-90 font-mono">
+        <div className="text-[11px] opacity-90 font-mono truncate max-w-[45%]">
           {fileName ? `${fileName} (${summary.sclVersion}${summary.sclRevision !== '-' ? summary.sclRevision : ''}${summary.sclRelease !== '-' ? '.' + summary.sclRelease : ''})` : 'No SCL Loaded'}
         </div>
+      </div>
+
+      {/* 1B. CLASSIC DESKTOP MENU BAR */}
+      <div
+        className="bg-[#f1f5f9] border-b border-[#cbd5e1] px-2 py-0.5 flex items-center gap-1 shrink-0 relative z-20 select-none"
+        onMouseLeave={() => setOpenMenu(null)}
+      >
+        {(
+          [
+            ['File', [
+              { label: 'Open SCL File (.icd/.cid/.scd)...', action: () => fileInputRef.current?.click() },
+              { label: 'Audit Live Substation SCD', action: handleAuditLiveSubstation },
+              { label: 'Load Faulty Sample CID', action: handleLoadFaultySample },
+              { label: 'Download XML', action: handleDownloadXml, disabled: !xmlText },
+              { label: 'Clear Workspace', action: () => { setXmlText(''); setFileName(''); setAutoFixBanner(''); } },
+            ]],
+            ['Validation', [
+              { label: 'Auto-Fix Common Schema Errors', action: handleAutoFixScl, disabled: !xmlText },
+              { label: 'Filter: Errors Only', action: () => setSeverityFilter('ERROR') },
+              { label: 'Filter: Warnings Only', action: () => setSeverityFilter('WARNING') },
+              { label: 'Show All Findings', action: () => setSeverityFilter('ALL') },
+            ]],
+            ['View', [
+              { label: 'XML Source Inspector', action: () => setRightTab('XML') },
+              { label: editXmlMode ? 'Switch to Highlight Mode' : 'Switch to Live XML Editor', action: () => { setRightTab('XML'); setEditXmlMode((v) => !v); } },
+              { label: 'SCL Structure Explorer', action: () => setRightTab('STRUCTURE') },
+              { label: 'IEC 61850-6 Rule Catalog', action: () => setRightTab('RULES') },
+            ]],
+            ['Reports', [
+              { label: 'Export Audit CSV', action: handleExportCsv, disabled: !xmlText },
+              { label: 'Print / Save Official PDF Report', action: handleExportPdfReport, disabled: !xmlText },
+            ]],
+          ] as Array<[string, Array<{ label: string; action: () => void; disabled?: boolean }>]>
+        ).map(([menuName, items]) => (
+          <div key={menuName} className="relative">
+            <button
+              type="button"
+              className="scl-menu-btn"
+              onClick={() => setOpenMenu((m) => (m === menuName ? null : menuName))}
+            >
+              {menuName}
+            </button>
+            {openMenu === menuName && (
+              <div className="absolute left-0 top-full mt-0.5 w-56 bg-white border border-[#94a3b8] shadow-lg py-1 z-30">
+                {items.map((it) => (
+                  <button
+                    key={it.label}
+                    type="button"
+                    disabled={it.disabled}
+                    onClick={() => { setOpenMenu(null); it.action(); }}
+                    className="w-full text-left px-3 py-1.5 text-[11.5px] text-[#0f172a] hover:bg-[#e0f2fe] disabled:opacity-40"
+                  >
+                    {it.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        {autoFixBanner && (
+          <div className="ml-auto text-[11px] font-medium text-[#0369a1] bg-[#e0f2fe] border border-[#7dd3fc] px-2 py-0.5 rounded flex items-center gap-2">
+            <span>{autoFixBanner}</span>
+            <button type="button" onClick={() => setAutoFixBanner('')} className="font-bold text-[#0f172a]">×</button>
+          </div>
+        )}
       </div>
 
       {/* 2. TOOLBAR */}
@@ -1225,9 +1392,18 @@ ${lntXml}
           <option value="ED1_0">Edition 1.0 (2003)</option>
         </select>
 
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <button type="button" className="scl-btn" disabled={!xmlText} onClick={() => { setRightTab('XML'); setEditXmlMode((v) => !v); }}>
+            {editXmlMode ? 'Inspect XML' : 'Edit XML'}
+          </button>
+          <button type="button" className="scl-btn" disabled={!xmlText || errorCount === 0} onClick={handleAutoFixScl}>
+            Auto-Fix ({errorCount})
+          </button>
+          <button type="button" className="scl-btn" disabled={!xmlText} onClick={handleExportPdfReport}>
+            PDF Report
+          </button>
           <button type="button" className="scl-btn" disabled={!xmlText} onClick={handleExportCsv}>
-            Export Audit CSV
+            Export CSV
           </button>
           <button type="button" className="scl-btn" disabled={!xmlText} onClick={handleDownloadXml}>
             Download XML
@@ -1442,7 +1618,7 @@ ${lntXml}
           {rightTab === 'XML' && (
             <div ref={xmlScrollRef} className="flex-1 overflow-auto bg-[#ffffff] font-mono text-[11.5px] leading-[19px]">
               {xmlLines.length === 0 ? (
-                <div className="p-6 text-[#64748b] font-sans text-[12px]">
+                <div className="p-6 scl-empty-hint text-[#475569] font-sans text-[12px]">
                   Load an SCL file to inspect line-numbered XML with inline error highlights.
                 </div>
               ) : (
@@ -1460,7 +1636,7 @@ ${lntXml}
                       : 'transparent';
                     return (
                       <div key={ln} className="flex" style={{ backgroundColor: bg }}>
-                        <span className="w-[46px] shrink-0 text-right pr-2.5 select-none text-[#64748b] bg-[#f8fafc] border-r border-[#e2e8f0]">
+                        <span className="w-[46px] shrink-0 text-right pr-2.5 select-none scl-empty-hint text-[#475569] bg-[#f8fafc] border-r border-[#e2e8f0]">
                           {ln}
                         </span>
                         <span className="pl-2.5 pr-4 whitespace-pre text-[#0f172a]">{lineText}</span>
@@ -1498,7 +1674,7 @@ ${lntXml}
                     ))}
                     {summary.commEntries.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="text-[#64748b]">No Communication entries parsed.</td>
+                        <td colSpan={5} className="scl-empty-hint text-[#475569]">No Communication entries parsed.</td>
                       </tr>
                     )}
                   </tbody>
@@ -1533,7 +1709,7 @@ ${lntXml}
                     ))}
                     {summary.ieds.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="text-[#64748b]">No IEDs parsed.</td>
+                        <td colSpan={7} className="scl-empty-hint text-[#475569]">No IEDs parsed.</td>
                       </tr>
                     )}
                   </tbody>

@@ -1,5 +1,28 @@
-import React, { useEffect, useState } from 'react';
-import { BookOpen, ChevronDown, ClipboardCheck, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Activity,
+  AlertTriangle,
+  BookOpen,
+  CheckCircle2,
+  ChevronDown,
+  ClipboardCheck,
+  Download,
+  Factory,
+  FileText,
+  HelpCircle,
+  MapPin,
+  Play,
+  Plus,
+  Printer,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+  Wrench,
+  X,
+  Zap,
+} from 'lucide-react';
+import { useSubstationStore } from '../simulation/useSubstationStore';
+import { getBayProtocolBreakdown } from '../data/protocolRegistry';
 
 type Step = { title: string; why: string; actions: string[]; evidence: string };
 type Phase = { title: string; description: string; steps: Step[] };
@@ -145,547 +168,2532 @@ const phases: Phase[] = [
   ]}
 ];
 
-type LabCase = {
-  id: string; title: string; topic: string; objective: string;
-  setup: string; expected: string; diagnose: string;
-  controls: { key: string; label: string; options: { value: string; label: string }[]; correct: string }[];
-};
-const labCases: LabCase[] = [
-  { id: 'LAB-01', title: 'Breaker Status → SCADA HMI', topic: 'Status / HMI', objective: 'Simulated XCBR.Pos.stVal should match the SCADA indication with valid quality.', setup: 'Feeder IED sends an MMS report for XCBR.Pos. Operator expects breaker CLOSED.', expected: 'Source CLOSED, MMS report enabled, SCADA mapping correct, quality GOOD.', diagnose: 'Compare source XCBR.Pos, RCB enablement, quality and HMI tag mapping.', controls: [
-    {key:'position',label:'IED breaker contact',correct:'closed',options:[{value:'open',label:'OPEN'},{value:'closed',label:'CLOSED'}]},
-    {key:'report',label:'MMS Report Control Block',correct:'enabled',options:[{value:'disabled',label:'Disabled'},{value:'enabled',label:'Enabled'}]},
-    {key:'mapping',label:'SCADA tag mapping',correct:'correct',options:[{value:'wrong',label:'Wrong tag'},{value:'correct',label:'Correct XCBR.Pos'}]},
-    {key:'quality',label:'Data quality',correct:'good',options:[{value:'invalid',label:'INVALID'},{value:'good',label:'GOOD'}]}
-  ]},
-  { id:'LAB-02',title:'GOOSE Publisher → Subscriber',topic:'GOOSE',objective:'Subscriber accepts publisher dataset and updates the permissive input.',setup:'Protection IED publishes a simulated interlock permissive to bay controller.',expected:'GOOSE enabled, VLAN 100, confRev matched, subscriber ExtRef correct.',diagnose:'Check VLAN, APPID, confRev, dataset order, ExtRef and subscriber supervision.',controls:[
-    {key:'publish',label:'GOOSE publisher',correct:'on',options:[{value:'off',label:'Disabled'},{value:'on',label:'Enabled'}]},
-    {key:'vlan',label:'Subscriber VLAN',correct:'100',options:[{value:'200',label:'200 (mismatch)'},{value:'100',label:'100 (match)'}]},
-    {key:'revision',label:'GOOSE confRev',correct:'match',options:[{value:'mismatch',label:'Mismatch'},{value:'match',label:'Match'}]},
-    {key:'extref',label:'Subscriber ExtRef',correct:'mapped',options:[{value:'missing',label:'Not mapped'},{value:'mapped',label:'Mapped'}]}
-  ]},
-  { id:'LAB-03',title:'MMS Association & Reporting',topic:'MMS',objective:'SCADA client establishes MMS and receives the expected dataset updates.',setup:'IED IP 192.168.10.21; SCADA client uses TCP 102 and an enabled RCB.',expected:'Network reachable, TCP 102 available, MMS service running, RCB enabled.',diagnose:'Ping alone does not prove MMS; check TCP 102, server service, association and RCB.',controls:[
-    {key:'network',label:'Station network',correct:'reachable',options:[{value:'down',label:'Disconnected'},{value:'reachable',label:'Reachable'}]},
-    {key:'tcp',label:'TCP port 102',correct:'open',options:[{value:'blocked',label:'Blocked'},{value:'open',label:'Open'}]},
-    {key:'service',label:'IED MMS service',correct:'on',options:[{value:'off',label:'Stopped'},{value:'on',label:'Running'}]},
-    {key:'rcb',label:'SCADA report subscription',correct:'on',options:[{value:'off',label:'Not enabled'},{value:'on',label:'Enabled'}]}
-  ]},
-  { id:'LAB-04',title:'Remote Close Interlock Check',topic:'Controls',objective:'Verify a safe simulated CLOSE request is permitted only when all interlocks are satisfied.',setup:'Isolated training breaker; no physical output. Earth switch must be OPEN.',expected:'REMOTE selected, earth switch OPEN, permissive TRUE, control sequence valid.',diagnose:'Never bypass interlocks. Check Local/Remote, earthing switch, CILO and control model.',controls:[
-    {key:'remote',label:'Local / Remote',correct:'remote',options:[{value:'local',label:'LOCAL'},{value:'remote',label:'REMOTE'}]},
-    {key:'earth',label:'Earth switch',correct:'open',options:[{value:'closed',label:'CLOSED (blocks close)'},{value:'open',label:'OPEN'}]},
-    {key:'permissive',label:'CILO close permissive',correct:'true',options:[{value:'false',label:'FALSE'},{value:'true',label:'TRUE'}]},
-    {key:'control',label:'Control sequence',correct:'valid',options:[{value:'invalid',label:'Invalid select/operate'},{value:'valid',label:'Valid select/operate'}]}
-  ]},
-  { id:'LAB-05',title:'IEC 104 Gateway → RCC',topic:'Gateway',objective:'Confirm a mapped breaker indication reaches the control centre correctly.',setup:'IEC 61850 XCBR.Pos mapped to an approved IEC 104 IOA in the gateway.',expected:'Gateway online, IOA correct, GI completed, status quality valid.',diagnose:'Check source point, gateway mapping, IOA, Type ID, GI and IEC 104 link.',controls:[
-    {key:'gateway',label:'Gateway IEC 104 connection',correct:'up',options:[{value:'down',label:'Disconnected'},{value:'up',label:'Connected'}]},
-    {key:'ioa',label:'Information Object Address',correct:'correct',options:[{value:'wrong',label:'Wrong IOA'},{value:'correct',label:'Approved IOA'}]},
-    {key:'gi',label:'General Interrogation',correct:'done',options:[{value:'pending',label:'Not completed'},{value:'done',label:'Completed'}]},
-    {key:'q',label:'Source quality',correct:'good',options:[{value:'invalid',label:'INVALID'},{value:'good',label:'GOOD'}]}
-  ]},
-  { id:'LAB-06',title:'PRP LAN A / LAN B Redundancy',topic:'Networking',objective:'Verify redundancy health when one independent PRP path is unavailable.',setup:'Dual-attached IED communicates on independent PRP LAN A and LAN B.',expected:'At least one LAN operational; supervision correctly reports failed path. Both LANs preferred for healthy normal operation.',diagnose:'Inspect both independent LAN links and redundancy supervision. One failed LAN is degraded, not total failure.',controls:[
-    {key:'lanA',label:'PRP LAN A',correct:'up',options:[{value:'down',label:'DOWN'},{value:'up',label:'UP'}]},
-    {key:'lanB',label:'PRP LAN B',correct:'up',options:[{value:'down',label:'DOWN'},{value:'up',label:'UP'}]},
-    {key:'supervision',label:'Redundancy supervision',correct:'on',options:[{value:'off',label:'Disabled'},{value:'on',label:'Enabled'}]}
-  ]}
+
+type CommissioningMode = 'FAT' | 'SAT';
+type WorkbenchTab = 'P2P' | 'TESTS' | 'PUNCH' | 'REPORT' | 'SOP';
+type PunchCategory = 'CAT_A' | 'CAT_B' | 'CAT_C';
+
+interface P2pCheckResult {
+  key: string;
+  label: string;
+  signalRef: string;
+  ioaOrMap: string;
+  status: 'NOT_TESTED' | 'PASS' | 'FAIL';
+  observedValue: string;
+  timestamp: string;
+  note: string;
+}
+
+interface LiveAutoTestResult {
+  id: string;
+  code: string;
+  title: string;
+  standardRef: string;
+  modeScope: 'BOTH' | 'FAT' | 'SAT';
+  category: string;
+  description: string;
+  status: 'NOT_RUN' | 'PASS' | 'FAIL';
+  actualEvidence: string;
+  timestamp: string;
+}
+
+interface PunchItem {
+  id: string;
+  category: PunchCategory;
+  mode: CommissioningMode;
+  bayOrIed: string;
+  description: string;
+  linkedTestId?: string;
+  status: 'OPEN' | 'CLOSED';
+  createdAt: string;
+  closedAt?: string;
+}
+
+const INITIAL_LIVE_AUTO_TESTS: LiveAutoTestResult[] = [
+  {
+    id: 'AUTO-CILO-01',
+    code: 'TC-CILO-01',
+    title: 'Interlocking (CILO): Earth Switch Q8 Closed Blocks CB Close',
+    standardRef: 'IEC 61850-7-4 (CILO1) / Site Safety Matrix',
+    modeScope: 'BOTH',
+    category: 'Interlocking',
+    description: 'Opens CB, closes Earth Switch (Q8), attempts SCADA SBO CB Close, and verifies CILO rejects the unsafe close command.',
+    status: 'NOT_RUN',
+    actualEvidence: 'Click "Run Live Test" to execute on selected bay.',
+    timestamp: '—',
+  },
+  {
+    id: 'AUTO-PROT-86',
+    code: 'TC-PROT-86',
+    title: 'Protection Trip (50/51) → CB Open + 86 Lockout + Alarm + 1ms SOE',
+    standardRef: 'IEC 61850-7-4 (PTRC1 / PTOC1) / ISA-18.2',
+    modeScope: 'BOTH',
+    category: 'Protection & SOE',
+    description: 'Injects simulated 50/51 trip on selected bay, verifies breaker opens, 86 trip indication latches, Critical alarm raises, and SOE logs event.',
+    status: 'NOT_RUN',
+    actualEvidence: 'Click "Run Live Test" to inject & verify trip chain.',
+    timestamp: '—',
+  },
+  {
+    id: 'AUTO-SBO-01',
+    code: 'TC-SBO-01',
+    title: 'SCADA SBO Control (CSWI1) & Independent Position Feedback (XCBR1)',
+    standardRef: 'IEC 61850-7-2 (SBOw) / IEC 60870-5-104 (C_DC_NA_1)',
+    modeScope: 'BOTH',
+    category: 'Control & Feedback',
+    description: 'Ensures REMOTE mode & healthy interlocks, toggles CB via SCADA SBO, and verifies XCBR1 position feedback + SOE confirmation.',
+    status: 'NOT_RUN',
+    actualEvidence: 'Click "Run Live Test" to verify SBO control cycle.',
+    timestamp: '—',
+  },
+  {
+    id: 'AUTO-43LR-01',
+    code: 'TC-43LR-01',
+    title: 'Control Authority (43LR LOCAL Mode Blocks Remote SCADA Command)',
+    standardRef: 'IEC 61850-7-4 (LLN0.Loc) / Switching Hierarchy',
+    modeScope: 'SAT',
+    category: 'Authority',
+    description: 'Switches bay 43LR selector to LOCAL, sends a remote SCADA SBO command, confirms rejection, and restores REMOTE mode.',
+    status: 'NOT_RUN',
+    actualEvidence: 'Click "Run Live Test" to verify 43LR local blocking.',
+    timestamp: '—',
+  },
+  {
+    id: 'AUTO-MMS-GI',
+    code: 'TC-MMS-GI',
+    title: 'IEC 61850 MMS General Interrogation (GI) & BRCB Report Health',
+    standardRef: 'IEC 61850-8-1 (MMS TCP/102 / BRCB)',
+    modeScope: 'BOTH',
+    category: 'MMS & SCADA',
+    description: 'Triggers MMS General Interrogation on selected bay IED and verifies IED commHealthy, GOOD quality, and active BRCB reporting.',
+    status: 'NOT_RUN',
+    actualEvidence: 'Click "Run Live Test" to run MMS GI check.',
+    timestamp: '—',
+  },
+  {
+    id: 'AUTO-GOOSE-01',
+    code: 'TC-GOOSE-01',
+    title: 'GOOSE Multicast Burst (0x88B8) & stNum/sqNum Supervision',
+    standardRef: 'IEC 61850-8-1 (GOOSE VLAN / APPID)',
+    modeScope: 'FAT',
+    category: 'GOOSE',
+    description: 'Publishes a GOOSE state-change burst on primary GoCB and verifies stNum increment with zero mismatch faults.',
+    status: 'NOT_RUN',
+    actualEvidence: 'Click "Run Live Test" to verify GOOSE publisher burst.',
+    timestamp: '—',
+  },
+  {
+    id: 'AUTO-RED-01',
+    code: 'TC-RED-01',
+    title: 'Station Bus Redundancy (PRP / HSR) & Time Sync Quality Audit',
+    standardRef: 'IEC 62439-3 (PRP/HSR) / IEEE 1588 PTP',
+    modeScope: 'SAT',
+    category: 'Network & Sync',
+    description: 'Audits active redundancy mode, healthy station links, IED online ratio, and confirms no unresolved network/time-sync faults.',
+    status: 'NOT_RUN',
+    actualEvidence: 'Click "Run Live Test" to audit redundancy & sync health.',
+    timestamp: '—',
+  },
 ];
 
-type LabLog = { time: string; caseId: string; result: 'PASS' | 'FAIL'; detail: string };
-const FatSatInteractiveLab: React.FC = () => {
-  const [showGuide, setShowGuide] = useState(false);
-  const [selectedId,setSelectedId] = useState(labCases[0].id);
-  const [values,setValues] = useState<Record<string,string>>({});
-  const [logs,setLogs] = useState<LabLog[]>([]);
-  const [feedback,setFeedback] = useState<{pass:boolean; text:string} | null>(null);
-  const test = labCases.find(item => item.id === selectedId) ?? labCases[0];
-  useEffect(() => {
-    if (!showGuide) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setShowGuide(false); };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [showGuide]);
-  const changeTest = (id:string) => {setSelectedId(id);setValues({});setFeedback(null);};
-  const run = () => {
-    const failures = test.controls.filter(c => (values[c.key] ?? c.options[0].value) !== c.correct);
-    const prp = test.id === 'LAB-06';
-    const a = values.lanA ?? 'down'; const b = values.lanB ?? 'down';
-    const supervisor = values.supervision ?? 'off';
-    const pass = prp ? (a === 'up' || b === 'up') && supervisor === 'on' : failures.length === 0;
-    const detail = prp ? (!pass ? 'Communication unavailable or supervision disabled. Verify LAN A/B and supervision.' : a === 'up' && b === 'up' ? 'Both PRP paths healthy.' : 'Communication available via remaining LAN; redundancy DEGRADED and alarm expected.') : pass ? 'All simulated acceptance conditions satisfied.' : `Check: ${failures.map(c => c.label).join(', ')}.`;
-    setFeedback({pass,text:detail});
-    setLogs(old => [{time:new Date().toLocaleTimeString(),caseId:test.id,result:(pass?'PASS':'FAIL') as 'PASS' | 'FAIL',detail},...old].slice(0,40));
+function formatClock(): string {
+  return new Date().toLocaleTimeString();
+}
+
+function escapeHtml(val: unknown): string {
+  return String(val ?? '').replace(/[&<>"']/g, (ch) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] || ch)
+  );
+}
+
+function toPdfSafeText(input: unknown): string {
+  return String(input ?? '')
+    .replace(/\u2014|\u2013/g, '-')
+    .replace(/\u2192/g, '->')
+    .replace(/\u00b7/g, '|')
+    .replace(/\u00b0/g, ' deg')
+    .replace(/\u2265/g, '>=')
+    .replace(/\u2264/g, '<=')
+    .replace(/\u00d7/g, 'x')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+}
+
+function wrapPdfLines(text: string, maxChars: number): string[] {
+  const clean = String(text ?? '')
+    .replace(/\u2014|\u2013/g, '-')
+    .replace(/\u2192/g, '->')
+    .replace(/\u00b7/g, '|')
+    .replace(/\u00b0/g, ' deg')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return ['-'];
+  const words = clean.split(' ');
+  const out: string[] = [];
+  let cur = '';
+  for (const w of words) {
+    if (!cur) {
+      cur = w;
+    } else if (cur.length + 1 + w.length <= maxChars) {
+      cur += ' ' + w;
+    } else {
+      out.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+interface PdfSectionInput {
+  title: string;
+  headers: string[];
+  colWidths: number[];
+  rows: string[][];
+}
+
+function buildDirectPdfBlob(params: {
+  title: string;
+  subtitle: string;
+  metaLines: string[];
+  kpis: { label: string; value: string }[];
+  verdict: string;
+  sections: PdfSectionInput[];
+  signatures: string[];
+}): Blob {
+  const PAGE_W = 595.28;
+  const PAGE_H = 841.89;
+  const MARGIN = 36;
+  const CONTENT_W = PAGE_W - MARGIN * 2;
+  const BOTTOM_Y = 48;
+
+  const pages: string[][] = [];
+  let cmds: string[] = [];
+  let y = PAGE_H - MARGIN;
+
+  const startNewPage = () => {
+    cmds = [];
+    pages.push(cmds);
+    y = PAGE_H - MARGIN;
   };
-  const reset = () => {setValues({});setFeedback(null);};
-  const exportCsv = () => {
-    const csv = [['Time','Test','Result','Evidence'],...logs.map(x=>[x.time,x.caseId,x.result,x.detail])].map(row=>row.map(cell=>'"'+cell.replace(/"/g,'""')+'"').join(',')).join('\r\n');
-    const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
-    const a=document.createElement('a');a.href=url;a.download='fat-sat-training-evidence.csv';a.click();URL.revokeObjectURL(url);
+
+  const ensureSpace = (needed: number) => {
+    if (y - needed < BOTTOM_Y) {
+      startNewPage();
+    }
   };
-  return <section className="mt-8 rounded-2xl border border-cyan-700/70 bg-[#091f34] p-4 md:p-7" aria-label="Interactive FAT SAT Practical Lab">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-extrabold text-cyan-300 md:text-2xl">Interactive FAT / SAT Practical Lab</h2><p className="mt-2 text-sm leading-6 text-slate-300">Choose a test, configure simulated inputs, execute validation and inspect the evidence. No live hardware connection.</p></div><div className="flex flex-wrap items-center gap-2"><button type="button" onClick={() => setShowGuide(true)} aria-haspopup="dialog" className="inline-flex items-center gap-2 rounded-full border border-cyan-400 bg-[#103c54] px-4 py-2 text-sm font-bold text-cyan-100 shadow-lg shadow-cyan-950/30 hover:bg-[#175371] focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"><BookOpen size={17}/> Lab ఎలా పనిచేస్తుంది? <span className="rounded-full bg-cyan-300 px-2 py-0.5 text-xs text-[#052238]">HOW TO</span></button><span className="rounded-lg border border-emerald-700 bg-[#0b2d2b] px-3 py-2 text-xs font-bold text-emerald-300">TRAINING SIMULATION</span></div></div>
-    {showGuide && <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 p-3 md:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowGuide(false); }} role="presentation">
-      <div role="dialog" aria-modal="true" aria-labelledby="fat-sat-howto-title" className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-cyan-500 bg-[#071d30] p-5 text-slate-100 shadow-2xl md:p-7">
-        <div className="flex items-start justify-between gap-4"><div><div className="text-xs font-bold uppercase tracking-widest text-cyan-400">Interactive lab • User guide</div><h3 id="fat-sat-howto-title" className="mt-2 text-xl font-extrabold text-white md:text-2xl">Lab ఎలా పనిచేస్తుంది? — Step-by-Step</h3><p className="mt-2 text-sm leading-6 text-slate-300">ప్రతి simulated FAT/SAT test ఎలా run చేయాలో ఇక్కడ తెలుసుకోండి.</p></div><button type="button" autoFocus onClick={() => setShowGuide(false)} aria-label="Close lab guide" className="shrink-0 rounded-lg border border-cyan-700 px-3 py-2 font-bold text-cyan-200 hover:bg-[#123a52]">✕</button></div>
-        <ol className="mt-5 list-decimal space-y-3 rounded-xl border border-[#23506a] bg-[#0b2b42] p-5 pl-9 text-sm leading-7 text-slate-200">
-          <li><strong className="text-white">Select Test:</strong> Left side నుంచి LAB-01 నుంచి LAB-06 వరకు ఏ test అయినా select చేయండి.</li>
-          <li><strong className="text-white">Read Objective & Setup:</strong> Test purpose, simulated equipment, expected acceptance criteria చదవండి.</li>
-          <li><strong className="text-white">Configure Inputs:</strong> Dropdowns లో breaker status, VLAN, MMS, interlock, gateway లేదా PRP settings select చేయండి. Default values fault conditions చూపించవచ్చు.</li>
-          <li><strong className="text-white">Execute Simulated Test:</strong> Button click చేసి PASS లేదా FAIL result, fault reason చూడండి.</li>
-          <li><strong className="text-white">Troubleshoot & Retest:</strong> FAIL వస్తే guidance ప్రకారం settings correct చేసి మళ్లీ Execute చేయండి.</li>
-          <li><strong className="text-white">Evidence Log:</strong> ప్రతి run result కింద save అవుతుంది. Export CSV తో results download చేసుకోవచ్చు; Reset Inputs current settings reset చేస్తుంది.</li>
-        </ol>
-        <h4 className="mt-6 text-lg font-bold text-cyan-300">6 Practical Tests — ఏమి check చేయాలి?</h4>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">{[
-          ['LAB-01 — Breaker Status', 'Breaker input → IED → MMS → SCADA. Correct source status, reporting and HMI mapping select చేయండి.'],
-          ['LAB-02 — GOOSE', 'Publisher/Subscriber, VLAN and confRev values match అయ్యేలా configure చేయండి.'],
-          ['LAB-03 — MMS', 'Network reachable, TCP 102 open, MMS service running and RCB enabled ఉంచండి.'],
-          ['LAB-04 — Remote Close', 'REMOTE mode, earth switch OPEN, CILO permissive TRUE and valid control sequence check చేయండి.'],
-          ['LAB-05 — IEC 104 Gateway', 'Gateway connected, correct IOA, GI completed and source quality GOOD verify చేయండి.'],
-          ['LAB-06 — PRP Redundancy', 'LAN A/LAN B మరియు supervision test చేయండి. One LAN down అయితే communication PASS అయినా redundancy degraded అని result చూపిస్తుంది.']
-        ].map(([name, description]) => <div key={name} className="rounded-lg border border-[#27516a] bg-[#0b2b42] p-3"><strong className="text-sm text-cyan-200">{name}</strong><p className="mt-1 text-sm leading-6 text-slate-300">{description}</p></div>)}</div>
-        <p className="mt-5 rounded-lg border border-amber-800 bg-[#2c2415] p-3 text-sm leading-6 text-amber-100"><strong>Safety:</strong> ఇది browser-based simulation మాత్రమే. Live IED, breaker, protection trip outputs కి connect కాదు. Real FAT/SAT testing approved permits, isolation and authorized engineers తోనే చేయాలి.</p>
-        <div className="mt-5 flex justify-end"><button type="button" onClick={() => setShowGuide(false)} className="rounded-lg bg-cyan-400 px-5 py-2.5 font-bold text-[#041b2a] hover:bg-cyan-300">Got it — Start Testing</button></div>
-      </div>
-    </div>}
-    <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.7fr)]">
-      <nav aria-label="Lab test cases" className="space-y-2">{labCases.map(item=><button type="button" key={item.id} onClick={()=>changeTest(item.id)} className={`w-full rounded-lg border p-3 text-left transition-colors ${selectedId===item.id?'border-cyan-400 bg-[#13425b] text-white':'border-[#23506a] bg-[#0a273b] text-slate-200 hover:bg-[#123a52]'}`}><span className="block text-xs font-bold text-cyan-300">{item.id} · {item.topic}</span><span className="mt-1 block text-sm font-semibold">{item.title}</span></button>)}</nav>
-      <div className="rounded-xl border border-[#23506a] bg-[#061728] p-4 md:p-5">
-        <h3 className="text-lg font-bold text-white">{test.title}</h3><p className="mt-2 text-sm leading-6 text-slate-300"><strong className="text-cyan-300">Objective:</strong> {test.objective}</p><p className="mt-2 text-sm leading-6 text-slate-300"><strong className="text-cyan-300">Setup:</strong> {test.setup}</p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">{test.controls.map(c=><label key={c.key} className="block text-sm font-medium text-slate-200">{c.label}<select value={values[c.key]??c.options[0].value} onChange={e=>{setValues(old=>({...old,[c.key]:e.target.value}));setFeedback(null);}} className="mt-2 w-full rounded-lg border border-cyan-700 bg-[#10344a] p-3 text-white focus:outline-none focus:ring-2 focus:ring-cyan-400">{c.options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></label>)}</div>
-        <div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={run} className="rounded-lg bg-cyan-400 px-5 py-3 font-bold text-[#031522] hover:bg-cyan-300">Execute Simulated Test</button><button type="button" onClick={reset} className="rounded-lg border border-cyan-700 px-5 py-3 text-cyan-200 hover:bg-[#123a52]">Reset Inputs</button></div>
-        {feedback && <div role="status" className={`mt-4 rounded-lg border p-4 ${feedback.pass?'border-emerald-600 bg-[#0c302b] text-emerald-200':'border-rose-600 bg-[#351e2c] text-rose-200'}`}><strong>{feedback.pass?'PASS':'FAIL'} — Simulated result</strong><p className="mt-1 text-sm leading-6">{feedback.text}</p></div>}
-        <div className="mt-5 space-y-2 rounded-lg border border-[#28536b] bg-[#0c2a3f] p-4 text-sm leading-6"><p><strong className="text-cyan-300">Expected acceptance criteria:</strong> {test.expected}</p><p><strong className="text-cyan-300">Troubleshooting guidance:</strong> {test.diagnose}</p></div>
-      </div>
-    </div>
-    <div className="mt-6 rounded-xl border border-[#23506a] bg-[#071727] p-4 md:p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold text-cyan-300">Test Results & Evidence Log ({logs.length})</h3><div className="flex gap-2"><button type="button" disabled={!logs.length} onClick={exportCsv} className="rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-200 disabled:opacity-40">Export CSV</button><button type="button" disabled={!logs.length} onClick={()=>setLogs([])} className="rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-200 disabled:opacity-40">Clear Log</button></div></div>{logs.length?<div className="mt-3 overflow-x-auto"><table className="w-full min-w-[580px] text-left text-sm"><thead className="text-cyan-300"><tr><th className="p-2">Time</th><th className="p-2">Test</th><th className="p-2">Result</th><th className="p-2">Evidence / Diagnostic</th></tr></thead><tbody>{logs.map((log,i)=><tr key={`${log.time}-${i}`} className="border-t border-[#23435a]"><td className="p-2">{log.time}</td><td className="p-2">{log.caseId}</td><td className={`p-2 font-bold ${log.result==='PASS'?'text-emerald-300':'text-rose-300'}`}>{log.result}</td><td className="p-2">{log.detail}</td></tr>)}</tbody></table></div>:<p className="mt-3 text-sm text-slate-400">No tests executed yet. Choose inputs and click Execute Simulated Test.</p>}</div>
-  </section>;
-};
 
-
-
-type SignalStage = { name: string; detail: string; healthy: string; fault: string };
-const signalStages: SignalStage[] = [
-  {name:'Field Breaker',detail:'52a/52b auxiliary contacts',healthy:'CLOSED contact simulated',fault:'Field contact / wiring mismatch'},
-  {name:'Bay IED',detail:'XCBR.Pos.stVal + q + t',healthy:'CLOSED · GOOD quality',fault:'IED input mapping / quality invalid'},
-  {name:'IEC 61850 MMS',detail:'DataSet / Report Control Block',healthy:'Report received by SCADA',fault:'RCB disabled / report unavailable'},
-  {name:'SCADA / HMI',detail:'Point database + SLD indication',healthy:'Breaker CLOSED on HMI',fault:'Incorrect SCADA tag mapping'},
-  {name:'Station Gateway',detail:'IEC 61850 → IEC 104 mapping',healthy:'Correct IOA and status',fault:'Incorrect gateway IOA'},
-  {name:'RCC',detail:'IEC 104 indication at control centre',healthy:'CLOSED · GOOD quality',fault:'RCC cannot receive updated status'}
-];
-type SignalFault = 'none'|'field'|'ied'|'mms'|'scada'|'gateway'|'rcc';
-const signalFaults: {value:SignalFault; label:string; help:string}[] = [
-  {value:'none',label:'Healthy system (no fault)',help:'All six stages should pass'},
-  {value:'field',label:'Field contact / wiring fault',help:'Source breaker status does not reach IED correctly'},
-  {value:'ied',label:'IED input mapping / invalid quality',help:'IED data is invalid; downstream indications must not be trusted'},
-  {value:'mms',label:'MMS reporting disabled (RCB)',help:'IED has correct value but SCADA receives no new report'},
-  {value:'scada',label:'Wrong SCADA tag mapping',help:'MMS value arrives but HMI point does not update'},
-  {value:'gateway',label:'Wrong IEC 104 IOA mapping',help:'Local HMI is correct but gateway forwards wrong point'},
-  {value:'rcc',label:'RCC communication unavailable',help:'Gateway is correct but RCC has no updated indication'}
-];
-const faultIndex:Record<SignalFault,number> = {none:-1,field:0,ied:1,mms:2,scada:3,gateway:4,rcc:5};
-const SignalEndToEndLab: React.FC = () => {
-  const [fault,setFault] = useState<SignalFault>('none');
-  const [position,setPosition] = useState<'OPEN'|'CLOSED'>('CLOSED');
-  const [visited,setVisited] = useState<number>(-1);
-  const [executed,setExecuted] = useState(false);
-  const [history,setHistory] = useState<{time:string;position:string;fault:string;result:string;detail:string}[]>([]);
-  const [showHelp,setShowHelp] = useState(false);
-  const broken = faultIndex[fault];
-  const reset = () => {setVisited(-1);setExecuted(false);};
-  const inspect = (i:number) => {setVisited(i);setExecuted(true);};
-  const run = () => {
-    setVisited(5);setExecuted(true);
-    const result = broken<0?'PASS':'FAIL';
-    const detail = broken<0?'All six stages match the source with valid simulated quality.':`First failure at ${signalStages[broken].name}: ${signalStages[broken].fault}. Downstream indications may be stale or invalid.`;
-    setHistory(h=>[{time:new Date().toLocaleString(),position,fault:signalFaults.find(f=>f.value===fault)?.label??fault,result,detail},...h].slice(0,30));
+  const drawText = (
+    text: string,
+    x: number,
+    yPos: number,
+    size: number,
+    bold = false,
+    rgb: [number, number, number] = [0.1, 0.16, 0.23]
+  ) => {
+    cmds.push(
+      `BT ${rgb[0].toFixed(3)} ${rgb[1].toFixed(3)} ${rgb[2].toFixed(3)} rg /${bold ? 'F2' : 'F1'} ${size} Tf ${x.toFixed(2)} ${yPos.toFixed(2)} Td (${toPdfSafeText(text)}) Tj ET`
+    );
   };
-  const exportLog = () => {
-    const rows = [['Time','Breaker','Injected fault','Result','Diagnostic'],...history.map(h=>[h.time,h.position,h.fault,h.result,h.detail])];
-    const csv = rows.map(row=>row.map(cell=>'"'+String(cell).replace(/"/g,'""')+'"').join(',')).join('\r\n');
-    const url = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
-    const a=document.createElement('a');a.href=url;a.download='fat-sat-end-to-end-evidence.csv';a.click();URL.revokeObjectURL(url);
+
+  const drawRect = (
+    x: number,
+    yBottom: number,
+    w: number,
+    h: number,
+    fillRgb?: [number, number, number],
+    strokeRgb?: [number, number, number]
+  ) => {
+    cmds.push('q');
+    if (fillRgb) cmds.push(`${fillRgb[0].toFixed(3)} ${fillRgb[1].toFixed(3)} ${fillRgb[2].toFixed(3)} rg`);
+    if (strokeRgb) cmds.push(`${strokeRgb[0].toFixed(3)} ${strokeRgb[1].toFixed(3)} ${strokeRgb[2].toFixed(3)} RG 0.6 w`);
+    cmds.push(`${x.toFixed(2)} ${yBottom.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re ${fillRgb && strokeRgb ? 'B' : fillRgb ? 'f' : 'S'}`);
+    cmds.push('Q');
   };
-  return <section className="mt-8 rounded-2xl border border-cyan-700/60 bg-[#092137] p-4 md:p-6" aria-label="End-to-end signal testing laboratory">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><div className="text-xs font-bold uppercase tracking-widest text-cyan-400">NEW PRACTICAL MODULE · E2E-01</div><h2 className="mt-2 text-xl font-extrabold text-white md:text-2xl">End-to-End Signal Testing Lab</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">Simulated breaker status journey: Field → IED → MMS → SCADA/HMI → Gateway → RCC. Inject one fault, run the test, identify the first failed stage, then troubleshoot.</p></div>
-      <button type="button" onClick={()=>setShowHelp(true)} className="rounded-full border border-cyan-400 bg-[#103e55] px-4 py-2 text-sm font-bold text-cyan-100 hover:bg-[#15546d]">ⓘ How this lab works</button>
-    </div>
-    {showHelp&&<div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4" onMouseDown={e=>{if(e.target===e.currentTarget)setShowHelp(false)}} role="presentation"><div role="dialog" aria-modal="true" aria-label="End-to-end lab instructions" className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-cyan-600 bg-[#0b2439] p-6 text-slate-100"><div className="flex items-center justify-between gap-3"><h3 className="text-xl font-bold text-cyan-300">How to perform E2E testing</h3><button type="button" onClick={()=>setShowHelp(false)} aria-label="Close guide" className="rounded-lg border border-cyan-700 px-3 py-1">✕</button></div><ol className="mt-4 list-decimal space-y-3 pl-6 text-sm leading-7"><li>Select simulated breaker OPEN or CLOSED.</li><li>Choose Healthy or inject one specific fault.</li><li>Click <strong>Run End-to-End Test</strong> to check all six stages.</li><li>Click any stage card to inspect its expected data and status.</li><li>Find the <strong>first failed stage</strong>; later stages are blocked/stale rather than independently failed.</li><li>Change the fault back to Healthy and run again to verify recovery.</li><li>Download the evidence CSV for the simulated test history.</li></ol><p className="mt-4 text-sm text-amber-200">Training only: no physical breaker commands or real network connections.</p><button type="button" onClick={()=>setShowHelp(false)} className="mt-5 rounded-lg bg-cyan-400 px-5 py-2 font-bold text-[#041b2a]">Start Testing</button></div></div>}
-    <div className="mt-5 grid gap-4 md:grid-cols-2"><label className="text-sm font-semibold text-slate-200">Simulated breaker position<select value={position} onChange={e=>{setPosition(e.target.value as 'OPEN'|'CLOSED');reset()}} className="mt-2 w-full rounded-lg border border-cyan-700 bg-[#10344a] p-3 text-white"><option value="CLOSED">CLOSED</option><option value="OPEN">OPEN</option></select></label><label className="text-sm font-semibold text-slate-200">Inject a fault<select value={fault} onChange={e=>{setFault(e.target.value as SignalFault);reset()}} className="mt-2 w-full rounded-lg border border-cyan-700 bg-[#10344a] p-3 text-white">{signalFaults.map(f=><option key={f.value} value={f.value}>{f.label}</option>)}</select></label></div>
-    <p className="mt-3 text-sm text-cyan-200">{signalFaults.find(f=>f.value===fault)?.help}</p>
-    <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{signalStages.map((stage,i)=>{const state=!executed?'READY':broken<0||i<broken?'PASS':i===broken?'FAIL':'BLOCKED';const selected=visited===i;return <button type="button" key={stage.name} onClick={()=>inspect(i)} className={`rounded-xl border p-4 text-left transition ${selected?'ring-2 ring-cyan-400':''} ${state==='PASS'?'border-emerald-600 bg-[#0b302e]':state==='FAIL'?'border-rose-500 bg-[#39212e]':state==='BLOCKED'?'border-amber-700 bg-[#312b20]':'border-[#2b5871] bg-[#0b2b41]'}`}><span className="text-xs font-bold text-cyan-300">STAGE {i+1} / 6</span><span className="mt-1 block font-bold text-white">{stage.name}</span><span className="mt-1 block text-xs text-slate-300">{stage.detail}</span><span className={`mt-3 inline-block rounded-md px-2 py-1 text-xs font-bold ${state==='PASS'?'bg-emerald-900 text-emerald-200':state==='FAIL'?'bg-rose-900 text-rose-200':state==='BLOCKED'?'bg-amber-900 text-amber-200':'bg-[#1a4960] text-cyan-200'}`}>{state}</span></button>})}</div>
-    {executed&&visited>=0&&<div role="status" className="mt-4 rounded-xl border border-[#34617b] bg-[#061929] p-4 text-sm leading-7"><strong className="text-cyan-300">Stage inspection — {signalStages[visited].name}</strong><p className="text-slate-200">{broken<0||visited<broken?`${signalStages[visited].healthy}. Source breaker = ${position}.`:visited===broken?`FAULT: ${signalStages[visited].fault}. Check this stage first using engineering mapping, logs and approved test evidence.`:`BLOCKED: Upstream failure at ${signalStages[broken].name}; downstream value may be stale or invalid.`}</p></div>}
-    <div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={run} className="rounded-lg bg-cyan-400 px-5 py-3 font-bold text-[#041b2a] hover:bg-cyan-300">Run End-to-End Test</button><button type="button" onClick={()=>{setFault('none');setPosition('CLOSED');reset()}} className="rounded-lg border border-cyan-700 px-5 py-3 text-cyan-200">Reset Simulation</button></div>
-    {executed&&<div className={`mt-4 rounded-xl border p-4 ${broken<0?'border-emerald-600 bg-[#0d302a] text-emerald-200':'border-rose-600 bg-[#34202c] text-rose-200'}`}><strong>{broken<0?'PASS — End-to-end indication verified':'FAIL — End-to-end indication interrupted'}</strong><p className="mt-2 text-sm leading-6">{broken<0?`All six simulated stages deliver ${position} with GOOD quality.`:`First failed stage: ${signalStages[broken].name}. ${signalStages[broken].fault}. Check this stage and repeat the test after correction.`}</p></div>}
-    <div className="mt-6 rounded-xl border border-[#2a516a] bg-[#061929] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold text-cyan-300">End-to-End Evidence Log ({history.length})</h3><div className="flex gap-2"><button type="button" disabled={!history.length} onClick={exportLog} className="rounded-lg border border-cyan-700 px-3 py-2 text-sm disabled:opacity-40">Export CSV</button><button type="button" disabled={!history.length} onClick={()=>setHistory([])} className="rounded-lg border border-cyan-700 px-3 py-2 text-sm disabled:opacity-40">Clear</button></div></div>{history.length?<div className="mt-3 overflow-x-auto"><table className="w-full min-w-[600px] text-left text-xs"><thead><tr className="text-cyan-300"><th className="p-2">Time</th><th className="p-2">Breaker</th><th className="p-2">Injected fault</th><th className="p-2">Result</th><th className="p-2">Diagnostic</th></tr></thead><tbody>{history.map((h,i)=><tr key={i} className="border-t border-[#2a516a]"><td className="p-2">{h.time}</td><td className="p-2">{h.position}</td><td className="p-2">{h.fault}</td><td className="p-2 font-bold">{h.result}</td><td className="p-2">{h.detail}</td></tr>)}</tbody></table></div>:<p className="mt-3 text-sm text-slate-400">Run a test to create evidence.</p>}</div>
-  </section>;
-};
 
+  startNewPage();
 
+  // Header Banner
+  const headerH = 62;
+  drawRect(MARGIN, y - headerH, CONTENT_W, headerH, [0.03, 0.16, 0.29]);
+  drawText(params.title, MARGIN + 12, y - 22, 13.5, true, [1, 1, 1]);
+  drawText(params.subtitle, MARGIN + 12, y - 37, 9, false, [0.72, 0.9, 0.98]);
+  drawText(params.metaLines.join('   |   '), MARGIN + 12, y - 51, 8, false, [0.85, 0.94, 1]);
+  y -= headerH + 12;
 
-type BenchDevice = { id: string; name: string; kind: string; ip: string; protocol: string; role: string; vendor: string };
-const benchDevices: BenchDevice[] = [
-  {id:'ied',name:'Feeder Protection IED',kind:'Protection Relay',ip:'192.168.10.21',protocol:'IEC 61850 MMS / GOOSE',role:'Breaker status, protection events, GOOSE publisher',vendor:'Schneider / Siemens / ABB / GE'},
-  {id:'switchA',name:'Station Switch A',kind:'Ethernet Switch',ip:'192.168.10.2',protocol:'Ethernet / VLAN / PRP LAN A',role:'Independent LAN A transport',vendor:'Industrial managed switch'},
-  {id:'switchB',name:'Station Switch B',kind:'Ethernet Switch',ip:'192.168.20.2',protocol:'Ethernet / VLAN / PRP LAN B',role:'Independent LAN B transport',vendor:'Industrial managed switch'},
-  {id:'laptop',name:'Engineering Workstation',kind:'Engineering PC',ip:'192.168.10.50',protocol:'SCL / IEC 61850 client',role:'Engineering, diagnostics and packet inspection',vendor:'Multi-vendor tools'},
-  {id:'scada',name:'SCADA / HMI Server',kind:'Station Server',ip:'192.168.10.100',protocol:'IEC 61850 MMS',role:'IED data acquisition and operator display',vendor:'SCADA software'},
-  {id:'gateway',name:'Station Gateway',kind:'Protocol Gateway',ip:'192.168.10.110',protocol:'IEC 61850 / IEC 104',role:'Forward approved points to RCC',vendor:'Station gateway'},
-  {id:'rcc',name:'Remote Control Centre',kind:'Remote System',ip:'10.20.0.10',protocol:'IEC 60870-5-104',role:'Remote supervision and authorized commands',vendor:'RCC simulation'},
-];
-type BenchFault = 'healthy'|'lanA'|'lanB'|'both'|'vlan'|'ied'|'mms'|'gateway';
-const benchFaults: {id: BenchFault; title: string; cause: string; guidance: string}[] = [
-  {id:'healthy',title:'Healthy network',cause:'No injected fault',guidance:'Verify both PRP paths, MMS reporting and IEC 104 delivery.'},
-  {id:'lanA',title:'Disconnect LAN A fibre',cause:'LAN A path unavailable; LAN B remains available',guidance:'Inspect LAN A fibre, switch port and PRP counters. Confirm LAN B carries traffic.'},
-  {id:'lanB',title:'Disconnect LAN B fibre',cause:'LAN B path unavailable; LAN A remains available',guidance:'Inspect LAN B fibre, switch port and PRP counters. Confirm LAN A carries traffic.'},
-  {id:'both',title:'Disconnect both PRP LANs',cause:'No remaining IED station-bus path',guidance:'Restore at least one independent PRP path and verify IED reachability.'},
-  {id:'vlan',title:'GOOSE VLAN mismatch',cause:'Subscriber filters the configured GOOSE VLAN',guidance:'Compare publisher/subscriber VLAN ID, priority, APPID and switch filtering. MMS may remain healthy.'},
-  {id:'ied',title:'IED powered off',cause:'Protection IED unavailable',guidance:'Check IED supply, diagnostics and physical link before testing services.'},
-  {id:'mms',title:'MMS reporting disabled',cause:'SCADA association may exist, but expected report is absent',guidance:'Verify DataSet, RCB enablement, trigger options, client reservation and SCADA point mapping.'},
-  {id:'gateway',title:'Gateway IEC 104 offline',cause:'RCC does not receive station updates',guidance:'Check gateway service, TCP 2404 connectivity, point mapping and remote link.'},
-];
-type BenchResult = {id:number; test:string; outcome:string; detail:string};
-const VirtualFatSatTestBench: React.FC = () => {
-  const [fault,setFault] = useState<BenchFault>('healthy');
-  const [selected,setSelected] = useState('ied');
-  const [vendor,setVendor] = useState('Schneider MiCOM');
-  const [help,setHelp] = useState(false);
-  const [result,setResult] = useState<BenchResult|null>(null);
-  const [history,setHistory] = useState<BenchResult[]>([]);
-  const device=benchDevices.find(d=>d.id===selected) ?? benchDevices[0];
-  const issue=benchFaults.find(f=>f.id===fault) ?? benchFaults[0];
-  const available=fault!=='both'&&fault!=='ied';
-  const mms=available&&fault!=='mms';
-  const goose=available&&fault!=='vlan';
-  const remote=mms&&fault!=='gateway';
-  const pathA=!['lanA','both','ied'].includes(fault);
-  const pathB=!['lanB','both','ied'].includes(fault);
-  const run=(name:string)=>{
-    const passed=name==='PRP Path Continuity'?available:name==='MMS Status Report'?mms:name==='GOOSE Subscriber'?goose:remote;
-    const detail=name==='PRP Path Continuity'?(passed?'At least one independent PRP LAN is carrying simulated IED traffic.':'Both PRP paths or the IED are unavailable.'):
-      name==='MMS Status Report'?(passed?'IED MMS report reaches the SCADA acquisition stage.':'MMS reporting or underlying connectivity is unavailable.'):
-      name==='GOOSE Subscriber'?(passed?'Publisher and subscriber configuration is consistent.':'GOOSE subscription is blocked by injected fault or loss of connectivity.'):
-      passed?'Gateway IEC 104 delivers station data to RCC.':'End-to-end RCC delivery is blocked by gateway, MMS or network fault.';
-    const next={id:Date.now(),test:name,outcome:passed?'PASS':'FAIL',detail};
-    setResult(next);setHistory(h=>[next,...h].slice(0,40));
+  // KPI Boxes
+  const kpiGap = 8;
+  const kpiW = (CONTENT_W - kpiGap * (params.kpis.length - 1)) / params.kpis.length;
+  const kpiH = 38;
+  params.kpis.forEach((k, idx) => {
+    const kx = MARGIN + idx * (kpiW + kpiGap);
+    drawRect(kx, y - kpiH, kpiW, kpiH, [0.93, 0.96, 0.99], [0.76, 0.85, 0.91]);
+    drawText(k.value, kx + 8, y - 17, 11.5, true, [0.04, 0.2, 0.34]);
+    drawText(k.label, kx + 8, y - 30, 7.8, false, [0.3, 0.42, 0.52]);
+  });
+  y -= kpiH + 10;
+
+  // Verdict Banner
+  const verdictLines = wrapPdfLines(params.verdict, 95);
+  const verdictH = 14 + verdictLines.length * 11;
+  drawRect(MARGIN, y - verdictH, CONTENT_W, verdictH, [0.92, 0.96, 0.98], [0.0, 0.47, 0.66]);
+  verdictLines.forEach((vl, i) => {
+    drawText(vl, MARGIN + 10, y - 14 - i * 11, 8.5, true, [0.04, 0.2, 0.34]);
+  });
+  y -= verdictH + 14;
+
+  // Sections & Tables
+  for (const sec of params.sections) {
+    ensureSpace(48);
+    drawText(sec.title, MARGIN, y - 10, 10.5, true, [0.04, 0.2, 0.34]);
+    y -= 16;
+
+    const totalWeight = sec.colWidths.reduce((a, b) => a + b, 0);
+    const pxWidths = sec.colWidths.map((w) => (w / totalWeight) * CONTENT_W);
+
+    const drawTableHeader = () => {
+      const hh = 17;
+      drawRect(MARGIN, y - hh, CONTENT_W, hh, [0.05, 0.21, 0.34]);
+      let cx = MARGIN;
+      sec.headers.forEach((h, i) => {
+        drawText(h, cx + 4, y - 12, 7.8, true, [1, 1, 1]);
+        cx += pxWidths[i];
+      });
+      y -= hh;
+    };
+
+    drawTableHeader();
+
+    const rowsToRender = sec.rows.length ? sec.rows : [['No records executed yet in this session.']];
+    rowsToRender.forEach((row, rIdx) => {
+      const wrappedCols =
+        row.length === 1 && sec.headers.length > 1
+          ? [wrapPdfLines(row[0], 96)]
+          : row.map((cell, cIdx) => {
+              const maxCh = Math.max(8, Math.floor((pxWidths[cIdx] - 8) / 4.3));
+              return wrapPdfLines(cell, maxCh);
+            });
+      const maxLines = Math.max(1, ...wrappedCols.map((c) => c.length));
+      const rowH = Math.max(15, maxLines * 9.5 + 6);
+
+      if (y - rowH < BOTTOM_Y) {
+        startNewPage();
+        drawTableHeader();
+      }
+
+      const bg: [number, number, number] = rIdx % 2 === 1 ? [0.96, 0.98, 0.99] : [1, 1, 1];
+      drawRect(MARGIN, y - rowH, CONTENT_W, rowH, bg, [0.82, 0.88, 0.92]);
+
+      if (row.length === 1 && sec.headers.length > 1) {
+        wrappedCols[0].forEach((ln, li) => {
+          drawText(ln, MARGIN + 5, y - 11 - li * 9.5, 7.6, false, [0.35, 0.45, 0.55]);
+        });
+      } else {
+        let cx = MARGIN;
+        wrappedCols.forEach((linesArr, cIdx) => {
+          const rawUpper = String(row[cIdx] ?? '').toUpperCase();
+          const isPass = rawUpper === 'PASS' || rawUpper === 'CLOSED';
+          const isFail = rawUpper === 'FAIL' || rawUpper === 'OPEN';
+          const colRgb: [number, number, number] = isPass
+            ? [0.02, 0.48, 0.24]
+            : isFail
+            ? [0.76, 0.11, 0.17]
+            : [0.12, 0.18, 0.25];
+          linesArr.forEach((ln, li) => {
+            drawText(ln, cx + 4, y - 10.5 - li * 9.5, 7.5, isPass || isFail, colRgb);
+          });
+          cx += pxWidths[cIdx];
+        });
+      }
+      y -= rowH;
+    });
+
+    y -= 12;
+  }
+
+  // Witness Signatures Block
+  ensureSpace(64);
+  y -= 8;
+  const sigGap = 16;
+  const sigW = (CONTENT_W - sigGap * (params.signatures.length - 1)) / params.signatures.length;
+  params.signatures.forEach((sig, i) => {
+    const sx = MARGIN + i * (sigW + sigGap);
+    drawRect(sx, y - 42, sigW, 0.8, [0.35, 0.45, 0.55]);
+    drawText(sig, sx, y - 53, 8, true, [0.1, 0.18, 0.26]);
+    drawText('Signature & Date: _______________', sx, y - 64, 7.5, false, [0.35, 0.45, 0.55]);
+  });
+
+  // Add Page Footers
+  const totalPages = pages.length;
+  pages.forEach((pageCmds, idx) => {
+    pageCmds.push(
+      `BT 0.40 0.48 0.56 rg /F1 7.5 Tf ${MARGIN.toFixed(2)} 24.00 Td (${toPdfSafeText(`SAS Engineering Hub - Commissioning Evidence Report (Simulation Only)   |   Page ${idx + 1} of ${totalPages}`)}) Tj ET`
+    );
+  });
+
+  // Assemble PDF Binary Objects
+  const objects: string[] = [];
+  // Obj 1: Catalog, Obj 2: Pages, Obj 3: Helvetica, Obj 4: Helvetica-Bold
+  const pageObjIds: number[] = [];
+  const contentObjIds: number[] = [];
+  let nextObjId = 5;
+  for (let i = 0; i < totalPages; i++) {
+    pageObjIds.push(nextObjId++);
+    contentObjIds.push(nextObjId++);
+  }
+
+  objects[1] = '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n';
+  objects[2] = `2 0 obj\n<< /Type /Pages /Kids [${pageObjIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${totalPages} >>\nendobj\n`;
+  objects[3] = '3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n';
+  objects[4] = '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n';
+
+  for (let i = 0; i < totalPages; i++) {
+    const stream = pages[i].join('\n');
+    const streamBytes = new TextEncoder().encode(stream).length;
+    const pId = pageObjIds[i];
+    const cId = contentObjIds[i];
+    objects[pId] = `${pId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${cId} 0 R >>\nendobj\n`;
+    objects[cId] = `${cId} 0 obj\n<< /Length ${streamBytes} >>\nstream\n${stream}\nendstream\nendobj\n`;
+  }
+
+  const encoder = new TextEncoder();
+  const chunks: Uint8Array[] = [];
+  const offsets: number[] = [0];
+  let byteOffset = 0;
+
+  const pushStr = (s: string) => {
+    const b = encoder.encode(s);
+    chunks.push(b);
+    byteOffset += b.length;
   };
-  const exportCsv=()=>{
-    const quote=(v:string)=>'"'+v.replace(/"/g,'""')+'"';
-    const csv=[['Test','Result','Details'],...history.map(h=>[h.test,h.outcome,h.detail])].map(row=>row.map(quote).join(',')).join('\r\n');
-    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
-    const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='virtual-fat-sat-bench-evidence.csv';a.click();URL.revokeObjectURL(url);
-  };
-  const tile=(id:string)=>{const d=benchDevices.find(x=>x.id===id)!;const active=selected===id;
-    return <button type="button" key={id} onClick={()=>setSelected(id)} className={`min-w-0 rounded-xl border p-3 text-left transition-colors ${active?'border-cyan-300 bg-[#17425a]':'border-[#29516b] bg-[#0b253a] hover:border-cyan-500'}`} aria-pressed={active}>
-      <div className="mb-2 flex items-center gap-2"><span className="rounded-md bg-[#173c53] px-2 py-1 text-xs text-cyan-200">{id==='ied'?'IED':id.startsWith('switch')?'SW':id==='laptop'?'ENG':id==='scada'?'HMI':id==='gateway'?'GW':'RCC'}</span><span className="text-xs text-slate-400">{d.kind}</span></div>
-      <div className="text-sm font-semibold text-white">{d.name}</div><div className="mt-1 text-xs text-slate-400">{d.ip}</div>
-      <div className={`mt-2 text-xs font-bold ${id==='ied'&&!available?'text-red-300':id==='switchA'&&!pathA?'text-red-300':id==='switchB'&&!pathB?'text-red-300':'text-emerald-300'}`}>{id==='ied'&&!available?'OFFLINE':id==='switchA'&&!pathA?'PATH DOWN':id==='switchB'&&!pathB?'PATH DOWN':'SIMULATED ONLINE'}</div>
-    </button>};
-  return <section className="mt-8 rounded-2xl border border-cyan-700/70 bg-[#091d31] p-4 md:p-6" aria-label="Virtual FAT SAT Test Bench">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold tracking-widest text-cyan-400">INTERACTIVE ENGINEERING SIMULATION</p><h2 className="mt-2 text-xl font-bold text-white md:text-2xl">Virtual FAT / SAT Test Bench</h2><p className="mt-2 text-sm leading-6 text-slate-300">Click equipment, inject a fault, run tests and inspect evidence. Independent PRP LAN A/B paths are simulated.</p></div><button type="button" onClick={()=>setHelp(true)} className="rounded-lg border border-cyan-500 bg-[#113c56] px-4 py-2 text-sm font-semibold text-cyan-100">? How This Lab Works</button></div>
-    <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(270px,1fr)]">
-      <div className="rounded-xl border border-[#28516b] bg-[#061725] p-4">
-        <h3 className="mb-3 font-bold text-cyan-200">Station Network Topology</h3>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{tile('ied')}{tile('laptop')}{tile('scada')}</div>
-        <div className="my-3 grid grid-cols-2 gap-3"><div className={`rounded-lg border p-2 text-center text-xs ${pathA?'border-emerald-700 text-emerald-300':'border-red-700 text-red-300'}`}>↕ PRP LAN A — {pathA?'UP':'DOWN'}</div><div className={`rounded-lg border p-2 text-center text-xs ${pathB?'border-emerald-700 text-emerald-300':'border-red-700 text-red-300'}`}>↕ PRP LAN B — {pathB?'UP':'DOWN'}</div></div>
-        <div className="grid grid-cols-2 gap-3">{tile('switchA')}{tile('switchB')}</div>
-        <div className="my-3 text-center text-xs text-cyan-400">↓ Station data → Gateway → RCC</div>
-        <div className="grid grid-cols-2 gap-3">{tile('gateway')}{tile('rcc')}</div>
-        <p className="mt-3 text-xs leading-5 text-slate-400">Conceptual topology: actual PRP requires dual-attached nodes and two independent networks; workstation and RCC attachment depend on project design.</p>
-      </div>
-      <div className="space-y-4"><div className="rounded-xl border border-[#28516b] bg-[#0b253a] p-4"><h3 className="font-bold text-cyan-200">Selected Device Inspector</h3><p className="mt-2 text-base font-semibold">{device.name}</p><p className="mt-2 text-sm text-slate-300"><strong>IP:</strong> {device.ip}</p><p className="mt-1 text-sm text-slate-300"><strong>Protocol:</strong> {device.protocol}</p><p className="mt-1 text-sm text-slate-300"><strong>Role:</strong> {device.role}</p>{selected==='ied'&&<label className="mt-3 block text-sm text-slate-200">IED Vendor (training label)<select className="mt-1 w-full rounded-lg border border-[#3d6781] bg-[#061725] p-2 text-white" value={vendor} onChange={e=>setVendor(e.target.value)}>{['Schneider MiCOM','Siemens SIPROTEC','ABB Relion','GE Multilin'].map(v=><option key={v}>{v}</option>)}</select></label>}</div>
-      <div className="rounded-xl border border-[#28516b] bg-[#0b253a] p-4"><h3 className="font-bold text-cyan-200">Fault Injection</h3><label className="mt-2 block text-sm text-slate-200" htmlFor="bench-fault">Choose simulated fault</label><select id="bench-fault" className="mt-2 w-full rounded-lg border border-[#3d6781] bg-[#061725] p-2 text-white" value={fault} onChange={e=>{setFault(e.target.value as BenchFault);setResult(null)}}>{benchFaults.map(f=><option value={f.id} key={f.id}>{f.title}</option>)}</select><p className="mt-3 text-sm leading-6 text-slate-300">{issue.cause}</p><button type="button" className="mt-3 rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-100" onClick={()=>{setFault('healthy');setResult(null)}}>Restore Healthy State</button></div></div>
-    </div>
-    <div className="mt-4 rounded-xl border border-[#28516b] bg-[#0b253a] p-4"><h3 className="font-bold text-cyan-200">Run FAT / SAT Simulation</h3><div className="mt-3 flex flex-wrap gap-2">{['PRP Path Continuity','MMS Status Report','GOOSE Subscriber','Gateway to RCC'].map(t=><button type="button" key={t} onClick={()=>run(t)} className="rounded-lg border border-cyan-600 bg-[#123d54] px-3 py-2 text-sm text-white hover:bg-[#185473]">Test: {t}</button>)}</div>{result&&<div role="status" className={`mt-4 rounded-lg border p-3 ${result.outcome==='PASS'?'border-emerald-700 bg-[#0b302c]':'border-red-700 bg-[#361b25]'}`}><strong>{result.outcome} — {result.test}</strong><p className="mt-1 text-sm">{result.detail}</p><p className="mt-2 text-sm text-slate-200"><strong>Troubleshooting:</strong> {issue.guidance}</p></div>}</div>
-    <div className="mt-4 rounded-xl border border-[#28516b] bg-[#0b253a] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold text-cyan-200">Test Evidence Log ({history.length})</h3><div className="flex gap-2"><button type="button" disabled={!history.length} onClick={exportCsv} className="rounded-lg border border-cyan-600 px-3 py-2 text-sm disabled:opacity-40">Export CSV</button><button type="button" disabled={!history.length} onClick={()=>setHistory([])} className="rounded-lg border border-[#3d6781] px-3 py-2 text-sm disabled:opacity-40">Clear</button></div></div><div className="mt-3 space-y-2">{history.length?history.slice(0,8).map(h=><div key={h.id} className="flex flex-wrap justify-between gap-2 rounded-lg border border-[#254a62] p-3 text-sm"><span>{h.test}</span><strong className={h.outcome==='PASS'?'text-emerald-300':'text-red-300'}>{h.outcome}</strong></div>):<p className="text-sm text-slate-400">No tests executed yet. Select a fault and run a test.</p>}</div></div>
-    {help&&<div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4" onMouseDown={e=>{if(e.target===e.currentTarget)setHelp(false)}}><div role="dialog" aria-modal="true" aria-label="Virtual Test Bench Instructions" className="max-h-[85vh] w-full max-w-xl overflow-auto rounded-2xl border border-cyan-600 bg-[#0b253a] p-5 text-slate-100"><div className="flex items-center justify-between gap-3"><h3 className="text-xl font-bold text-cyan-300">How to Use the Virtual Test Bench</h3><button type="button" onClick={()=>setHelp(false)} aria-label="Close instructions" className="rounded-lg border border-cyan-600 px-3 py-1">✕</button></div><ol className="mt-4 list-decimal space-y-3 pl-6 text-sm leading-7"><li>Click any device to inspect its IP, protocol and engineering role.</li><li>Select an IED vendor label for training context.</li><li>Choose Healthy or inject LAN A, LAN B, VLAN, MMS, IED or gateway faults.</li><li>Run PRP, MMS, GOOSE or RCC delivery tests.</li><li>Review PASS/FAIL and the troubleshooting explanation.</li><li>Restore Healthy State, retest, and export your evidence log as CSV.</li></ol><p className="mt-4 rounded-lg border border-amber-700/50 p-3 text-sm text-amber-200">This is a conceptual browser simulation only. No real IED, protection trip, breaker control or network interface is operated.</p></div></div>}
-  </section>;
-};
+
+  pushStr('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+  for (let id = 1; id < objects.length; id++) {
+    offsets[id] = byteOffset;
+    pushStr(objects[id]);
+  }
+
+  const xrefOffset = byteOffset;
+  pushStr(`xref\n0 ${objects.length}\n`);
+  pushStr('0000000000 65535 f \n');
+  for (let id = 1; id < objects.length; id++) {
+    pushStr(`${String(offsets[id]).padStart(10, '0')} 00000 n \n`);
+  }
+  pushStr(`trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+
+  return new Blob(chunks, { type: 'application/pdf' });
+}
 
 
-type AdvancedFaultCase = {
- id: string; title: string; symptom: string; impact: string;
- rootCause: string; diagnosis: string; correction: string; expected: string;
- choices: { id: string; label: string }[];
-};
-const advancedFaultCases: AdvancedFaultCase[] = [
- {id:'AF-01',title:'MMS Report Control Block Disabled',symptom:'IED ping and MMS association succeed, but SCADA breaker indication remains stale.',impact:'Status reporting unavailable',rootCause:'rcb',diagnosis:'Read the source value and quality, then inspect the configured DataSet and RCB enabled/reservation state.',correction:'Restore the approved RCB configuration and verify fresh reports reach the SCADA tag.',expected:'Fresh XCBR.Pos report arrives and HMI matches the source.',choices:[{id:'vlan',label:'Change switch VLAN'},{id:'rcb',label:'Check RCB enablement and DataSet'},{id:'ioa',label:'Change IEC 104 IOA'}]},
- {id:'AF-02',title:'GOOSE VLAN Mismatch',symptom:'Publisher stNum increases, but subscriber does not receive the expected GOOSE message.',impact:'IED-to-IED subscription lost',rootCause:'vlan',diagnosis:'Compare publisher VLAN tagging, switch port VLAN handling and subscriber multicast reception.',correction:'Align approved VLAN engineering and switch configuration, then validate the subscriber.',expected:'Subscriber receives the matching GOOSE stream and updates the mapped input.',choices:[{id:'vlan',label:'Verify VLAN and multicast delivery'},{id:'clock',label:'Change NTP server'},{id:'ioa',label:'Edit IEC 104 IOA'}]},
- {id:'AF-03',title:'GOOSE confRev Mismatch',symptom:'GOOSE frames reach the subscriber, but its subscription is invalid after an SCD update.',impact:'Subscriber rejects configured message',rootCause:'confrev',diagnosis:'Compare transmitted confRev, DataSet structure and subscriber ExtRef against the approved SCD.',correction:'Reconcile publisher and subscriber configuration versions and repeat the isolated test.',expected:'Subscription supervision is healthy and data quality is accepted.',choices:[{id:'rcb',label:'Enable MMS RCB'},{id:'confrev',label:'Compare confRev and DataSet'},{id:'port',label:'Open TCP 2404'}]},
- {id:'AF-04',title:'Incorrect IEC 104 IOA Mapping',symptom:'Station HMI shows correct breaker status, while RCC displays the wrong feeder point.',impact:'Control-centre point mismatch',rootCause:'ioa',diagnosis:'Trace source tag through gateway database to IEC 104 common address and IOA.',correction:'Correct the approved gateway/RCC mapping and verify interrogation plus spontaneous updates.',expected:'RCC displays the intended breaker point and quality.',choices:[{id:'ioa',label:'Trace gateway IOA and point list'},{id:'vlan',label:'Change GOOSE VLAN'},{id:'clock',label:'Restart time server'}]},
- {id:'AF-05',title:'PRP LAN A Path Failure',symptom:'One PRP LAN is disconnected; communication continues but redundancy alarm appears.',impact:'Redundancy degraded, not necessarily data outage',rootCause:'prp',diagnosis:'Inspect LAN A/B link states and PRP duplicate/discard supervision counters.',correction:'Restore the failed independent path under approved procedure and verify both networks healthy.',expected:'Both PRP LANs healthy; communication continuous and alarm cleared.',choices:[{id:'prp',label:'Check both PRP LANs and counters'},{id:'rcb',label:'Reconfigure MMS reports'},{id:'ioa',label:'Change gateway IOA'}]},
- {id:'AF-06',title:'Breaker Close Rejected by Interlock',symptom:'Operator Close request returns negative confirmation while earthing switch permissive is absent.',impact:'Control rejected for safety',rootCause:'interlock',diagnosis:'Review Local/Remote, command authority, CILO/interlocking and device rejection code.',correction:'Keep interlock effective; correct the simulated unsafe condition using an approved isolated test setup.',expected:'Unsafe Close remains rejected; only authorized safe test conditions permit operation.',choices:[{id:'interlock',label:'Inspect interlock and permissives'},{id:'bypass',label:'Bypass interlock to force Close'},{id:'clock',label:'Change SNTP time zone'}]},
- {id:'AF-07',title:'SOE Timestamp Drift',symptom:'Two IED events appear in incorrect order on the SCADA SOE list.',impact:'Misleading event sequence',rootCause:'time',diagnosis:'Compare IED clock synchronization, time quality, UTC conversion and source event timestamps.',correction:'Restore the approved time source and validate source-time ordering.',expected:'Event timestamps are synchronized within project tolerance and display order is correct.',choices:[{id:'time',label:'Inspect time sync and source timestamps'},{id:'ioa',label:'Change IOA'},{id:'vlan',label:'Change GOOSE APPID'}]},
- {id:'AF-08',title:'Wrong SCADA Analog Scaling',symptom:'IED current is 120 A, while HMI displays 12 A with good quality.',impact:'Incorrect engineering-unit display',rootCause:'scale',diagnosis:'Compare raw measured value, CT ratio, scaling factor and SCADA engineering-unit conversion.',correction:'Correct the approved conversion configuration and regression-test the analog range.',expected:'HMI current matches source within the specified tolerance.',choices:[{id:'scale',label:'Verify CT ratio and analog scaling'},{id:'rcb',label:'Disable MMS reporting'},{id:'prp',label:'Disconnect PRP LAN B'}]}
+
+interface TestHowToGuide {
+  id: string;
+  code: string;
+  title: string;
+  preconditions: string[];
+  steps: string[];
+  passCriteria: string;
+  faultCheckTip: string;
+}
+
+const WORKBENCH_HOW_TO_STEPS = [
+  {
+    step: 1,
+    title: 'Select FAT or SAT Mode & Bay Under Test',
+    detail:
+      'Top right lo FAT (Factory) leda SAT (Site) toggle cheyandi. Tarvatha Point-to-Point (P2P) Console lo mee test cheyalsina Bay (e.g., 132-L1, 132-T1, 33-F03) select cheyandi.',
+  },
+  {
+    step: 2,
+    title: 'Verify 5-Stage End-to-End Signal Chain',
+    detail:
+      'Bay select cheyagane Field Switchgear → Bay IED (MMS TCP/102) → Station Bus (PRP/HSR) → Gateway (IEC-104 COA 132) → SCADA & 1ms SOE anni HEALTHY ga unnaya leda check cheyandi.',
+  },
+  {
+    step: 3,
+    title: 'Run Point-to-Point (P2P) Signal Checks',
+    detail:
+      'P2P table lo prathi row (CB 52a/52b, Q1, Q8, 86 Trip, SBO Control, Analog GI, OLTC Tap) pakkana unna "Operate & Verify" / "Inject Trip" / "Verify GI" button click chesi live PASS/FAIL verify cheyandi.',
+  },
+  {
+    step: 4,
+    title: 'Execute Auto-Verified Live Test Runner',
+    detail:
+      'Live Test Runner tab lo okkokka test card lo "Run Live Test" leda paina "Execute Full Test Suite" click cheyandi. Kindha unna Live 1ms SOE table lo exact millisecond events confirm cheyandi.',
+  },
+  {
+    step: 5,
+    title: 'Inject Live Faults & Log Punch Points',
+    detail:
+      'P2P tab kindha unna Fault Injection cards (e.g., IED Offline, IEC-104 Fault, 43LR LOCAL) ON chesi malli test run cheyandi — FAIL avvagane "+ Punch" click chesi Cat-A defect log cheyandi. Fault OFF chesi "Re-Test & Close" tho punch point close cheyandi.',
+  },
+  {
+    step: 6,
+    title: 'Witness Sign-Off & Export Official Report',
+    detail:
+      'Cat-A blockers 0 ayyaka Punch List tab lo Commissioning Engineer & Witness names enter chesi, Evidence Report tab lo Official PDF print leda CSV package download chesukondi.',
+  },
 ];
-type AdvancedFaultLog = { at: string; id: string; title: string; diagnosis: string; result: string; feedback: string };
-const AdvancedFaultInjectionLab: React.FC = () => {
- const [selected,setSelected] = useState(advancedFaultCases[0].id);
- const [diagnosis,setDiagnosis] = useState('');
- const [fixed,setFixed] = useState(false);
- const [result,setResult] = useState<{pass:boolean;message:string}|null>(null);
- const [logs,setLogs] = useState<AdvancedFaultLog[]>([]);
- const [help,setHelp] = useState(false);
- const item = advancedFaultCases.find(x=>x.id===selected) ?? advancedFaultCases[0];
- const choose = (id:string) => {setSelected(id);setDiagnosis('');setFixed(false);setResult(null)};
- const execute = () => {
-   const correct = diagnosis===item.rootCause;
-   const pass = correct && fixed;
-   const message = !diagnosis ? 'Select a root-cause diagnosis first.' : !correct ? 'Incorrect diagnosis. Inspect the symptom and review the troubleshooting hints.' : !fixed ? 'Correct diagnosis. Apply the simulated corrective action, then retest.' : 'PASS — correct diagnosis and approved simulated correction verified.';
-   setResult({pass,message});
-   setLogs(old=>[{at:new Date().toLocaleString(),id:item.id,title:item.title,diagnosis:diagnosis||'Not selected',result:(pass?'PASS':'FAIL') as 'PASS' | 'FAIL',feedback:message},...old].slice(0,60));
- };
- const csv = () => {
-   const quote=(v:string)=>'"'+v.replace(/"/g,'""')+'"';
-   const lines=[['Timestamp','Test ID','Scenario','Diagnosis','Result','Feedback'].join(','),...logs.map(l=>[l.at,l.id,l.title,l.diagnosis,l.result,l.feedback].map(quote).join(','))];
-   const blob=new Blob([lines.join('\r\n')],{type:'text/csv;charset=utf-8'});
-   const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='sas-advanced-fault-injection-log.csv';a.click();URL.revokeObjectURL(url);
- };
- return <section className="mt-8 rounded-2xl border border-cyan-700/60 bg-[#091d31] p-4 md:p-6">
-   <div className="flex flex-wrap items-start justify-between gap-3">
-     <div><div className="text-xs font-bold uppercase tracking-widest text-cyan-400">FAT / SAT • Interactive Simulation</div><h2 className="mt-2 text-2xl font-extrabold text-white">Advanced Fault Injection & Troubleshooting Lab</h2><p className="mt-2 text-sm leading-6 text-slate-300">Diagnose realistic SAS faults, apply a simulated corrective action and run a validation test. No physical devices are controlled.</p></div>
-     <button type="button" onClick={()=>setHelp(true)} className="rounded-lg border border-cyan-600 px-4 py-2 text-sm font-semibold text-cyan-200 hover:bg-[#123a51]">? How to Use</button>
-   </div>
-   <div className="mt-5 grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-     <nav aria-label="Fault scenarios" className="space-y-2">{advancedFaultCases.map(x=><button key={x.id} type="button" onClick={()=>choose(x.id)} aria-pressed={x.id===selected} className={`w-full rounded-lg border p-3 text-left text-sm ${x.id===selected?'border-cyan-400 bg-[#123d52] text-white':'border-[#28516a] bg-[#071726] text-slate-300 hover:bg-[#103049]'}`}><span className="block text-xs font-bold text-cyan-300">{x.id}</span><span className="mt-1 block">{x.title}</span></button>)}</nav>
-     <div className="min-w-0 space-y-4">
-       <div className="rounded-xl border border-[#27516b] bg-[#071726] p-4"><h3 className="text-lg font-bold text-white">{item.title}</h3><p className="mt-3 leading-7 text-slate-200"><strong className="text-cyan-300">Observed symptom:</strong> {item.symptom}</p><p className="mt-2 text-sm text-amber-200"><strong>Impact:</strong> {item.impact}</p></div>
-       <div className="rounded-xl border border-[#27516b] bg-[#071726] p-4"><h4 className="font-bold text-cyan-300">1. Select Root-Cause Diagnosis</h4><div className="mt-3 space-y-2">{item.choices.map(c=><label key={c.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-[#234760] p-3 text-sm text-slate-200 hover:bg-[#103049]"><input type="radio" name={'fault-diagnosis-'+item.id} checked={diagnosis===c.id} onChange={()=>{setDiagnosis(c.id);setResult(null);setFixed(false)}} className="mt-1"/><span>{c.label}</span></label>)}</div></div>
-       <div className="rounded-xl border border-[#27516b] bg-[#071726] p-4"><h4 className="font-bold text-cyan-300">2. Simulated Corrective Action</h4><label className="mt-3 flex items-start gap-3 text-sm leading-6 text-slate-200"><input type="checkbox" checked={fixed} onChange={e=>{setFixed(e.target.checked);setResult(null)}} className="mt-1"/><span>Apply the approved correction in this simulation and verify its effect (training only).</span></label><button type="button" onClick={execute} className="mt-4 rounded-lg bg-cyan-500 px-5 py-2 font-bold text-[#052034] hover:bg-cyan-300">Execute Fault Test</button></div>
-       {result&&<div role="status" className={`rounded-xl border p-4 ${result.pass?'border-emerald-600 bg-[#0c3029] text-emerald-200':'border-amber-700 bg-[#352710] text-amber-200'}`}><strong>{result.pass?'PASS':'FAIL / INCOMPLETE'}</strong><p className="mt-2">{result.message}</p>{!result.pass&&<p className="mt-2 text-sm">Troubleshooting hint: {item.diagnosis}</p>}{result.pass&&<><p className="mt-2 text-sm"><strong>Corrective action:</strong> {item.correction}</p><p className="mt-1 text-sm"><strong>Expected:</strong> {item.expected}</p></>}</div>}
-     </div>
-   </div>
-   <div className="mt-6 rounded-xl border border-[#27516b] bg-[#071726] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold text-white">Fault Test Evidence Log ({logs.length})</h3><div className="flex gap-2"><button type="button" disabled={!logs.length} onClick={csv} className="rounded-lg border border-cyan-600 px-3 py-2 text-sm text-cyan-200 disabled:opacity-40">Export CSV</button><button type="button" disabled={!logs.length} onClick={()=>setLogs([])} className="rounded-lg border border-[#45627a] px-3 py-2 text-sm text-slate-200 disabled:opacity-40">Clear Log</button></div></div><div className="mt-3 space-y-2">{logs.length?logs.slice(0,10).map((l,i)=><div key={i} className="flex flex-wrap justify-between gap-2 rounded-lg border border-[#234760] p-3 text-sm"><span className="text-slate-300">{l.at} • {l.id} • {l.title}</span><strong className={l.result==='PASS'?'text-emerald-300':'text-amber-300'}>{l.result}</strong></div>):<p className="text-sm text-slate-400">No test runs yet. Execute a scenario to create evidence.</p>}</div></div>
-   {help&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" onMouseDown={e=>{if(e.target===e.currentTarget)setHelp(false)}} role="presentation"><div role="dialog" aria-modal="true" aria-label="Advanced Fault Injection Help" className="w-full max-w-xl rounded-xl border border-cyan-600 bg-[#0a2237] p-6 text-slate-100"><div className="flex items-center justify-between gap-3"><h3 className="text-xl font-bold">How to Run Fault Injection Lab</h3><button type="button" onClick={()=>setHelp(false)} aria-label="Close help" className="rounded-lg border border-cyan-700 px-3 py-1">✕</button></div><ol className="mt-4 list-decimal space-y-3 pl-5 leading-7 text-slate-200"><li>Select one of the 8 fault scenarios.</li><li>Read the observed symptom and select the most likely root cause.</li><li>Tick the simulated corrective action after choosing your diagnosis.</li><li>Click Execute Fault Test to receive PASS/FAIL and troubleshooting feedback.</li><li>Review the Evidence Log and export CSV for training records.</li></ol><p className="mt-4 text-sm text-amber-200">Training simulation only. Never bypass real protection interlocks or test live equipment without authorization.</p></div></div>}
- </section>;
-};
 
-
-type ReportRow = { id: string; title: string; expected: string; actual: string; status: 'PASS'|'FAIL'|'NOT TESTED'|'BLOCKED'; remarks: string; defect: string };
-const reportInitialRows: ReportRow[] = [
- {id:'FAT-001',title:'Breaker Status MMS Indication',expected:'HMI indication and quality match simulated IED XCBR.Pos',actual:'',status:'NOT TESTED',remarks:'',defect:''},
- {id:'FAT-002',title:'GOOSE Publisher / Subscriber',expected:'Valid DataSet, VLAN and confRev; subscriber updates',actual:'',status:'NOT TESTED',remarks:'',defect:''},
- {id:'FAT-003',title:'MMS Report Control Block',expected:'RCB enabled and configured reports received',actual:'',status:'NOT TESTED',remarks:'',defect:''},
- {id:'FAT-004',title:'Remote Close Interlocking',expected:'Unsafe commands rejected; permitted controls acknowledged',actual:'',status:'NOT TESTED',remarks:'',defect:''},
- {id:'SAT-001',title:'IEC 104 Gateway to RCC',expected:'Approved IOA mapping and indication verified',actual:'',status:'NOT TESTED',remarks:'',defect:''},
- {id:'SAT-002',title:'PRP LAN A/B Redundancy',expected:'Single-path failure maintains communication and raises alarm',actual:'',status:'NOT TESTED',remarks:'',defect:''}
-];
-const FatSatProfessionalReport: React.FC = () => {
- const [project,setProject]=useState('33/11 kV Substation SAS Training');
- const [station,setStation]=useState('Training Substation');
- const [engineer,setEngineer]=useState('');
- const [date,setDate]=useState(()=>new Date().toISOString().slice(0,10));
- const [type,setType]=useState<'FAT'|'SAT'>('FAT');
- const [revision,setRevision]=useState('R0');
- const [rows,setRows]=useState<ReportRow[]>(reportInitialRows);
- const [guide,setGuide]=useState(false);
- const update=(id:string,key:keyof ReportRow,value:string)=>setRows(old=>old.map(row=>row.id===id?{...row,[key]:value}:row));
- const add=()=>setRows(old=>[...old,{id:`${type}-${String(old.length+1).padStart(3,'0')}`,title:'New test case',expected:'',actual:'',status:'NOT TESTED',remarks:'',defect:''}]);
- const counts={pass:rows.filter(r=>r.status==='PASS').length,fail:rows.filter(r=>r.status==='FAIL').length,blocked:rows.filter(r=>r.status==='BLOCKED').length,untested:rows.filter(r=>r.status==='NOT TESTED').length};
- const escapeCsv=(v:string)=>'"'+String(v).replace(/"/g,'""')+'"';
- const exportCsv=()=>{
-  const header=['Project','Station','Engineer','Date','Test Type','Revision','Test ID','Test Description','Expected Result','Actual Result','Status','Remarks','Defect ID'];
-  const data=rows.map(r=>[project,station,engineer,date,type,revision,r.id,r.title,r.expected,r.actual,r.status,r.remarks,r.defect]);
-  const csv=[header,...data].map(line=>line.map(escapeCsv).join(',')).join('\r\n');
-  const blob=new Blob(['\ufeff',csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download=`FAT-SAT-Report-${date}.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
- };
- const printReport=()=>{
-  const safe=(v:string)=>String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  const html=`<!doctype html><html><head><meta charset="utf-8"><title>FAT/SAT Test Report</title><style>@page{size:A4 landscape;margin:12mm}body{font-family:Arial,sans-serif;color:#172433;font-size:11px}h1{margin-bottom:5px}table{border-collapse:collapse;width:100%;table-layout:fixed}td,th{border:1px solid #8895a2;padding:6px;vertical-align:top;overflow-wrap:anywhere}th{background:#eaf2f8}.meta{margin:16px 0}.summary{margin:14px 0}.note{margin-top:16px;color:#52606d}</style></head><body><h1>${safe(type)} Test Report — ${safe(project)}</h1><div class="meta"><b>Station:</b> ${safe(station)} &nbsp; <b>Engineer:</b> ${safe(engineer||'Not specified')} &nbsp; <b>Date:</b> ${safe(date)} &nbsp; <b>Revision:</b> ${safe(revision)}</div><div class="summary"><b>Summary:</b> ${counts.pass} PASS | ${counts.fail} FAIL | ${counts.blocked} BLOCKED | ${counts.untested} NOT TESTED</div><table><thead><tr>${['Test ID','Description','Expected Result','Actual Result','Status','Remarks','Defect ID'].map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${[r.id,r.title,r.expected,r.actual,r.status,r.remarks,r.defect].map(v=>`<td>${safe(v)}</td>`).join('')}</tr>`).join('')}</tbody></table><p class="note">Training report generated from browser-entered results. No live IED testing or automatic verification is implied. Review and approve evidence before using as a project record.</p></body></html>`;
-  const w=window.open('','_blank');if(!w){window.alert('Allow popups to print this report.');return;}w.document.open();w.document.write(html);w.document.close();w.focus();setTimeout(()=>w.print(),250);
- };
- return <section className="mt-8 rounded-2xl border border-cyan-700/60 bg-[#091d31] p-4 md:p-6">
-  <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-widest text-cyan-400">FAT / SAT • Documentation</div><h2 className="mt-2 text-2xl font-extrabold text-white">Professional FAT/SAT Test Report Generator</h2><p className="mt-2 text-sm leading-6 text-slate-300">Record test cases, expected/actual results, PASS/FAIL, engineer remarks and defect references. Export CSV or print to PDF.</p></div><button type="button" onClick={()=>setGuide(true)} className="rounded-lg border border-cyan-600 px-4 py-2 text-sm font-semibold text-cyan-200">? How to Use</button></div>
-  <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-   {([['Project',project,setProject],['Station',station,setStation],['Engineer',engineer,setEngineer],['Date',date,setDate],['Revision',revision,setRevision]] as [string,string,(v:string)=>void][]).map(([label,value,set])=><label key={label} className="text-sm text-slate-200">{label}<input type={label==='Date'?'date':'text'} value={value} onChange={e=>set(e.target.value)} className="mt-1 block w-full rounded-lg border border-[#2a5873] bg-[#071726] p-2 text-white"/></label>)}
-   <label className="text-sm text-slate-200">Report Type<select value={type} onChange={e=>setType(e.target.value as 'FAT'|'SAT')} className="mt-1 block w-full rounded-lg border border-[#2a5873] bg-[#071726] p-2 text-white"><option value="FAT">FAT</option><option value="SAT">SAT</option></select></label>
-  </div>
-  <div className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-4">{([['PASS',counts.pass,'text-emerald-300'],['FAIL',counts.fail,'text-rose-300'],['BLOCKED',counts.blocked,'text-amber-300'],['NOT TESTED',counts.untested,'text-slate-300']] as const).map(([label,count,color])=><div key={label} className="rounded-xl border border-[#2a5873] bg-[#071726] p-3"><div className={`text-2xl font-bold ${color}`}>{count}</div><div className="text-xs text-slate-300">{label}</div></div>)}</div>
-  <div className="mt-5 space-y-3">{rows.map((r,i)=><article key={i} className="rounded-xl border border-[#2a5873] bg-[#071726] p-4"><div className="grid gap-3 md:grid-cols-[120px_minmax(0,1fr)_160px]"><label className="text-xs text-slate-300">Test ID<input value={r.id} onChange={e=>update(r.id,'id',e.target.value)} className="mt-1 w-full rounded border border-[#2a5873] bg-[#0b2539] p-2 text-sm text-white"/></label><label className="text-xs text-slate-300">Test Description<input value={r.title} onChange={e=>update(r.id,'title',e.target.value)} className="mt-1 w-full rounded border border-[#2a5873] bg-[#0b2539] p-2 text-sm text-white"/></label><label className="text-xs text-slate-300">Result<select value={r.status} onChange={e=>update(r.id,'status',e.target.value)} className="mt-1 w-full rounded border border-[#2a5873] bg-[#0b2539] p-2 text-sm text-white"><option>NOT TESTED</option><option>PASS</option><option>FAIL</option><option>BLOCKED</option></select></label></div><div className="mt-3 grid gap-3 md:grid-cols-2"><label className="text-xs text-slate-300">Expected Result<textarea rows={2} value={r.expected} onChange={e=>update(r.id,'expected',e.target.value)} className="mt-1 w-full rounded border border-[#2a5873] bg-[#0b2539] p-2 text-sm text-white"/></label><label className="text-xs text-slate-300">Actual Result<textarea rows={2} value={r.actual} onChange={e=>update(r.id,'actual',e.target.value)} className="mt-1 w-full rounded border border-[#2a5873] bg-[#0b2539] p-2 text-sm text-white"/></label><label className="text-xs text-slate-300">Engineer Remarks<input value={r.remarks} onChange={e=>update(r.id,'remarks',e.target.value)} className="mt-1 w-full rounded border border-[#2a5873] bg-[#0b2539] p-2 text-sm text-white"/></label><label className="text-xs text-slate-300">Defect / Punch List ID<input value={r.defect} onChange={e=>update(r.id,'defect',e.target.value)} className="mt-1 w-full rounded border border-[#2a5873] bg-[#0b2539] p-2 text-sm text-white"/></label></div><div className="mt-2 flex justify-end"><button type="button" onClick={()=>setRows(old=>old.filter((_,j)=>j!==i))} className="text-xs text-rose-300 hover:underline">Remove Test</button></div></article>)}</div>
-  <div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={add} className="rounded-lg border border-cyan-500 px-4 py-2 text-sm font-semibold text-cyan-200">+ Add Test Case</button><button type="button" onClick={exportCsv} className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-bold text-[#052034]">Export CSV</button><button type="button" onClick={printReport} className="rounded-lg border border-cyan-500 px-4 py-2 text-sm font-semibold text-cyan-200">Print / Save as PDF</button></div>
-  <p className="mt-3 text-xs text-amber-200">Entries are held in this page session; export before closing or refreshing. Results are manually entered, not automatically collected from live equipment.</p>
-  {guide&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" onMouseDown={e=>{if(e.target===e.currentTarget)setGuide(false)}}><div role="dialog" aria-modal="true" aria-label="Report Generator Guide" className="w-full max-w-xl rounded-xl border border-cyan-600 bg-[#0a2237] p-6 text-slate-100"><div className="flex items-center justify-between gap-3"><h3 className="text-xl font-bold">How to Prepare FAT/SAT Report</h3><button type="button" onClick={()=>setGuide(false)} aria-label="Close" className="rounded-lg border border-cyan-700 px-3 py-1">✕</button></div><ol className="mt-4 list-decimal space-y-3 pl-5 leading-7"><li>Enter project, station, engineer, date and report revision.</li><li>Choose FAT or SAT report type.</li><li>Review each test's expected result and enter observed actual result.</li><li>Set PASS, FAIL, BLOCKED or NOT TESTED and record remarks/defect IDs.</li><li>Add or remove test cases as needed.</li><li>Export CSV, or use Print / Save as PDF in your browser.</li></ol><p className="mt-3 text-sm text-amber-200">Training documentation only. Validate and approve all project evidence separately.</p></div></div>}
- </section>;
-};
-
-
-type TrainingLevel = 'Beginner' | 'Intermediate' | 'Advanced';
-type TrainingTask = {id:string;level:TrainingLevel;title:string;scenario:string;objective:string;choices:string[];correct:number;hint:string;explanation:string};
-const commissioningTasks: TrainingTask[] = [
- {id:'TR-01',level:'Beginner',title:'IED Communication Check',scenario:'A protection IED is reachable on the station LAN, but SCADA cannot establish an MMS association.',objective:'Identify the first protocol-specific verification.',choices:['Check TCP port 102 and IEC 61850 MMS association settings','Change the IEC 104 IOA','Disable PRP LAN B'],correct:0,hint:'Ping confirms IP reachability, not application-layer MMS.',explanation:'Check MMS/TCP 102 connectivity, server configuration and association logs. Do not infer MMS health from ping alone.'},
- {id:'TR-02',level:'Beginner',title:'Breaker Indication Mapping',scenario:'The field breaker is OPEN, but SCADA indicates CLOSED. MMS communication is healthy.',objective:'Choose the correct signal tracing method.',choices:['Restart every switch','Trace XCBR.Pos source, quality and SCADA tag mapping','Bypass breaker interlocks'],correct:1,hint:'Start at the source value and follow the mapping chain.',explanation:'Verify source XCBR.Pos, quality, DataSet/RCB and HMI point mapping against the approved signal list.'},
- {id:'TR-03',level:'Beginner',title:'Time Synchronization',scenario:'IED events are displayed out of order in the SOE list.',objective:'Select the relevant commissioning check.',choices:['Check time source, sync status and event timestamps','Change CT ratio','Disable GOOSE'],correct:0,hint:'SOE depends on event source timestamps and clock quality.',explanation:'Validate IED synchronization, source timestamps, time zone/UTC handling and project tolerance.'},
- {id:'TR-04',level:'Intermediate',title:'GOOSE Subscription',scenario:'Publisher GOOSE packets are visible but the subscriber rejects the stream after a configuration update.',objective:'Find the likely configuration mismatch.',choices:['RCC IEC 104 common address','GOOSE confRev, DataSet and subscriber ExtRef','HMI analog scaling'],correct:1,hint:'A valid network frame can still be rejected by an IEC 61850 subscriber.',explanation:'Compare transmitted confRev and DataSet with the subscriber engineering configuration and approved SCD.'},
- {id:'TR-05',level:'Intermediate',title:'MMS Reporting',scenario:'IED data can be read on demand, but breaker changes do not update SCADA automatically.',objective:'Choose the most relevant reporting checks.',choices:['RCB enablement, DataSet, trigger options and SCADA subscription','Only the Ethernet cable colour','Gateway IEC 104 IOA only'],correct:0,hint:'Reads and unsolicited reports are different services.',explanation:'Inspect Report Control Block, trigger options, DataSet membership, reservation and client subscriptions.'},
- {id:'TR-06',level:'Intermediate',title:'PRP Redundancy',scenario:'LAN A is disconnected in a simulated test. Communication continues on LAN B and a redundancy alarm appears.',objective:'Evaluate the expected outcome.',choices:['FAIL because any PRP link loss must stop data','PASS for continuity, with degraded redundancy alarm and repair action','Disable supervision to clear the alarm'],correct:1,hint:'PRP aims for zero-time recovery on single-network failure.',explanation:'Single LAN failure should preserve communication through the remaining LAN; the loss must be alarmed and corrected.'},
- {id:'TR-07',level:'Advanced',title:'Remote Breaker Close',scenario:'An earth switch is CLOSED and the operator requests breaker CLOSE.',objective:'Choose the safe commissioning outcome.',choices:['Force Close by bypassing CILO','Approve Close because MMS is online','Reject Close and verify interlocking/permissive feedback'],correct:2,hint:'Communication availability does not override electrical interlocks.',explanation:'Unsafe CLOSE must remain blocked. Check control authority, interlock logic and command response in an authorized isolated simulation.'},
- {id:'TR-08',level:'Advanced',title:'IEC 104 RCC Mapping',scenario:'Station HMI shows the correct breaker but RCC displays the wrong feeder status.',objective:'Identify the trace path.',choices:['Source SCADA tag → gateway common address/IOA → RCC point list','Change GOOSE multicast MAC','Disable RCB on the IED'],correct:0,hint:'The station display is already correct; focus on the gateway-to-RCC mapping.',explanation:'Trace IEC 104 point mapping, common address, IOA, quality, interrogation and spontaneous updates using the approved point list.'},
- {id:'TR-09',level:'Advanced',title:'FAT/SAT Evidence Review',scenario:'A breaker command test has a PASS mark but no actual result, event timestamp or signed test record.',objective:'Determine the proper acceptance action.',choices:['Accept PASS without evidence','Record the missing evidence and hold acceptance pending review','Delete the test case'],correct:1,hint:'A status label alone is not sufficient engineering evidence.',explanation:'Document actual observations, SOE/command logs, witness details and defects before formal sign-off.'}
-];
-const GuidedCommissioningTraining: React.FC = () => {
- const [level,setLevel]=useState<TrainingLevel>('Beginner');
- const [index,setIndex]=useState(0);
- const [answers,setAnswers]=useState<Record<string,number>>({});
- const [hints,setHints]=useState<Record<string,boolean>>({});
- const [submitted,setSubmitted]=useState<Record<string,boolean>>({});
- const [engineer,setEngineer]=useState('');
- const [guide,setGuide]=useState(false);
- const [completed,setCompleted]=useState(false);
- useEffect(()=>{
-  try {
-   const saved=window.localStorage.getItem('sas-guided-training-v1');
-   if(!saved)return;
-   const data=JSON.parse(saved);
-   if(data && typeof data==='object'){
-    if(['Beginner','Intermediate','Advanced'].includes(data.level))setLevel(data.level);
-    if(typeof data.index==='number'&&Number.isInteger(data.index))setIndex(Math.max(0,Math.min(2,data.index)));
-    if(data.answers&&typeof data.answers==='object')setAnswers(data.answers);
-    if(data.hints&&typeof data.hints==='object')setHints(data.hints);
-    if(data.submitted&&typeof data.submitted==='object')setSubmitted(data.submitted);
-    if(typeof data.engineer==='string')setEngineer(data.engineer);
-   }
-  }catch(_error){/* private browsing or invalid saved data */}
- },[]);
- const [trainingLoaded,setTrainingLoaded]=useState(false);
- useEffect(()=>{const handle=window.setTimeout(()=>setTrainingLoaded(true),0);return ()=>window.clearTimeout(handle)},[]);
- useEffect(()=>{
-  if(!trainingLoaded)return;
-  try{window.localStorage.setItem('sas-guided-training-v1',JSON.stringify({level,index,answers,hints,submitted,engineer}))}catch(_error){/* storage unavailable */}
- },[trainingLoaded,level,index,answers,hints,submitted,engineer]);
- const tasks=commissioningTasks.filter(t=>t.level===level);
- const task=tasks[Math.min(index,tasks.length-1)];
- const levelAnswered=tasks.filter(t=>submitted[t.id]).length;
- const levelCorrect=tasks.filter(t=>submitted[t.id]&&answers[t.id]===t.correct).length;
- const levelHints=tasks.filter(t=>hints[t.id]).length;
- const score=Math.max(0,Math.round((levelCorrect/tasks.length)*100)-(levelHints*5));
- const allCompleted=commissioningTasks.filter(t=>submitted[t.id]).length;
- const switchLevel=(next:TrainingLevel)=>{setLevel(next);setIndex(0);setCompleted(false)};
- const submit=()=>{if(answers[task.id]===undefined)return;setSubmitted(old=>({...old,[task.id]:true}));setCompleted(false)};
- const resetLevel=()=>{const ids=new Set(tasks.map(t=>t.id));setAnswers(old=>Object.fromEntries(Object.entries(old).filter(([k])=>!ids.has(k))));setHints(old=>Object.fromEntries(Object.entries(old).filter(([k])=>!ids.has(k))));setSubmitted(old=>Object.fromEntries(Object.entries(old).filter(([k])=>!ids.has(k))));setIndex(0);setCompleted(false)};
- const print=()=>{
-  const safe=(v:string)=>String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  const rows=tasks.map(t=>`<tr><td>${safe(t.id)}</td><td>${safe(t.title)}</td><td>${submitted[t.id]?(answers[t.id]===t.correct?'Correct':'Incorrect'):'Not completed'}</td><td>${hints[t.id]?'Yes':'No'}</td></tr>`).join('');
-  const html=`<!doctype html><html><head><meta charset="utf-8"><title>Commissioning Training Assessment</title><style>body{font:13px Arial,sans-serif;color:#15253a;margin:35px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #9aaaba;padding:9px;text-align:left}th{background:#e8f1f7}h1{font-size:23px}.note{margin-top:24px;color:#58687a}</style></head><body><h1>SAS Guided Commissioning — Training Assessment</h1><p><b>Engineer:</b> ${safe(engineer||'Not specified')} &nbsp; <b>Level:</b> ${safe(level)} &nbsp; <b>Date:</b> ${safe(new Date().toLocaleDateString())}</p><p><b>Completed:</b> ${levelAnswered}/${tasks.length} &nbsp; <b>Correct:</b> ${levelCorrect} &nbsp; <b>Hints used:</b> ${levelHints} &nbsp; <b>Score:</b> ${score}%</p><table><tr><th>Task</th><th>Commissioning Scenario</th><th>Answer</th><th>Hint Used</th></tr>${rows}</table><p class="note">Browser-based knowledge assessment only. Not a formal qualification, site acceptance certificate or record of live equipment testing.</p></body></html>`;
-  const w=window.open('','_blank');if(!w){window.alert('Please allow popups to print the training report.');return;}w.document.open();w.document.write(html);w.document.close();w.focus();setTimeout(()=>w.print(),250);
- };
- return <section className="mt-8 rounded-2xl border border-cyan-700/60 bg-[#091d31] p-4 md:p-6">
-  <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-widest text-cyan-400">FAT / SAT • Guided Training</div><h2 className="mt-2 text-2xl font-extrabold text-white">Guided Commissioning Training & Assessment</h2><p className="mt-2 text-sm leading-6 text-slate-300">Practice commissioning decisions from beginner to advanced, review engineering explanations and track your assessment score.</p></div><button type="button" onClick={()=>setGuide(true)} className="rounded-lg border border-cyan-600 px-4 py-2 text-sm font-semibold text-cyan-200">? How to Use</button></div>
-  <div className="mt-5 flex flex-wrap gap-2">{(['Beginner','Intermediate','Advanced'] as TrainingLevel[]).map(l=><button key={l} type="button" onClick={()=>switchLevel(l)} aria-pressed={level===l} className={`rounded-lg border px-4 py-2 text-sm font-bold ${level===l?'border-cyan-400 bg-[#13506a] text-white':'border-[#2a5873] bg-[#071726] text-slate-300'}`}>{l}</button>)}</div>
-  <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">{([['Level Progress',`${levelAnswered}/${tasks.length}`],['Correct Answers',String(levelCorrect)],['Hints Used',String(levelHints)],['Score',`${score}%`]] as const).map(([label,value])=><div key={label} className="rounded-lg border border-[#2a5873] bg-[#071726] p-3"><div className="text-xl font-bold text-cyan-200">{value}</div><div className="text-xs text-slate-400">{label}</div></div>)}</div>
-  <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#123247]"><div className="h-full bg-cyan-400 transition-all" style={{width:`${Math.round(levelAnswered/tasks.length*100)}%`}}/></div>
-  <div className="mt-5 rounded-xl border border-[#2a5873] bg-[#071726] p-4 md:p-5"><div className="flex flex-wrap justify-between gap-2 text-sm text-cyan-300"><span>{task.id} · {level}</span><span>Task {index+1} of {tasks.length}</span></div><h3 className="mt-3 text-xl font-bold text-white">{task.title}</h3><p className="mt-3 leading-7 text-slate-200"><strong className="text-cyan-300">Scenario:</strong> {task.scenario}</p><p className="mt-2 leading-7 text-slate-200"><strong className="text-cyan-300">Your assignment:</strong> {task.objective}</p>
-  <div className="mt-4 space-y-2">{task.choices.map((c,i)=><label key={i} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm ${answers[task.id]===i?'border-cyan-400 bg-[#123d52] text-white':'border-[#2a5873] text-slate-200'} ${submitted[task.id]?'cursor-default':''}`}><input type="radio" name={`training-${task.id}`} className="mt-1" checked={answers[task.id]===i} disabled={!!submitted[task.id]} onChange={()=>setAnswers(old=>({...old,[task.id]:i}))}/><span>{c}</span></label>)}</div>
-  <div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={!!submitted[task.id]||answers[task.id]===undefined} onClick={submit} className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-bold text-[#052034] disabled:opacity-40">Check Answer</button><button type="button" onClick={()=>setHints(old=>({...old,[task.id]:true}))} className="rounded-lg border border-amber-700 px-4 py-2 text-sm text-amber-200">Show Hint (-5 points)</button></div>
-  {hints[task.id]&&<p className="mt-3 rounded-lg border border-amber-700/60 bg-[#332817] p-3 text-sm text-amber-100"><strong>Hint:</strong> {task.hint}</p>}
-  {submitted[task.id]&&<div role="status" className={`mt-4 rounded-lg border p-4 ${answers[task.id]===task.correct?'border-emerald-700 bg-[#0d3029] text-emerald-100':'border-rose-700 bg-[#361c26] text-rose-100'}`}><strong>{answers[task.id]===task.correct?'CORRECT — PASS':'INCORRECT — REVIEW'}</strong><p className="mt-2 text-sm leading-6">{task.explanation}</p><p className="mt-2 text-sm">Correct answer: {task.choices[task.correct]}</p></div>}
-  <div className="mt-5 flex flex-wrap items-center justify-between gap-2"><button type="button" disabled={index===0} onClick={()=>setIndex(i=>Math.max(0,i-1))} className="rounded-lg border border-[#2a5873] px-4 py-2 text-sm text-slate-200 disabled:opacity-40">← Previous</button><button type="button" disabled={index===tasks.length-1} onClick={()=>setIndex(i=>Math.min(tasks.length-1,i+1))} className="rounded-lg border border-cyan-600 px-4 py-2 text-sm text-cyan-200 disabled:opacity-40">Next Task →</button></div></div>
-  <div className="mt-5 rounded-xl border border-[#2a5873] bg-[#071726] p-4"><h3 className="font-bold text-white">Assessment & Completion Report</h3><p className="mt-2 text-sm text-slate-300">Total completed across all levels: {allCompleted}/{commissioningTasks.length}. Level assessment is available after all {tasks.length} tasks are answered.</p><label className="mt-3 block max-w-sm text-sm text-slate-300">Engineer Name<input value={engineer} onChange={e=>setEngineer(e.target.value)} placeholder="Enter name for training report" className="mt-1 block w-full rounded-lg border border-[#2a5873] bg-[#0b2539] p-2 text-white"/></label><div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={levelAnswered!==tasks.length} onClick={()=>setCompleted(true)} className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-bold text-[#052034] disabled:opacity-40">Finish Level</button><button type="button" onClick={print} className="rounded-lg border border-cyan-600 px-4 py-2 text-sm text-cyan-200">Print / Save Assessment PDF</button><button type="button" onClick={resetLevel} className="rounded-lg border border-[#45627a] px-4 py-2 text-sm text-slate-300">Reset This Level</button></div>{completed&&<p role="status" className="mt-3 rounded-lg border border-emerald-700 bg-[#0d3029] p-3 text-sm text-emerald-200">{level} level complete: {levelCorrect}/{tasks.length} correct · Score {score}%. This is a training assessment, not an industry certification.</p>}</div>
-  <p className="mt-3 text-xs text-amber-200">Training-only scenarios. Never bypass protection or interlocking on live equipment. Progress is held in page memory; print your assessment before refreshing.</p>
-  {guide&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" onMouseDown={e=>{if(e.target===e.currentTarget)setGuide(false)}}><div role="dialog" aria-modal="true" aria-label="Guided Training Help" className="w-full max-w-xl rounded-xl border border-cyan-600 bg-[#0a2237] p-6 text-slate-100"><div className="flex items-center justify-between gap-3"><h3 className="text-xl font-bold">How to Use Guided Training</h3><button type="button" onClick={()=>setGuide(false)} aria-label="Close guide" className="rounded-lg border border-cyan-700 px-3 py-1">✕</button></div><ol className="mt-4 list-decimal space-y-2 pl-5 leading-7 text-slate-200"><li>Select Beginner, Intermediate or Advanced.</li><li>Read the commissioning scenario and assignment.</li><li>Select an answer and click Check Answer.</li><li>Use Show Hint if needed; each hinted task deducts 5 percentage points from the level score.</li><li>Complete all three tasks in the level, then click Finish Level.</li><li>Enter your name and Print / Save Assessment PDF.</li></ol><p className="mt-3 text-sm text-amber-200">No live device controls or actual site acceptance are performed.</p></div></div>}
- </section>;
-};
-
-
-type DiagnosticScenario = {id:string;title:string;fault:string;root:string;fix:string;protocol:'MMS'|'GOOSE'|'IEC104'|'PRP';symptom:string;choices:{id:string;label:string}[]};
-const diagnosticScenarios:DiagnosticScenario[]=[
-{id:'DC-01',title:'IED Offline',fault:'IED network interface unavailable',root:'link',fix:'Restore simulated IED link',protocol:'MMS',symptom:'IED ping fails and SCADA reports communication lost.',choices:[{id:'link',label:'Inspect IED link and port'},{id:'ioa',label:'Edit RCC IOA'},{id:'time',label:'Adjust clock'}]},
-{id:'DC-02',title:'MMS RCB Disabled',fault:'Report Control Block not enabled',root:'rcb',fix:'Enable simulated RCB',protocol:'MMS',symptom:'MMS session established but breaker indications do not update.',choices:[{id:'rcb',label:'Verify DataSet / RCB state'},{id:'vlan',label:'Change GOOSE VLAN'},{id:'ioa',label:'Change IEC 104 IOA'}]},
-{id:'DC-03',title:'GOOSE VLAN Mismatch',fault:'Publisher/subscriber VLAN mismatch',root:'vlan',fix:'Align simulated VLAN',protocol:'GOOSE',symptom:'Publisher sends GOOSE; subscriber misses updates.',choices:[{id:'time',label:'Check NTP'},{id:'vlan',label:'Check VLAN tagging and multicast'},{id:'rcb',label:'Enable MMS RCB'}]},
-{id:'DC-04',title:'PRP LAN A Failure',fault:'LAN A fibre disconnected',root:'prp',fix:'Restore simulated LAN A',protocol:'PRP',symptom:'LAN A alarm active, LAN B carries communication; redundancy degraded.',choices:[{id:'prp',label:'Check independent PRP paths'},{id:'ioa',label:'Change RCC IOA'},{id:'rcb',label:'Disable MMS RCB'}]},
-{id:'DC-05',title:'IEC 104 IOA Error',fault:'Gateway IOA mapped to wrong point',root:'ioa',fix:'Correct simulated IOA',protocol:'IEC104',symptom:'Local HMI is correct but RCC shows wrong feeder indication.',choices:[{id:'ioa',label:'Trace gateway IOA mapping'},{id:'vlan',label:'Change GOOSE VLAN'},{id:'link',label:'Restart IED'}]},
-{id:'DC-06',title:'GOOSE confRev Mismatch',fault:'Subscriber expects older confRev',root:'confrev',fix:'Align simulated SCD configuration',protocol:'GOOSE',symptom:'GOOSE packets arrive but subscriber rejects the stream.',choices:[{id:'confrev',label:'Compare confRev, DataSet and ExtRef'},{id:'rcb',label:'Enable MMS RCB'},{id:'ioa',label:'Change IEC 104 IOA'}]}
-];
-type DiagnosticEvent={time:string;severity:string;message:string};
-const CommissioningDiagnostics:React.FC=()=>{
- const [scenario,setScenario]=useState(diagnosticScenarios[0].id);
- const [answer,setAnswer]=useState('');
- const [corrected,setCorrected]=useState(false);
- const [checked,setChecked]=useState(false);
- const [runs,setRuns]=useState(0);
- const [success,setSuccess]=useState(0);
- const [history,setHistory]=useState<DiagnosticEvent[]>([]);
- const [filter,setFilter]=useState('ALL');
- const [guide,setGuide]=useState(false);
- const item=diagnosticScenarios.find(x=>x.id===scenario)??diagnosticScenarios[0];
- const resolved=corrected&&checked&&answer===item.root;
- const push=(severity:string,message:string)=>setHistory(old=>[{time:new Date().toLocaleTimeString(),severity,message},...old].slice(0,80));
- const choose=(id:string)=>{setScenario(id);setAnswer('');setCorrected(false);setChecked(false);push('ALARM',`${id} fault injected in browser simulation`)};
- const diagnose=()=>{setChecked(true);push(answer===item.root?'INFO':'WARNING',answer===item.root?'Correct root cause selected':'Diagnosis mismatch — inspect protocol evidence')};
- const retest=()=>{setRuns(v=>v+1);const pass=corrected&&answer===item.root&&checked;if(pass)setSuccess(v=>v+1);push(pass?'CLEAR':'ALARM',pass?`${item.id}: simulated fix validated, communication restored`:`${item.id}: retest failed; verify diagnosis and correction`)};
- const packet=item.protocol==='MMS'?['TCP 102 | MMS association: '+(item.id==='DC-01'&&!resolved?'DOWN':'UP'),'Report Control Block: '+(item.id==='DC-02'&&!resolved?'DISABLED':'ENABLED'),'Quality: '+(resolved?'GOOD':'SUSPECT / STALE')]:item.protocol==='GOOSE'?['EtherType 0x88B8 | Multicast GOOSE','VLAN / confRev: '+(resolved?'MATCH':'MISMATCH'),'Subscriber status: '+(resolved?'VALID':'INVALID')]:item.protocol==='IEC104'?['TCP 2404 | IEC 60870-5-104','IOA mapping: '+(resolved?'MATCH':'INCORRECT'),'RCC indication: '+(resolved?'UPDATED':'MISMATCH')]:['PRP LAN A: '+(resolved?'UP':'DOWN'),'PRP LAN B: UP','Redundancy: '+(resolved?'HEALTHY':'DEGRADED')];
- const visible=history.filter(x=>filter==='ALL'||x.severity===filter);
- const print=()=>{const safe=(v:string)=>v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');const html=`<!doctype html><html><head><title>Commissioning Diagnostic Assessment</title><style>body{font:13px Arial;margin:30px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #999;padding:8px;text-align:left}</style></head><body><h1>SAS Commissioning Diagnostics — Training Report</h1><p>Scenario: ${safe(item.title)} | Retests: ${runs} | Passed: ${success} | Date: ${safe(new Date().toLocaleString())}</p><p>Training simulation only — no live field verification.</p><table><tr><th>Time</th><th>Severity</th><th>Event</th></tr>${history.map(e=>`<tr><td>${safe(e.time)}</td><td>${safe(e.severity)}</td><td>${safe(e.message)}</td></tr>`).join('')}</table></body></html>`;const w=window.open('','_blank');if(!w){window.alert('Allow popups to print.');return}w.document.write(html);w.document.close();w.focus();setTimeout(()=>w.print(),250)};
- return <section className="mt-8 rounded-2xl border border-cyan-700/60 bg-[#091d31] p-4 md:p-6">
- <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="text-xs font-bold uppercase tracking-widest text-cyan-400">Commissioning • Browser Simulation</div><h2 className="mt-2 text-2xl font-extrabold text-white">Real-Time Commissioning Troubleshooting Simulator</h2><p className="mt-2 text-sm text-slate-300">Interactive diagnostic states and generated protocol evidence. Not connected to live equipment.</p></div><button type="button" onClick={()=>setGuide(true)} className="rounded-lg border border-cyan-600 px-4 py-2 text-sm text-cyan-200">? How to Use</button></div>
- <div className="mt-5 grid gap-3 md:grid-cols-3">{[['IED / Station Bus',item.id==='DC-01'&&!resolved?'OFFLINE':'ONLINE'],['SCADA / MMS',item.protocol==='MMS'&&!resolved?'ALARM':'ONLINE'],['Gateway / RCC',item.id==='DC-05'&&!resolved?'POINT MISMATCH':'CONNECTED']].map(([name,status])=><div key={name} className="rounded-xl border border-[#28516a] bg-[#071726] p-4"><div className="text-xs text-slate-400">{name}</div><div className={`mt-2 font-bold ${status==='ONLINE'||status==='CONNECTED'?'text-emerald-300':'text-amber-300'}`}>{status}</div></div>)}</div>
- <div className="mt-5 grid gap-4 lg:grid-cols-2">
- <div className="space-y-4"><div className="rounded-xl border border-[#28516a] bg-[#071726] p-4"><label className="text-sm font-bold text-cyan-200">Fault Scenario<select value={scenario} onChange={e=>choose(e.target.value)} className="mt-2 block w-full rounded-lg border border-[#28516a] bg-[#0c293e] p-2 text-white">{diagnosticScenarios.map(x=><option key={x.id} value={x.id}>{x.id} — {x.title}</option>)}</select></label><p className="mt-3 text-sm text-slate-200"><strong>Symptom:</strong> {item.symptom}</p><p className="mt-2 text-xs text-amber-200">Fault injected: {item.fault}</p></div>
- <div className="rounded-xl border border-[#28516a] bg-[#071726] p-4"><h3 className="font-bold text-cyan-200">Troubleshooting Workflow</h3><p className="mt-2 text-xs text-slate-400">1. Diagnose → 2. Apply simulated correction → 3. Retest</p><div className="mt-3 space-y-2">{item.choices.map(c=><label key={c.id} className="flex items-center gap-2 text-sm text-slate-200"><input type="radio" checked={answer===c.id} onChange={()=>{setAnswer(c.id);setChecked(false);setCorrected(false)}} name={'diag-'+item.id}/>{c.label}</label>)}</div><button type="button" disabled={!answer} onClick={diagnose} className="mt-3 rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-200 disabled:opacity-40">Check Diagnosis</button>{checked&&<p role="status" className={`mt-2 text-sm ${answer===item.root?'text-emerald-300':'text-amber-300'}`}>{answer===item.root?'Correct diagnosis. Apply the simulated fix.':'Incorrect diagnosis. Review the symptom and protocol evidence.'}</p>}<label className="mt-3 flex items-center gap-2 text-sm text-slate-200"><input type="checkbox" disabled={!checked||answer!==item.root} checked={corrected} onChange={e=>setCorrected(e.target.checked)}/>Apply: {item.fix}</label><button type="button" onClick={retest} className="mt-4 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-bold text-[#052034]">Run Retest</button></div></div>
- <div className="space-y-4"><div className="rounded-xl border border-[#28516a] bg-[#071726] p-4"><h3 className="font-bold text-cyan-200">Simulated {item.protocol} Protocol Analyzer</h3><div className="mt-3 space-y-2 font-mono text-xs text-slate-200">{packet.map((p,i)=><div key={i} className="rounded bg-[#0c293e] p-3">{p}</div>)}</div><p className="mt-3 text-xs text-slate-400">Illustrative protocol fields only; not captured network packets.</p></div><div className="rounded-xl border border-[#28516a] bg-[#071726] p-4"><h3 className="font-bold text-cyan-200">Performance</h3><div className="mt-3 grid grid-cols-3 gap-2 text-center">{[['Retests',runs],['Passed',success],['Success Rate',runs?`${Math.round(success/runs*100)}%`:'—']].map(([label,val])=><div key={label} className="rounded bg-[#0c293e] p-2"><div className="text-xl font-bold text-white">{val}</div><div className="text-xs text-slate-400">{label}</div></div>)}</div><button type="button" onClick={print} className="mt-3 rounded-lg border border-cyan-500 px-3 py-2 text-sm text-cyan-200">Print Assessment / Save PDF</button></div></div></div>
- <div className="mt-5 rounded-xl border border-[#28516a] bg-[#071726] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold text-cyan-200">Event & SOE Viewer</h3><select aria-label="Filter event severity" value={filter} onChange={e=>setFilter(e.target.value)} className="rounded border border-[#28516a] bg-[#0c293e] p-2 text-sm text-white">{['ALL','ALARM','WARNING','INFO','CLEAR'].map(x=><option key={x}>{x}</option>)}</select></div><div className="mt-3 max-h-56 space-y-2 overflow-y-auto">{visible.length?visible.map((e,i)=><div key={i} className="flex flex-wrap gap-2 rounded bg-[#0c293e] p-2 text-xs text-slate-200"><span className="text-slate-400">{e.time}</span><strong className={e.severity==='ALARM'?'text-rose-300':'text-cyan-300'}>{e.severity}</strong><span>{e.message}</span></div>):<p className="text-sm text-slate-400">Select a fault or run a test to generate simulated events.</p>}</div></div>
- {guide&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" onMouseDown={e=>{if(e.target===e.currentTarget)setGuide(false)}}><div role="dialog" aria-modal="true" aria-label="Troubleshooting simulator help" className="w-full max-w-lg rounded-xl border border-cyan-600 bg-[#0a2237] p-6 text-slate-100"><div className="flex justify-between gap-3"><h3 className="text-xl font-bold">How to Use</h3><button type="button" onClick={()=>setGuide(false)} aria-label="Close" className="rounded border border-cyan-700 px-2">✕</button></div><ol className="mt-4 list-decimal space-y-2 pl-5 text-sm leading-7"><li>Select one of the six fault scenarios.</li><li>Inspect the device dashboard, symptom and protocol evidence.</li><li>Select a root cause and check the diagnosis.</li><li>Apply the simulated fix and run a retest.</li><li>Review SOE events and print the assessment report.</li></ol><p className="mt-3 text-xs text-amber-200">Simulation only; never bypass protection interlocks on live equipment.</p></div></div>}
- </section>;
+const TEST_PROCEDURES: Record<string, TestHowToGuide> = {
+  'AUTO-CILO-01': {
+    id: 'AUTO-CILO-01',
+    code: 'TC-CILO-01',
+    title: 'Interlocking (CILO): Earth Switch Q8 Closed Blocks CB Close',
+    preconditions: [
+      'Bay 43LR switch REMOTE mode lo undali.',
+      'Bay IED communication ONLINE & Quality GOOD ga undali.',
+    ],
+    steps: [
+      'Circuit Breaker (CB) ni OPEN cheyandi.',
+      'Bus Disconnector (Q1) ni OPEN chesi Earth Switch (Q8) ni CLOSE cheyandi.',
+      'Q8 CLOSED unnapude SCADA SBO dwara CB CLOSE command pampandi.',
+      'CILO interlock command ni reject chesthundo ledo verify cheyandi, tarvatha Q8 OPEN & Q1 CLOSED ki restore cheyandi.',
+    ],
+    passCriteria: 'Q8 closed condition lo SCADA CB CLOSE command strictly REJECT avvali; unsafe close jaragakudadu.',
+    faultCheckTip: 'Test fail aithe Bay 43LR mode leda active IED comm fault undemo check cheyandi.',
+  },
+  'AUTO-PROT-86': {
+    id: 'AUTO-PROT-86',
+    code: 'TC-PROT-86',
+    title: 'Protection Trip (50/51) → CB Open + 86 Lockout + Alarm + 1ms SOE',
+    preconditions: [
+      'Selected bay energized leda CB CLOSED condition lo undali.',
+      'SCADA Alarm & 1ms SOE recorder active ga undali.',
+    ],
+    steps: [
+      'Simulated 50/51 Phase Overcurrent protection trip inject cheyandi.',
+      'Circuit Breaker ventane OPEN ayyinda & 86 Master Trip Lockout latch ayyinda check cheyandi.',
+      'Unacknowledged Critical Alarm raise ayyinda mariyu Live 1ms SOE table lo trip record padinda verify cheyandi.',
+      'Verify ayyaka P2P tab lo "Reset 86 / Ack Alarms" click chesi normal state ki restore cheyandi.',
+    ],
+    passCriteria: 'CB = OPEN, 86 Trip = ACTIVE, Active Alarm raised, mariyu SOE lo millisecond timestamp record ravali.',
+    faultCheckTip: 'Trip tarvatha CB malli close cheyalante mundu 86 Lockout reset cheyali.',
+  },
+  'AUTO-SBO-01': {
+    id: 'AUTO-SBO-01',
+    code: 'TC-SBO-01',
+    title: 'SCADA SBO Control (CSWI1) & Independent Position Feedback (XCBR1)',
+    preconditions: [
+      'Bay 43LR = REMOTE, Earth Switch Q8 = OPEN, Bus DS Q1 = CLOSED.',
+      '86 Protection Lockout active lo undakudadu.',
+    ],
+    steps: [
+      'Select-Before-Operate (SBOw) command (OPEN or CLOSE) send cheyandi.',
+      'CSWI1 control confirmation & XCBR1.Pos.stVal actual feedback change verify cheyandi.',
+      'Data Quality GOOD ga unda mariyu SOE lo OPERATOR_CMD record padinda check cheyandi.',
+    ],
+    passCriteria: 'Breaker position target state ki change ayyi Quality = GOOD tho SCADA/SOE lo confirm avvali.',
+    faultCheckTip: 'SBO fail aithe active faults (IED offline / TCS / DC supply) clear chesi malli run cheyandi.',
+  },
+  'AUTO-43LR-01': {
+    id: 'AUTO-43LR-01',
+    code: 'TC-43LR-01',
+    title: 'Control Authority (43LR LOCAL Mode Blocks Remote SCADA Command)',
+    preconditions: [
+      'Bay IED online undali.',
+    ],
+    steps: [
+      'Bay 43LR selector switch ni LOCAL mode ki marchandi.',
+      'SCADA HMI nunchi remote SBO CB command send cheyandi.',
+      'Command "Blocked-by-switching-hierarchy" tho reject ayyinda verify cheyandi.',
+      'Test complete ayyaka 43LR ni malli REMOTE mode ki restore cheyandi.',
+    ],
+    passCriteria: '43LR LOCAL lo unnappudu remote SCADA command execute avvakunda reject avvali.',
+    faultCheckTip: 'Real site SAT lo local panel control matrame work avvali, remote SCADA blocked undali.',
+  },
+  'AUTO-MMS-GI': {
+    id: 'AUTO-MMS-GI',
+    code: 'TC-MMS-GI',
+    title: 'IEC 61850 MMS General Interrogation (GI) & BRCB Report Health',
+    preconditions: [
+      'Station Bus switch & IED TCP/102 MMS association UP lo undali.',
+    ],
+    steps: [
+      'Selected bay IED meeda MMS General Interrogation (GI) trigger cheyandi.',
+      'IED commHealthy = true mariyu Bay Quality = GOOD unnaya check cheyandi.',
+      'Buffered Report Control Block (BRCB) snapshot update ayyinda verify cheyandi.',
+    ],
+    passCriteria: 'MMS TCP/102 ONLINE & Bay Quality = GOOD undali.',
+    faultCheckTip: 'P2P tab lo MMS/IED Offline fault toggle ON chesthe ee test FAIL avthundi — fault OFF chesi re-test cheyandi.',
+  },
+  'AUTO-GOOSE-01': {
+    id: 'AUTO-GOOSE-01',
+    code: 'TC-GOOSE-01',
+    title: 'GOOSE Multicast Burst (0x88B8) & stNum/sqNum Supervision',
+    preconditions: [
+      'GOOSE Control Block (GoCB) configured with matching APPID, VLAN, confRev.',
+    ],
+    steps: [
+      'Primary GoCB meeda GOOSE state-change burst publish cheyandi.',
+      'stNum increment ayyinda mariyu sqNum reset/retransmit healthy ga unda check cheyandi.',
+      'Subscriber side lo mismatchFault = NONE unnada verify cheyandi.',
+    ],
+    passCriteria: 'stNum increment avvali mariyu GOOSE mismatch fault NONE undali.',
+    faultCheckTip: 'GOOSE Lab lo confRev/APPID mismatch inject chesthe ee test FAIL chupisthundi.',
+  },
+  'AUTO-RED-01': {
+    id: 'AUTO-RED-01',
+    code: 'TC-RED-01',
+    title: 'Station Bus Redundancy (PRP / HSR) & Time Sync Quality Audit',
+    preconditions: [
+      'All Station Bus switches, redundant LAN A/B paths, and PTP/SNTP clock healthy.',
+    ],
+    steps: [
+      'Active redundancy mode (PRP / HSR / RSTP) mariyu healthy network links count audit cheyandi.',
+      'Anni IEDs ONLINE unnaya leda check cheyandi.',
+      'Network & Sync category lo active faults 0 unnaya verify cheyandi.',
+    ],
+    passCriteria: '100% IEDs ONLINE, anni station links UP, mariyu zero Network/Time-Sync faults.',
+    faultCheckTip: 'Network/Time-Sync fault ON chesi fail test cheyochu, tarvatha clear chesi Re-Test & Close cheyandi.',
+  },
 };
 
 export const FatSatLabPage: React.FC = () => {
-  const [open, setOpen] = useState<number[]>([0]);
-  const toggle = (index: number) => setOpen((current) => current.includes(index) ? current.filter((n) => n !== index) : [...current, index]);
-  return (
-    <div className="sas-fat-sat-page min-h-screen px-4 py-7 text-slate-100 md:px-8">
-      <header className="mx-auto max-w-6xl rounded-2xl border border-cyan-800/60 bg-[#0a2237] p-6 md:p-9">
-        <div className="flex items-center gap-2 text-sm font-bold tracking-widest text-cyan-400"><BookOpen size={19}/> SAS ENGINEERING HUB / FAT & SAT LEARNING</div>
-        <h1 className="mt-4 text-2xl font-extrabold md:text-4xl">FAT / SAT — Complete Step-by-Step Guide</h1>
-        <p className="mt-3 max-w-4xl text-slate-300">Substation Automation System commissioning ని starting నుంచి final handover వరకు, practical engineering sequence లో తెలుసుకుందాం. ఇది learning guide మాత్రమే; actual site tests approved procedures and qualified supervision లో చేయాలి.</p>
-        <div className="mt-5 flex flex-wrap gap-3 text-sm">
-          <span className="rounded-lg border border-cyan-700 bg-[#10334a] px-3 py-2">4 phases</span>
-          <span className="rounded-lg border border-cyan-700 bg-[#10334a] px-3 py-2">18 sequential steps</span>
-          <span className="rounded-lg border border-cyan-700 bg-[#10334a] px-3 py-2">Documents → FAT → SAT → Handover</span>
+  const {
+    bays,
+    transformers,
+    ieds,
+    networkLinks,
+    gooseControlBlocks,
+    alarms,
+    soeLog,
+    faultScenarios,
+    fatSatTests,
+    networkRedundancyMode,
+    selectedBayId,
+    setSelectedBayId,
+    commandBreaker,
+    commandDisconnector,
+    setBayLocalRemote,
+    triggerProtectionTrip,
+    resetProtectionTrip,
+    resetRecloseDemo86,
+    stepTransformerOltc,
+    triggerGooseStateChangeBurst,
+    triggerMmsGeneralInterrogation,
+    toggleFaultScenario,
+    runFatSatTest,
+    runAllFatSatTests,
+    acknowledgeAllAlarms,
+  } = useSubstationStore();
+
+  const [mode, setMode] = useState<CommissioningMode>('SAT');
+  const [activeTab, setActiveTab] = useState<WorkbenchTab>('P2P');
+  const [testerName, setTesterName] = useState<string>('D. Nagendra Babu (SAS Commissioning Eng.)');
+  const [witnessName, setWitnessName] = useState<string>('Utility Witness / Consultant');
+  const [projectRef, setProjectRef] = useState<string>('132/33/11 kV Digital Substation SAS');
+
+  // Selected Bay for P2P & Live Auto Tests
+  const activeBay = useMemo(
+    () => bays.find((b) => b.id === selectedBayId) || bays[0],
+    [bays, selectedBayId]
+  );
+  const activeBayIdx = useMemo(
+    () => Math.max(0, bays.findIndex((b) => b.id === activeBay?.id)),
+    [bays, activeBay]
+  );
+  const activeIed = useMemo(
+    () => ieds.find((i) => i.id === activeBay?.iedId),
+    [ieds, activeBay]
+  );
+  const activeTx = useMemo(
+    () =>
+      transformers.find(
+        (t) =>
+          t.hvBayId === activeBay?.id ||
+          t.lvBayId === activeBay?.id ||
+          t.id === activeBay?.connectedTransformerId
+      ),
+    [transformers, activeBay]
+  );
+  const proto = useMemo(
+    () => (activeBay ? getBayProtocolBreakdown(activeBay, activeBayIdx) : null),
+    [activeBay, activeBayIdx]
+  );
+
+  // P2P Results keyed by `${bayId}:${pointKey}`
+  const [p2pResults, setP2pResults] = useState<Record<string, P2pCheckResult>>({});
+  // Interactive Auto-Verified Tests
+  const [autoTests, setAutoTests] = useState<LiveAutoTestResult[]>(INITIAL_LIVE_AUTO_TESTS);
+  // Real-time Punch List
+  const [punchList, setPunchList] = useState<PunchItem[]>([]);
+  const [newPunchCat, setNewPunchCat] = useState<PunchCategory>('CAT_B');
+  const [newPunchDesc, setNewPunchDesc] = useState<string>('');
+  const [lastActionBanner, setLastActionBanner] = useState<{
+    type: 'PASS' | 'FAIL' | 'INFO';
+    text: string;
+  } | null>(null);
+
+  // How to Test Popup Modal State ('WORKBENCH' for full guide, or specific testId)
+  const [howToTestModal, setHowToTestModal] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!howToTestModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setHowToTestModal(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [howToTestModal]);
+
+  // SOP 18-Step Accordion State
+  const [openPhases, setOpenPhases] = useState<number[]>([0]);
+  const togglePhase = (index: number) =>
+    setOpenPhases((cur) => (cur.includes(index) ? cur.filter((n) => n !== index) : [...cur, index]));
+
+  // Derived Live Telemetry Metrics
+  const onlineIedsCount = ieds.filter((i) => i.commHealthy).length;
+  const activeFaults = faultScenarios.filter((f) => f.active);
+  const unackAlarmsCount = alarms.filter((a) => a.state === 'ACTIVE_UNACK').length;
+  const healthyLinksCount = networkLinks.filter((l) => l.status === 'UP').length;
+
+  // Combined Progress Stats
+  const totalAutoAndStoreTests = autoTests.length + fatSatTests.length;
+  const passedTestsCount =
+    autoTests.filter((t) => t.status === 'PASS').length +
+    fatSatTests.filter((t) => t.status === 'PASS').length;
+  const failedTestsCount =
+    autoTests.filter((t) => t.status === 'FAIL').length +
+    fatSatTests.filter((t) => t.status === 'FAIL').length;
+  const completedAutoTests = autoTests.filter((t) => t.status !== 'NOT_RUN');
+  const completedStoreTests = fatSatTests.filter((t) => t.status !== 'NOT_RUN');
+  const completedP2pTests = Object.values(p2pResults).filter((r) => r.status !== 'NOT_TESTED');
+  const completedSuiteCount = completedAutoTests.length + completedStoreTests.length;
+  const totalCompletedCount = completedSuiteCount + completedP2pTests.length;
+  const allSuiteTestsCompleted = totalAutoAndStoreTests > 0 && completedSuiteCount >= totalAutoAndStoreTests;
+  const openPunchItems = punchList.filter((p) => p.status === 'OPEN');
+  const openCatACount = openPunchItems.filter((p) => p.category === 'CAT_A').length;
+
+  const p2pEntriesForBay = useMemo(() => {
+    if (!activeBay || !proto) return [];
+    const base = [
+      {
+        key: 'CB_POS',
+        group: 'Digital Input (52a/52b)',
+        label: `Circuit Breaker Position (${activeBay.breakerId})`,
+        signalRef: proto.mms.statusRef,
+        ioaOrMap: proto.iec104.ioaStatus,
+        liveVal: `${activeBay.breakerState} (Q:${activeBay.quality})`,
+      },
+      {
+        key: 'DS_Q1',
+        group: 'Digital Input (Q1)',
+        label: 'Bus Disconnector (Q1) Position',
+        signalRef: `${activeBay.iedId.replace(/-/g, '_')}/XSWI1.Pos.stVal`,
+        ioaOrMap: `IOA ${1101 + activeBayIdx} (M_DP_TB_1)`,
+        liveVal: activeBay.busDisconnectorState,
+      },
+      {
+        key: 'ES_Q8',
+        group: 'Digital Input (Q8)',
+        label: 'Earth Switch (Q8) Position',
+        signalRef: `${activeBay.iedId.replace(/-/g, '_')}/XSWI8.Pos.stVal`,
+        ioaOrMap: `IOA ${1201 + activeBayIdx} (M_DP_TB_1)`,
+        liveVal: activeBay.earthSwitchState,
+      },
+      {
+        key: 'TRIP_86',
+        group: 'Protection / 86 Lockout',
+        label: 'Master Trip / Protection Operate (PTRC1)',
+        signalRef: `${activeBay.iedId.replace(/-/g, '_')}/PTRC1.Tr.general`,
+        ioaOrMap: `IOA ${1401 + activeBayIdx} (M_SP_TB_1)`,
+        liveVal: activeBay.protectionTripActive ? 'TRIP ACTIVE (86)' : 'NORMAL (HEALTHY)',
+      },
+      {
+        key: 'CTRL_SBO',
+        group: 'Remote Control (SBO)',
+        label: `SCADA SBO Command (${activeBay.breakerId})`,
+        signalRef: `${activeBay.iedId.replace(/-/g, '_')}/CSWI1$CO$Pos$SBOw`,
+        ioaOrMap: `IOA ${6001 + activeBayIdx} (C_DC_NA_1)`,
+        liveVal: `${activeBay.localRemote} · CILO: ${activeBay.interlockPermissive ? 'OK' : 'LOCKED'}`,
+      },
+      {
+        key: 'ANALOG_MW',
+        group: 'Analog Telemetry (MMXU1)',
+        label: 'Active Power / Current / Voltage Scaling',
+        signalRef: proto.mms.measRef,
+        ioaOrMap: proto.iec104.ioaMeas,
+        liveVal: `${(activeBay.voltageAbKv ?? activeBay.voltageKv ?? 0).toFixed(2)} kV · ${(activeBay.currentA ?? 0).toFixed(1)} A · ${(activeBay.activePowerMw ?? 0).toFixed(2)} MW`,
+      },
+    ];
+    if (activeTx) {
+      base.push({
+        key: 'OLTC_TAP',
+        group: 'Transformer Control (YLTC1)',
+        label: `${activeTx.id} OLTC Tap Step & Oil Temp`,
+        signalRef: `${activeBay.iedId.replace(/-/g, '_')}/YLTC1.TapChg`,
+        ioaOrMap: `IOA ${3501 + activeBayIdx} (C_RC_NA_1)`,
+        liveVal: `Tap ${activeTx.oltcTapPosition} · OTI ${activeTx.oilTempC}°C · Load ${(activeTx.loadPercent ?? 0).toFixed(1)}%`,
+      });
+    }
+    return base;
+  }, [activeBay, activeBayIdx, activeTx, proto]);
+
+  // Helper to log a punch item
+  const addPunchItem = (
+    category: PunchCategory,
+    bayOrIed: string,
+    description: string,
+    linkedTestId?: string
+  ) => {
+    const id = `PL-${String(punchList.length + 1).padStart(3, '0')}`;
+    const item: PunchItem = {
+      id,
+      category,
+      mode,
+      bayOrIed,
+      description,
+      linkedTestId,
+      status: 'OPEN',
+      createdAt: formatClock(),
+    };
+    setPunchList((prev) => [item, ...prev]);
+    setLastActionBanner({ type: 'INFO', text: `Punch Point ${id} (${category.replace('_', ' ')}) logged for ${bayOrIed}.` });
+  };
+
+  // End-to-End Signal Chain Health for Selected Bay
+  const signalChainNodes = useMemo(() => {
+    const fieldOk = Boolean(activeBay && activeBay.dcSupplyHealthy && activeBay.tcsHealthy);
+    const iedOk = Boolean(activeIed?.commHealthy && activeBay?.quality === 'GOOD');
+    const busOk = healthyLinksCount > 0 && !activeFaults.some((f) => f.category === 'Network & Sync');
+    const gtwOk = !activeFaults.some((f) => f.id === 'FLT-IEC104-01' || f.id === 'FLT-MODBUS-01');
+    const scadaOk = iedOk && busOk;
+    return [
+      { name: mode === 'FAT' ? 'Test Switch / Sim Input' : 'Field Switchgear (52a/CT/VT)', ok: fieldOk, detail: activeBay ? `${activeBay.breakerId}: ${activeBay.breakerState}` : '—' },
+      { name: `Bay IED (${activeBay?.iedId || 'IED'})`, ok: iedOk, detail: iedOk ? 'MMS TCP/102 ONLINE' : 'COMM FAULT / BAD Q' },
+      { name: `Station Bus (${networkRedundancyMode})`, ok: busOk, detail: `${healthyLinksCount}/${networkLinks.length} Links UP` },
+      { name: 'Gateway (IEC-104 COA 132)', ok: gtwOk, detail: proto ? proto.iec104.ioaStatus.split(' ')[0] + ' ' + proto.iec104.ioaStatus.split(' ')[1] : 'IOA OK' },
+      { name: 'SCADA HMI & 1ms SOE', ok: scadaOk, detail: `${soeLog.length} SOE Records` },
+    ];
+  }, [activeBay, activeIed, healthyLinksCount, networkLinks.length, activeFaults, networkRedundancyMode, mode, proto, soeLog.length]);
+
+  // Execute Live P2P Point Check directly on useSubstationStore
+  const runP2pPointTest = (pointKey: string) => {
+    if (!activeBay || !proto) return;
+    const storeId = `${activeBay.id}:${pointKey}`;
+    const ts = formatClock();
+    const entry = p2pEntriesForBay.find((e) => e.key === pointKey);
+    if (!entry) return;
+
+    let passed = false;
+    let observed = '';
+    let note = '';
+
+    if (pointKey === 'CB_POS' || pointKey === 'CTRL_SBO') {
+      const target: 'OPEN' | 'CLOSED' = activeBay.breakerState === 'CLOSED' ? 'OPEN' : 'CLOSED';
+      const ok = commandBreaker(activeBay.id, target, 'SCADA_SBO');
+      const latestBay = useSubstationStore.getState().bays.find((b) => b.id === activeBay.id);
+      passed = ok && latestBay?.breakerState === target && latestBay.quality === 'GOOD';
+      observed = latestBay ? `${latestBay.breakerState} (Q:${latestBay.quality})` : 'Unknown';
+      note = passed
+        ? `${mode} verified: SBO ${target} confirmed on ${activeBay.breakerId} & logged in 1ms SOE.`
+        : `Command rejected/failed: ${useSubstationStore.getState().lastCommandFeedback?.message || activeBay.interlockReason}`;
+    } else if (pointKey === 'DS_Q1') {
+      const target = activeBay.busDisconnectorState === 'CLOSED' ? 'OPEN' : 'CLOSED';
+      const ok = commandDisconnector(activeBay.id, 'BUS_Q1', target);
+      const latestBay = useSubstationStore.getState().bays.find((b) => b.id === activeBay.id);
+      passed = ok && latestBay?.busDisconnectorState === target;
+      observed = latestBay ? latestBay.busDisconnectorState : 'Unknown';
+      note = passed
+        ? `Q1 Bus Disconnector operated to ${target} and verified end-to-end.`
+        : `Q1 operation blocked (CB must be OPEN before operating isolator).`;
+    } else if (pointKey === 'ES_Q8') {
+      const target = activeBay.earthSwitchState === 'CLOSED' ? 'OPEN' : 'CLOSED';
+      const ok = commandDisconnector(activeBay.id, 'EARTH_Q8', target);
+      const latestBay = useSubstationStore.getState().bays.find((b) => b.id === activeBay.id);
+      passed = ok && latestBay?.earthSwitchState === target;
+      observed = latestBay ? latestBay.earthSwitchState : 'Unknown';
+      note = passed
+        ? `Q8 Earth Switch operated to ${target} and verified in SCADA/SOE.`
+        : `Q8 operation blocked (CB & Bus DS Q1 must be OPEN to close Earth Switch).`;
+    } else if (pointKey === 'TRIP_86') {
+      if (activeBay.protectionTripActive) {
+        resetProtectionTrip(activeBay.id);
+        if (activeBay.bayType === 'OUTGOING_FEEDER') resetRecloseDemo86(activeBay.id);
+        const latestBay = useSubstationStore.getState().bays.find((b) => b.id === activeBay.id);
+        passed = !latestBay?.protectionTripActive;
+        observed = passed ? '86 RESET NORMAL' : 'STILL LATCHED';
+        note = passed ? '86 Lockout & trip indication reset verified.' : 'Reset incomplete — clear fault first.';
+      } else {
+        triggerProtectionTrip(activeBay.id, '50/51 Phase Overcurrent');
+        const latestBay = useSubstationStore.getState().bays.find((b) => b.id === activeBay.id);
+        passed = Boolean(latestBay?.protectionTripActive && latestBay.breakerState === 'OPEN');
+        observed = latestBay ? `CB:${latestBay.breakerState} · 86:${latestBay.protectionTripActive ? 'ACTIVE' : 'OFF'}` : 'Unknown';
+        note = passed ? 'Trip injected: CB opened, 86 latched, Critical alarm & SOE confirmed.' : 'Trip chain verification failed.';
+      }
+    } else if (pointKey === 'ANALOG_MW') {
+      triggerMmsGeneralInterrogation(activeBay.iedId);
+      const latestBay = useSubstationStore.getState().bays.find((b) => b.id === activeBay.id);
+      passed = Boolean(latestBay && latestBay.quality === 'GOOD' && activeIed?.commHealthy);
+      observed = latestBay ? `${(latestBay.voltageAbKv ?? latestBay.voltageKv ?? 0).toFixed(2)} kV | ${(latestBay.currentA ?? 0).toFixed(1)} A | ${(latestBay.activePowerMw ?? 0).toFixed(2)} MW` : '—';
+      note = passed
+        ? `Analog scaling & MMS GI verified (${proto.iec104.ioaMeas}, Q:GOOD).`
+        : `Analog quality suspect (${latestBay?.quality || 'INVALID'}) or IED offline.`;
+    } else if (pointKey === 'OLTC_TAP' && activeTx) {
+      const prevTap = activeTx.oltcTapPosition;
+      const dir = prevTap >= activeTx.oltcMaxTap ? 'LOWER' : 'RAISE';
+      stepTransformerOltc(activeTx.id, dir);
+      const latestTx = useSubstationStore.getState().transformers.find((t) => t.id === activeTx.id);
+      passed = Boolean(latestTx && latestTx.oltcTapPosition !== prevTap);
+      observed = latestTx ? `Tap ${prevTap} → ${latestTx.oltcTapPosition} (OTI ${latestTx.oilTempC}°C)` : '—';
+      note = passed ? `${activeTx.id} OLTC ${dir} step verified.` : 'OLTC step did not change.';
+    }
+
+    setP2pResults((prev) => ({
+      ...prev,
+      [storeId]: {
+        key: pointKey,
+        label: entry.label,
+        signalRef: entry.signalRef,
+        ioaOrMap: entry.ioaOrMap,
+        status: passed ? 'PASS' : 'FAIL',
+        observedValue: observed,
+        timestamp: ts,
+        note,
+      },
+    }));
+    setLastActionBanner({ type: passed ? 'PASS' : 'FAIL', text: `[P2P ${entry.label}] ${note}` });
+  };
+
+  // Run Auto-Verified Live Commissioning Test
+  const executeAutoTest = (testId: string) => {
+    if (!activeBay) return;
+    const ts = formatClock();
+    let passed = false;
+    let evidence = '';
+
+    if (testId === 'AUTO-CILO-01') {
+      // Ensure REMOTE, open CB, open Q1, close Q8, attempt CB Close (must be blocked!), then restore Q8 OPEN
+      setBayLocalRemote(activeBay.id, 'REMOTE');
+      if (activeBay.breakerState === 'CLOSED') commandBreaker(activeBay.id, 'OPEN', 'SCADA_SBO');
+      if (activeBay.busDisconnectorState === 'CLOSED') commandDisconnector(activeBay.id, 'BUS_Q1', 'OPEN');
+      const esClosed = commandDisconnector(activeBay.id, 'EARTH_Q8', 'CLOSED');
+      const unsafeCloseAccepted = commandBreaker(activeBay.id, 'CLOSED', 'SCADA_SBO');
+      const feedback = useSubstationStore.getState().lastCommandFeedback?.message || '';
+      // Cleanly restore Q8 OPEN so bay is safe for next tests
+      commandDisconnector(activeBay.id, 'EARTH_Q8', 'OPEN');
+      commandDisconnector(activeBay.id, 'BUS_Q1', 'CLOSED');
+      passed = esClosed && !unsafeCloseAccepted;
+      evidence = passed
+        ? `PASS on ${activeBay.bayCode}: Q8 closed → CB Close rejected by CILO ("${feedback || 'Interlock Blocked'}"). Q8/Q1 restored.`
+        : `FAIL on ${activeBay.bayCode}: Unsafe close was not blocked or Q8 failed to close.`;
+    } else if (testId === 'AUTO-PROT-86') {
+      const beforeSoeCount = useSubstationStore.getState().soeLog.length;
+      triggerProtectionTrip(activeBay.id, '50/51 Commissioning Trip Test');
+      const st = useSubstationStore.getState();
+      const b = st.bays.find((x) => x.id === activeBay.id);
+      const hasCritAlarm = st.alarms.some((a) => a.bayId === activeBay.id && a.state !== 'CLEARED');
+      const soeAdded = st.soeLog.length > beforeSoeCount;
+      passed = Boolean(b && b.breakerState === 'OPEN' && b.protectionTripActive && hasCritAlarm && soeAdded);
+      evidence = passed
+        ? `PASS on ${activeBay.bayCode}: CB OPEN, 86 Trip Active, Alarm raised, SOE logged (${st.soeLog[0]?.timestampMs || ts}).`
+        : `FAIL on ${activeBay.bayCode}: Expected CB OPEN + 86 + Alarm + SOE.`;
+    } else if (testId === 'AUTO-SBO-01') {
+      setBayLocalRemote(activeBay.id, 'REMOTE');
+      if (activeBay.protectionTripActive) {
+        resetProtectionTrip(activeBay.id);
+        if (activeBay.bayType === 'OUTGOING_FEEDER') resetRecloseDemo86(activeBay.id);
+      }
+      if (activeBay.earthSwitchState === 'CLOSED') commandDisconnector(activeBay.id, 'EARTH_Q8', 'OPEN');
+      if (activeBay.busDisconnectorState === 'OPEN') commandDisconnector(activeBay.id, 'BUS_Q1', 'CLOSED');
+      const latestBefore = useSubstationStore.getState().bays.find((x) => x.id === activeBay.id);
+      const target: 'OPEN' | 'CLOSED' = latestBefore?.breakerState === 'CLOSED' ? 'OPEN' : 'CLOSED';
+      const ok = commandBreaker(activeBay.id, target, 'SCADA_SBO');
+      const latestAfter = useSubstationStore.getState().bays.find((x) => x.id === activeBay.id);
+      passed = Boolean(ok && latestAfter?.breakerState === target && latestAfter.quality === 'GOOD');
+      evidence = passed
+        ? `PASS on ${activeBay.bayCode}: SBO ${target} accepted → XCBR1.Pos=${latestAfter?.breakerState} (Q:${latestAfter?.quality}).`
+        : `FAIL on ${activeBay.bayCode}: ${useSubstationStore.getState().lastCommandFeedback?.message || 'SBO command rejected'}.`;
+    } else if (testId === 'AUTO-43LR-01') {
+      setBayLocalRemote(activeBay.id, 'LOCAL');
+      const target: 'OPEN' | 'CLOSED' = activeBay.breakerState === 'CLOSED' ? 'OPEN' : 'CLOSED';
+      const remoteAllowed = commandBreaker(activeBay.id, target, 'SCADA_SBO');
+      const msg = useSubstationStore.getState().lastCommandFeedback?.message || '';
+      setBayLocalRemote(activeBay.id, 'REMOTE');
+      passed = !remoteAllowed;
+      evidence = passed
+        ? `PASS on ${activeBay.bayCode}: 43LR=LOCAL blocked SCADA SBO ("${msg || 'Blocked-by-switching-hierarchy'}"). Restored REMOTE.`
+        : `FAIL on ${activeBay.bayCode}: Remote command executed despite 43LR=LOCAL.`;
+    } else if (testId === 'AUTO-MMS-GI') {
+      triggerMmsGeneralInterrogation(activeBay.iedId);
+      const st = useSubstationStore.getState();
+      const ied = st.ieds.find((i) => i.id === activeBay.iedId);
+      const b = st.bays.find((x) => x.id === activeBay.id);
+      passed = Boolean(ied?.commHealthy && b?.quality === 'GOOD');
+      evidence = passed
+        ? `PASS on ${activeBay.iedId}: MMS TCP/102 ONLINE, GI snapshot refreshed, Bay Quality=GOOD.`
+        : `FAIL on ${activeBay.iedId}: IED commHealthy=${String(ied?.commHealthy)}, Quality=${b?.quality}.`;
+    } else if (testId === 'AUTO-GOOSE-01') {
+      const targetGocb = gooseControlBlocks[0];
+      if (targetGocb) {
+        const prevSt = targetGocb.stNum;
+        triggerGooseStateChangeBurst(targetGocb.id);
+        const updated = useSubstationStore.getState().gooseControlBlocks.find((g) => g.id === targetGocb.id);
+        passed = Boolean(updated && updated.stNum > prevSt && updated.mismatchFault === 'NONE');
+        evidence = passed
+          ? `PASS on ${targetGocb.gocbRef}: GOOSE burst published (stNum ${prevSt} → ${updated?.stNum}, APPID ${targetGocb.appId}, Fault: NONE).`
+          : `FAIL on ${targetGocb.gocbRef}: Mismatch fault active (${updated?.mismatchFault}) or stNum unchanged.`;
+      }
+    } else if (testId === 'AUTO-RED-01') {
+      const netFaults = activeFaults.filter((f) => f.category === 'Network & Sync');
+      passed = netFaults.length === 0 && onlineIedsCount === ieds.length && healthyLinksCount === networkLinks.length;
+      evidence = passed
+        ? `PASS: Redundancy=${networkRedundancyMode}, IEDs=${onlineIedsCount}/${ieds.length} ONLINE, Links=${healthyLinksCount}/${networkLinks.length} UP, Zero Time/Net faults.`
+        : `FAIL: ${netFaults.length} network/sync fault(s) active; IEDs ${onlineIedsCount}/${ieds.length}; Links ${healthyLinksCount}/${networkLinks.length}.`;
+    }
+
+    setAutoTests((prev) =>
+      prev.map((t) =>
+        t.id === testId
+          ? { ...t, status: passed ? 'PASS' : 'FAIL', actualEvidence: evidence, timestamp: ts }
+          : t
+      )
+    );
+    // Auto-close any open punch item linked to this test when re-test passes!
+    if (passed) {
+      setPunchList((prev) =>
+        prev.map((p) =>
+          p.linkedTestId === testId && p.status === 'OPEN'
+            ? { ...p, status: 'CLOSED', closedAt: ts }
+            : p
+        )
+      );
+    }
+    setLastActionBanner({ type: passed ? 'PASS' : 'FAIL', text: evidence });
+  };
+
+  const runAllAutoAndStoreTests = () => {
+    INITIAL_LIVE_AUTO_TESTS.forEach((t) => executeAutoTest(t.id));
+    runAllFatSatTests();
+  };
+
+
+  // Direct One-Click Downloadable PDF File (Real .pdf binary — no print dialog needed)
+  const downloadOfficialPdfFile = () => {
+    const generatedAt = new Date().toLocaleString();
+    const p2pList = Object.values(p2pResults);
+    const verdict =
+      openCatACount > 0 || failedTestsCount > 0
+        ? `HOLD / NOT RELEASED - ${failedTestsCount} failed test(s) and ${openCatACount} open Category-A blocker punch point(s) must be resolved and re-tested.`
+        : passedTestsCount === 0
+        ? 'PENDING EXECUTION - Run live commissioning test cases before witness sign-off.'
+        : `SIMULATOR ${mode} ACCEPTED - ${passedTestsCount}/${totalAutoAndStoreTests} test cases passed with zero Category-A blockers. (Training simulation evidence only.)`;
+
+    const pdfBlob = buildDirectPdfBlob({
+      title: `${mode} - Substation Automation System Commissioning Report`,
+      subtitle: `${projectRef} | ${mode === 'FAT' ? 'Factory Acceptance Test' : 'Site Acceptance Test'}`,
+      metaLines: [
+        `Engineer: ${testerName}`,
+        `Witness: ${witnessName}`,
+        `Generated: ${generatedAt}`,
+      ],
+      kpis: [
+        { label: 'Tests Passed', value: `${passedTestsCount} / ${totalAutoAndStoreTests}` },
+        { label: 'Tests Failed', value: String(failedTestsCount) },
+        { label: 'P2P Verified', value: `${p2pList.filter((p) => p.status === 'PASS').length} / ${p2pList.length}` },
+        { label: 'Open Punch Points', value: `${openPunchItems.length} (${openCatACount} Cat-A)` },
+      ],
+      verdict,
+      sections: [
+        {
+          title: '1. Point-to-Point (P2P) Signal Verification Evidence',
+          headers: ['Signal / Point', 'IEC 61850 Reference', 'Gateway / IOA', 'Observed Value', 'Status', 'Time'],
+          colWidths: [20, 22, 16, 20, 10, 12],
+          rows: p2pList.map((r) => [r.label, r.signalRef, r.ioaOrMap, r.observedValue, r.status, r.timestamp]),
+        },
+        {
+          title: '2. Functional Commissioning Test Cases (IEC 61850 / IEC-104)',
+          headers: ['Code', 'Test Case', 'Standard Ref', 'Status', 'Actual Recorded Evidence', 'Time'],
+          colWidths: [11, 23, 16, 9, 31, 10],
+          rows: [
+            ...autoTests.map((t) => [t.code, t.title, t.standardRef, t.status, t.actualEvidence, t.timestamp]),
+            ...fatSatTests.map((t) => [
+              t.testCode,
+              t.title,
+              t.standardRef,
+              t.status,
+              t.actualSimulatedResult || t.evidenceLog,
+              t.lastExecuted || '-',
+            ]),
+          ],
+        },
+        {
+          title: '3. Commissioning Punch List (Category A / B / C)',
+          headers: ['ID', 'Cat', 'Mode', 'Bay / IED', 'Defect Description', 'Status', 'Time'],
+          colWidths: [9, 9, 8, 13, 39, 10, 12],
+          rows: punchList.map((p) => [
+            p.id,
+            p.category.replace('_', ' '),
+            p.mode,
+            p.bayOrIed,
+            p.description,
+            p.status,
+            p.closedAt || p.createdAt,
+          ]),
+        },
+        {
+          title: '4. Recorded Millisecond Sequence of Events (SOE - Latest 20)',
+          headers: ['#', 'Timestamp (ms)', 'Bay / IED', 'Event Description', 'Cause', 'Quality'],
+          colWidths: [5, 22, 18, 35, 12, 8],
+          rows: soeLog.slice(0, 20).map((s, idx) => [
+            String(idx + 1),
+            s.timestampMs,
+            `${s.bayName} (${s.iedId})`,
+            s.eventDescription,
+            s.cause,
+            s.quality,
+          ]),
+        },
+      ],
+      signatures: [
+        `Commissioning Eng: ${testerName}`,
+        `Utility Witness: ${witnessName}`,
+        'QA / Site Manager: SAS Hub',
+      ],
+    });
+
+    const url = URL.createObjectURL(pdfBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sas_${mode.toLowerCase()}_commissioning_report.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    setLastActionBanner({
+      type: 'PASS',
+      text: `Downloaded official ${mode} PDF report (sas_${mode.toLowerCase()}_commissioning_report.pdf).`,
+    });
+  };
+
+  // Export Printable Official FAT/SAT Report PDF
+  const exportOfficialPdfReport = () => {
+    const generatedAt = new Date().toLocaleString();
+    const p2pList = Object.values(p2pResults);
+    const p2pRowsHtml = p2pList.length
+      ? p2pList
+          .map(
+            (r) =>
+              `<tr><td>${escapeHtml(r.label)}</td><td><code>${escapeHtml(r.signalRef)}</code></td><td>${escapeHtml(r.ioaOrMap)}</td><td>${escapeHtml(r.observedValue)}</td><td class="${r.status === 'PASS' ? 'pass' : 'fail'}">${escapeHtml(r.status)}</td><td>${escapeHtml(r.timestamp)}</td></tr>`
+          )
+          .join('')
+      : '<tr><td colspan="6">No P2P signal checks executed in this session yet.</td></tr>';
+
+    const testRowsHtml = [
+      ...autoTests.map((t) => ({
+        code: t.code,
+        title: t.title,
+        std: t.standardRef,
+        status: t.status,
+        ev: t.actualEvidence,
+        ts: t.timestamp,
+      })),
+      ...fatSatTests.map((t) => ({
+        code: t.testCode,
+        title: t.title,
+        std: t.standardRef,
+        status: t.status,
+        ev: t.actualSimulatedResult || t.evidenceLog,
+        ts: t.lastExecuted || '—',
+      })),
+    ]
+      .map(
+        (t) =>
+          `<tr><td>${escapeHtml(t.code)}</td><td>${escapeHtml(t.title)}</td><td>${escapeHtml(t.std)}</td><td class="${t.status === 'PASS' ? 'pass' : t.status === 'FAIL' ? 'fail' : 'pending'}">${escapeHtml(t.status)}</td><td>${escapeHtml(t.ev)}</td><td>${escapeHtml(t.ts)}</td></tr>`
+      )
+      .join('');
+
+    const punchRowsHtml = punchList.length
+      ? punchList
+          .map(
+            (p) =>
+              `<tr><td>${escapeHtml(p.id)}</td><td>${escapeHtml(p.category.replace('_', ' '))}</td><td>${escapeHtml(p.mode)}</td><td>${escapeHtml(p.bayOrIed)}</td><td>${escapeHtml(p.description)}</td><td class="${p.status === 'CLOSED' ? 'pass' : 'fail'}">${escapeHtml(p.status)}</td><td>${escapeHtml(p.closedAt || p.createdAt)}</td></tr>`
+          )
+          .join('')
+      : '<tr><td colspan="7">Zero open punch points recorded.</td></tr>';
+
+    const soeRowsHtml = soeLog
+      .slice(0, 25)
+      .map(
+        (s, idx) =>
+          `<tr><td>${idx + 1}</td><td><code>${escapeHtml(s.timestampMs)}</code></td><td>${escapeHtml(s.bayName)} (${escapeHtml(s.iedId)})</td><td>${escapeHtml(s.eventDescription)}</td><td>${escapeHtml(s.cause)}</td><td>${escapeHtml(s.quality)}</td></tr>`
+      )
+      .join('');
+
+    const verdict =
+      openCatACount > 0 || failedTestsCount > 0
+        ? `HOLD / NOT RELEASED — ${failedTestsCount} failed test(s) and ${openCatACount} open Category-A blocker punch point(s) must be resolved and re-tested.`
+        : passedTestsCount === 0
+        ? 'PENDING EXECUTION — Run live commissioning test cases before witness sign-off.'
+        : `SIMULATOR ${mode} ACCEPTED — ${passedTestsCount}/${totalAutoAndStoreTests} test cases passed with zero Category-A blockers. (Training simulation evidence only.)`;
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"/><title>${escapeHtml(mode)} Commissioning Protocol Report — ${escapeHtml(projectRef)}</title><style>
+      @page { size: A4 portrait; margin: 12mm; }
+      * { box-sizing: border-box; }
+      body { font: 10px Arial, sans-serif; color: #16283a; margin: 0; }
+      header { border-bottom: 3px solid #0077a8; padding-bottom: 10px; margin-bottom: 14px; }
+      h1 { margin: 0 0 4px; font-size: 16px; color: #053354; }
+      h2 { font-size: 12px; color: #053354; margin: 14px 0 6px; border-bottom: 1px solid #d0e1ec; padding-bottom: 3px; break-after: avoid; }
+      .meta { display: flex; flex-wrap: wrap; gap: 16px; font-size: 9.5px; color: #3d566e; margin-top: 6px; }
+      .kpis { display: flex; gap: 10px; margin: 10px 0; }
+      .kpi { flex: 1; background: #eef6fa; border: 1px solid #c7dce8; border-radius: 4px; padding: 7px 10px; }
+      .kpi strong { font-size: 14px; display: block; color: #053354; }
+      table { width: 100%; border-collapse: collapse; font-size: 8.5px; margin-top: 4px; }
+      th { background: #0a3554; color: #fff; text-align: left; }
+      th, td { border: 1px solid #c9dae5; padding: 4px 5px; vertical-align: top; word-break: break-word; }
+      tr:nth-child(even) { background: #f5f9fc; }
+      .pass { color: #057a3c; font-weight: bold; }
+      .fail { color: #c41c2c; font-weight: bold; }
+      .pending { color: #9c5b00; font-weight: bold; }
+      .verdict { padding: 9px 11px; border-left: 4px solid #0077a8; background: #edf6fa; font-weight: bold; margin: 10px 0; }
+      .sigs { display: flex; gap: 24px; margin-top: 26px; }
+      .sigs div { flex: 1; border-top: 1px solid #567089; padding-top: 5px; font-size: 9px; }
+    </style></head><body>
+      <header>
+        <h1>${escapeHtml(mode)} — Substation Automation System Commissioning Protocol Report</h1>
+        <div class="meta">
+          <span><b>Project:</b> ${escapeHtml(projectRef)}</span>
+          <span><b>Mode:</b> ${escapeHtml(mode)} (${mode === 'FAT' ? 'Factory Acceptance' : 'Site Acceptance'})</span>
+          <span><b>Commissioning Eng:</b> ${escapeHtml(testerName)}</span>
+          <span><b>Witness:</b> ${escapeHtml(witnessName)}</span>
+          <span><b>Generated:</b> ${escapeHtml(generatedAt)}</span>
         </div>
       </header>
-      <main className="mx-auto mt-6 max-w-6xl">
-        <section className="mb-6 grid gap-4 md:grid-cols-2">
-          <div className="rounded-xl border border-cyan-800/60 bg-[#0a2237] p-5"><h2 className="text-lg font-bold text-cyan-300">FAT అంటే ఏమిటి?</h2><p className="mt-2 leading-7 text-slate-300"><strong>Factory Acceptance Test:</strong> Panels, IED configuration, communications, SCADA, GOOSE, alarms, controls వంటి engineered functions ని factory/lab setup లో approved test cases తో verify చేస్తాం. Shipping/site installation కు ముందు design defects గుర్తించడం ప్రధాన purpose.</p></div>
-          <div className="rounded-xl border border-cyan-800/60 bg-[#0a2237] p-5"><h2 className="text-lg font-bold text-cyan-300">SAT అంటే ఏమిటి?</h2><p className="mt-2 leading-7 text-slate-300"><strong>Site Acceptance Test:</strong> Equipment install చేసిన తరువాత actual field wiring, network, SCADA/RCC integration, control interlocks and end-to-end signals ని site లో safely verify చేస్తాం. FAT pass అయినా SAT తప్పనిసరిగా ఉండవచ్చు.</p></div>
+      <div class="kpis">
+        <div class="kpi"><strong>${passedTestsCount} / ${totalAutoAndStoreTests}</strong>Tests Passed</div>
+        <div class="kpi"><strong>${failedTestsCount}</strong>Tests Failed</div>
+        <div class="kpi"><strong>${p2pList.filter((p) => p.status === 'PASS').length} / ${p2pList.length}</strong>P2P Verified</div>
+        <div class="kpi"><strong>${openPunchItems.length} (${openCatACount} Cat-A)</strong>Open Punch Points</div>
+      </div>
+      <div class="verdict">${escapeHtml(verdict)}</div>
+      <h2>1. Point-to-Point (P2P) Signal Verification Evidence</h2>
+      <table><thead><tr><th>Signal / Point</th><th>IEC 61850 Reference</th><th>Gateway / IOA</th><th>Observed Value</th><th>Result</th><th>Time</th></tr></thead><tbody>${p2pRowsHtml}</tbody></table>
+      <h2>2. Functional Commissioning Test Cases (IEC 61850 / IEC-104)</h2>
+      <table><thead><tr><th>Code</th><th>Test Case</th><th>Standard Ref</th><th>Status</th><th>Actual Recorded Evidence</th><th>Time</th></tr></thead><tbody>${testRowsHtml}</tbody></table>
+      <h2>3. Commissioning Punch List (Category A / B / C)</h2>
+      <table><thead><tr><th>ID</th><th>Category</th><th>Mode</th><th>Bay / IED</th><th>Defect Description</th><th>Status</th><th>Timestamp</th></tr></thead><tbody>${punchRowsHtml}</tbody></table>
+      <h2>4. Recorded Millisecond Sequence of Events (SOE — Latest 25)</h2>
+      <table><thead><tr><th>#</th><th>Timestamp (ms)</th><th>Bay / IED</th><th>Event Description</th><th>Cause</th><th>Quality</th></tr></thead><tbody>${soeRowsHtml}</tbody></table>
+      <div class="sigs">
+        <div><b>Commissioning Engineer:</b><br/>${escapeHtml(testerName)}<br/>Sign / Date: _______________</div>
+        <div><b>Customer / Utility Witness:</b><br/>${escapeHtml(witnessName)}<br/>Sign / Date: _______________</div>
+        <div><b>QA / Site Manager:</b><br/>Substation Automation Hub<br/>Sign / Date: _______________</div>
+      </div>
+    </body></html>`;
+
+    const popup = window.open('', '_blank');
+    if (!popup) {
+      window.alert('Please allow pop-ups in your browser to print/save the official PDF report.');
+      return;
+    }
+    popup.document.open();
+    popup.document.write(html);
+    popup.document.close();
+    popup.focus();
+    setTimeout(() => popup.print(), 250);
+  };
+
+  // Export CSV Package
+  const exportCsvPackage = () => {
+    const rows: string[][] = [
+      ['Section', 'Code/ID', 'Title/Signal', 'Category/Ref', 'Status', 'Evidence / Value', 'Timestamp'],
+      ...Object.values(p2pResults).map((r) => ['P2P', r.key, r.label, r.signalRef, r.status, `${r.observedValue} — ${r.note}`, r.timestamp]),
+      ...autoTests.map((t) => ['LIVE_TEST', t.code, t.title, t.standardRef, t.status, t.actualEvidence, t.timestamp]),
+      ...fatSatTests.map((t) => ['PROTOCOL_TEST', t.testCode, t.title, t.standardRef, t.status, t.actualSimulatedResult || t.evidenceLog, t.lastExecuted || '—']),
+      ...punchList.map((p) => ['PUNCH_LIST', p.id, p.description, `${p.category} (${p.bayOrIed})`, p.status, p.mode, p.closedAt || p.createdAt]),
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sas_${mode.toLowerCase()}_commissioning_evidence.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Download ONLY Completed Tests (PASS / FAIL across P2P, Live Tests & Protocol Checks)
+  const exportCompletedTestsCsv = () => {
+    if (totalCompletedCount === 0) {
+      setLastActionBanner({
+        type: 'INFO',
+        text: 'No completed tests yet — run P2P checks or Live Tests first, then download.',
+      });
+      return;
+    }
+    const exportedAt = new Date().toLocaleString();
+    const rows: string[][] = [
+      ['Project', projectRef, 'Mode', mode, 'Engineer', testerName, 'Witness', witnessName],
+      ['Exported At', exportedAt, 'Total Completed', String(totalCompletedCount), 'Suite Passed', `${passedTestsCount}/${totalAutoAndStoreTests}`, 'Suite Failed', String(failedTestsCount)],
+      [],
+      ['Section', 'Code / ID', 'Test / Signal Name', 'Standard / Reference', 'Status', 'Actual Recorded Evidence', 'Timestamp'],
+      ...completedAutoTests.map((t) => [
+        'LIVE_TEST',
+        t.code,
+        t.title,
+        t.standardRef,
+        t.status,
+        t.actualEvidence,
+        t.timestamp,
+      ]),
+      ...completedStoreTests.map((t) => [
+        'PROTOCOL_TEST',
+        t.testCode,
+        t.title,
+        t.standardRef,
+        t.status,
+        t.actualSimulatedResult || t.evidenceLog,
+        t.lastExecuted || '—',
+      ]),
+      ...completedP2pTests.map((r) => [
+        'P2P_SIGNAL',
+        r.key,
+        r.label,
+        `${r.signalRef} | ${r.ioaOrMap}`,
+        r.status,
+        `${r.observedValue} — ${r.note}`,
+        r.timestamp,
+      ]),
+    ];
+    const csv = rows
+      .map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sas_${mode.toLowerCase()}_completed_tests_${totalCompletedCount}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setLastActionBanner({
+      type: 'PASS',
+      text: `Downloaded ${totalCompletedCount} completed ${mode} test record(s) as CSV.`,
+    });
+  };
+
+  return (
+    <div className="sas-fat-sat-page space-y-4 pb-10 text-slate-100">
+      {/* 1. REAL-TIME COMMISSIONING HEADER + FAT/SAT MODE SWITCH */}
+      <header className="rounded-2xl border border-cyan-500/40 bg-gradient-to-br from-[#071c32] via-[#061629] to-[#04101f] p-4 sm:p-5 shadow-xl">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-extrabold uppercase tracking-widest text-cyan-400">
+              <ClipboardCheck className="w-4 h-4" />
+              <span>REAL-TIME SUBSTATION COMMISSIONING WORKBENCH</span>
+              <span className="rounded-full border border-emerald-400/60 bg-emerald-950/60 px-2.5 py-0.5 text-[10px] text-emerald-300">
+                LIVE STORE SYNCED
+              </span>
+              <button
+                type="button"
+                onClick={() => setHowToTestModal('WORKBENCH')}
+                className="inline-flex items-center gap-1 rounded-full border border-cyan-300/80 bg-cyan-500/20 hover:bg-cyan-400 hover:text-[#031424] px-2.5 py-0.5 text-[10px] font-extrabold text-cyan-200 shadow-[0_0_10px_rgba(0,229,255,0.28)] transition cursor-pointer"
+              >
+                <HelpCircle className="w-3 h-3" /> How to Test
+              </button>
+            </div>
+            <h1 className="mt-1.5 text-xl sm:text-2xl font-extrabold text-white">
+              {mode === 'FAT'
+                ? 'FAT — Factory Acceptance Test Workbench'
+                : 'SAT — Site Acceptance Test & P2P Commissioning Workbench'}
+            </h1>
+            <p className="mt-1 text-xs sm:text-sm text-slate-300 max-w-3xl">
+              {mode === 'FAT'
+                ? 'Factory Mode: Verify panel IED logic, secondary fault injection, GOOSE/MMS loopback, and Gateway IOA mapping before dispatch.'
+                : 'Site Mode: Execute live Point-to-Point (P2P) bay checks, CILO interlocks, 86 lockout trips, PRP/HSR redundancy, and 1ms SOE witness verification.'}
+            </p>
+          </div>
+
+          {/* FAT / SAT LIVE MODE TOGGLE */}
+          <div className="flex flex-col items-stretch sm:items-end gap-2">
+            <div className="inline-flex rounded-xl border border-cyan-500/50 bg-[#041222] p-1">
+              <button
+                type="button"
+                onClick={() => setMode('FAT')}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-extrabold transition ${
+                  mode === 'FAT'
+                    ? 'bg-cyan-400 text-[#031424] shadow-[0_0_14px_rgba(0,229,255,0.45)]'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <Factory className="w-3.5 h-3.5" /> FAT (Factory)
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('SAT')}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-extrabold transition ${
+                  mode === 'SAT'
+                    ? 'bg-emerald-400 text-[#031c14] shadow-[0_0_14px_rgba(52,211,153,0.45)]'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <MapPin className="w-3.5 h-3.5" /> SAT (Site)
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5 font-mono text-[10.5px]">
+              <span className="rounded border border-cyan-700/60 bg-[#08223a] px-2 py-0.5 text-cyan-200">
+                IEDs: {onlineIedsCount}/{ieds.length} ONLINE
+              </span>
+              <span className={`rounded border px-2 py-0.5 ${activeFaults.length ? 'border-rose-500 bg-rose-950/60 text-rose-200' : 'border-emerald-600/60 bg-emerald-950/50 text-emerald-300'}`}>
+                Faults: {activeFaults.length}
+              </span>
+              <span className={`rounded border px-2 py-0.5 ${unackAlarmsCount ? 'border-amber-500 bg-amber-950/60 text-amber-200' : 'border-slate-700 bg-slate-900 text-slate-300'}`}>
+                Unack Alarms: {unackAlarmsCount}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* LIVE PROGRESS STRIP */}
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs">
+          <div className="rounded-xl border border-emerald-600/40 bg-[#06221c] p-2.5">
+            <div className="text-[10px] font-bold uppercase text-emerald-300">Passed Tests</div>
+            <div className="mt-0.5 text-lg font-black text-white font-mono">
+              {passedTestsCount} / {totalAutoAndStoreTests}
+            </div>
+          </div>
+          <div className="rounded-xl border border-rose-600/40 bg-[#260b12] p-2.5">
+            <div className="text-[10px] font-bold uppercase text-rose-300">Failed Tests</div>
+            <div className="mt-0.5 text-lg font-black text-white font-mono">{failedTestsCount}</div>
+          </div>
+          <div className="rounded-xl border border-cyan-600/40 bg-[#072138] p-2.5">
+            <div className="text-[10px] font-bold uppercase text-cyan-300">P2P Signals Verified</div>
+            <div className="mt-0.5 text-lg font-black text-white font-mono">
+              {Object.values(p2pResults).filter((r) => r.status === 'PASS').length} / {Object.values(p2pResults).length || p2pEntriesForBay.length}
+            </div>
+          </div>
+          <div className="rounded-xl border border-amber-500/40 bg-[#261b08] p-2.5">
+            <div className="text-[10px] font-bold uppercase text-amber-300">Open Punch Points</div>
+            <div className="mt-0.5 text-lg font-black text-white font-mono">
+              {openPunchItems.length} <span className="text-xs font-semibold text-rose-300">({openCatACount} Cat-A)</span>
+            </div>
+          </div>
+          <div className="col-span-2 sm:col-span-1 rounded-xl border border-cyan-700/50 bg-[#081d33] p-2.5 flex flex-col justify-between">
+            <div className="text-[10px] font-bold uppercase text-cyan-200">Quick Actions</div>
+            <div className="mt-1 flex gap-1.5">
+              <button
+                type="button"
+                onClick={runAllAutoAndStoreTests}
+                className="flex-1 rounded-lg bg-cyan-400 hover:bg-cyan-300 px-2 py-1 text-[11px] font-extrabold text-[#031424]"
+              >
+                Run All
+              </button>
+              <button
+                type="button"
+                onClick={exportCompletedTestsCsv}
+                disabled={totalCompletedCount === 0}
+                className={`rounded-lg border px-2 py-1 text-[11px] font-bold transition ${
+                  totalCompletedCount > 0
+                    ? 'border-emerald-400/80 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-400 hover:text-[#031c14]'
+                    : 'border-slate-700 bg-slate-900/60 text-slate-500 cursor-not-allowed'
+                }`}
+                title={
+                  totalCompletedCount > 0
+                    ? `Download ${totalCompletedCount} Completed Tests (CSV)`
+                    : 'Run tests first to enable download'
+                }
+              >
+                <Download className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={downloadOfficialPdfFile}
+                className="inline-flex items-center gap-1 rounded-lg border border-cyan-300 bg-cyan-500/20 hover:bg-cyan-400 hover:text-[#031424] px-2 py-1 text-[11px] font-extrabold text-cyan-100 transition"
+                title={`Download ${mode} PDF Report`}
+              >
+                <FileText className="w-3.5 h-3.5" /> PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* LIVE ACTION FEEDBACK BANNER */}
+      {lastActionBanner && (
+        <div
+          role="status"
+          className={`rounded-xl border px-4 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2 ${
+            lastActionBanner.type === 'PASS'
+              ? 'border-emerald-500 bg-emerald-950/50 text-emerald-100'
+              : lastActionBanner.type === 'FAIL'
+              ? 'border-rose-500 bg-rose-950/60 text-rose-100'
+              : 'border-cyan-500 bg-cyan-950/50 text-cyan-100'
+          }`}
+        >
+          <span className="font-mono font-semibold">{lastActionBanner.text}</span>
+          <button
+            type="button"
+            onClick={() => setLastActionBanner(null)}
+            className="rounded bg-black/30 px-2 py-0.5 text-[11px] font-bold hover:bg-black/50"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* 2. WORKBENCH NAVIGATION TABS */}
+      <nav className="flex flex-wrap items-center gap-1.5 rounded-xl border border-cyan-800/60 bg-[#06182b] p-2">
+        {(
+          [
+            ['P2P', 'Point-to-Point (P2P) Console', Zap],
+            ['TESTS', `Live Test Runner (${passedTestsCount}/${totalAutoAndStoreTests})`, Play],
+            ['PUNCH', `Punch List & Sign-Off (${openPunchItems.length})`, Wrench],
+            ['REPORT', 'Evidence Report (PDF / CSV)', FileText],
+            ['SOP', '18-Step SOP Guide (EN/TE)', BookOpen],
+          ] as const
+        ).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setActiveTab(id)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-extrabold transition ${
+              activeTab === id
+                ? 'border-cyan-300 bg-cyan-400 text-[#031424] shadow-[0_0_12px_rgba(0,229,255,0.4)]'
+                : 'border-cyan-900/80 bg-[#092038] text-cyan-100 hover:border-cyan-500/60'
+            }`}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            <span>{label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {/* ==================== TAB 1: LIVE POINT-TO-POINT (P2P) SIGNAL VERIFICATION CONSOLE ==================== */}
+      {activeTab === 'P2P' && activeBay && proto && (
+        <section className="space-y-4">
+          {/* Bay Selector + Active Bay Live Telemetry */}
+          <div className="rounded-2xl border border-cyan-700/50 bg-[#071a2f] p-4 space-y-4">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <label className="min-w-[240px] flex-1 max-w-md space-y-1 text-xs">
+                <span className="font-bold uppercase tracking-wider text-cyan-300">
+                  Select Bay Under {mode} Test
+                </span>
+                <select
+                  value={activeBay.id}
+                  onChange={(e) => setSelectedBayId(e.target.value)}
+                  className="w-full rounded-lg border border-cyan-600/60 bg-[#041222] px-3 py-2 text-sm font-bold text-white"
+                >
+                  {bays.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.bayCode} — {b.name} ({b.voltageKv} kV · {b.iedId})
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setBayLocalRemote(
+                      activeBay.id,
+                      activeBay.localRemote === 'REMOTE' ? 'LOCAL' : 'REMOTE'
+                    )
+                  }
+                  className={`rounded-lg border px-3 py-2 font-bold ${
+                    activeBay.localRemote === 'REMOTE'
+                      ? 'border-emerald-500/60 bg-emerald-950/50 text-emerald-300'
+                      : 'border-amber-500 bg-amber-950/60 text-amber-200'
+                  }`}
+                >
+                  43LR: {activeBay.localRemote} (Toggle)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetProtectionTrip(activeBay.id);
+                    if (activeBay.bayType === 'OUTGOING_FEEDER') resetRecloseDemo86(activeBay.id);
+                    acknowledgeAllAlarms();
+                    setLastActionBanner({
+                      type: 'INFO',
+                      text: `Reset 86 lockout & acknowledged alarms for ${activeBay.bayCode}.`,
+                    });
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg border border-cyan-600/60 bg-[#0a2742] px-3 py-2 font-bold text-cyan-200 hover:bg-[#10385c]"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Reset 86 / Ack Alarms
+                </button>
+              </div>
+            </div>
+
+            {/* LIVE END-TO-END SIGNAL CHAIN VISUALIZER */}
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+              {signalChainNodes.map((node, idx) => (
+                <div
+                  key={node.name}
+                  className={`rounded-xl border p-2.5 text-xs ${
+                    node.ok
+                      ? 'border-emerald-500/50 bg-emerald-950/25'
+                      : 'border-rose-500 bg-rose-950/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-mono text-[10px] font-bold text-slate-400">
+                      STAGE {idx + 1}
+                    </span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 font-mono text-[9.5px] font-extrabold ${
+                        node.ok ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/30 text-rose-200'
+                      }`}
+                    >
+                      {node.ok ? 'HEALTHY' : 'FAULT'}
+                    </span>
+                  </div>
+                  <div className="mt-1 font-bold text-white leading-snug">{node.name}</div>
+                  <div className="mt-0.5 font-mono text-[10.5px] text-cyan-200">{node.detail}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* P2P INTERACTIVE VERIFICATION TABLE */}
+            <div className="overflow-x-auto rounded-xl border border-cyan-800/60 bg-[#041222]">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="bg-[#09233d] text-cyan-200 uppercase text-[10.5px]">
+                  <tr>
+                    <th className="p-2.5">Signal / Point</th>
+                    <th className="p-2.5">IEC 61850 MMS / GOOSE Ref</th>
+                    <th className="p-2.5">Gateway IOA / Map</th>
+                    <th className="p-2.5">Live Store Value</th>
+                    <th className="p-2.5">P2P Status</th>
+                    <th className="p-2.5 text-right">Live Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-cyan-950">
+                  {p2pEntriesForBay.map((pt) => {
+                    const res = p2pResults[`${activeBay.id}:${pt.key}`];
+                    return (
+                      <tr key={pt.key} className="hover:bg-[#081f36]">
+                        <td className="p-2.5">
+                          <div className="font-bold text-white">{pt.label}</div>
+                          <div className="text-[10.5px] text-slate-400">{pt.group}</div>
+                        </td>
+                        <td className="p-2.5 font-mono text-[11px] text-cyan-300 break-all">
+                          {pt.signalRef}
+                        </td>
+                        <td className="p-2.5 font-mono text-[11px] text-purple-300">
+                          {pt.ioaOrMap}
+                        </td>
+                        <td className="p-2.5 font-mono text-[11px] text-emerald-300 font-bold">
+                          {pt.liveVal}
+                        </td>
+                        <td className="p-2.5">
+                          {res ? (
+                            <div>
+                              <span
+                                className={`inline-block rounded px-2 py-0.5 font-mono text-[10px] font-extrabold ${
+                                  res.status === 'PASS'
+                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
+                                    : 'bg-rose-500/20 text-rose-300 border border-rose-500/50'
+                                }`}
+                              >
+                                {res.status} · {res.timestamp}
+                              </span>
+                              <div className="mt-0.5 text-[10px] text-slate-300 max-w-[220px]">
+                                {res.note}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="font-mono text-[10px] text-slate-400">NOT TESTED</span>
+                          )}
+                        </td>
+                        <td className="p-2.5 text-right whitespace-nowrap space-x-1.5">
+                          <button
+                            type="button"
+                            onClick={() => runP2pPointTest(pt.key)}
+                            className="rounded-lg bg-cyan-400 hover:bg-cyan-300 px-2.5 py-1.5 text-[11px] font-extrabold text-[#031424]"
+                          >
+                            {pt.key === 'ANALOG_MW'
+                              ? 'Verify GI'
+                              : pt.key === 'TRIP_86'
+                              ? activeBay.protectionTripActive
+                                ? 'Reset 86'
+                                : 'Inject Trip'
+                              : 'Operate & Verify'}
+                          </button>
+                          {res?.status === 'FAIL' && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                addPunchItem('CAT_A', activeBay.bayCode, `P2P Fail (${pt.label}): ${res.note}`)
+                              }
+                              className="rounded-lg border border-rose-400 bg-rose-950/70 px-2 py-1.5 text-[10.5px] font-bold text-rose-200 hover:bg-rose-900"
+                            >
+                              + Punch
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* LIVE FAULT INJECTION QUICK-TOGGLES (FOR REALISTIC TROUBLESHOOTING DURING P2P) */}
+          <div className="rounded-2xl border border-amber-600/40 bg-[#081a2c] p-4 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-amber-300">
+                <AlertTriangle className="w-4 h-4" />
+                <span>Inject Live Faults to Test {mode} Failure Detection</span>
+              </div>
+              <span className="text-[11px] text-slate-400">
+                Toggle any fault below, then re-run P2P or Live Tests to see real-time FAIL & Punch List behavior.
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              {faultScenarios.slice(0, 8).map((flt) => (
+                <button
+                  key={flt.id}
+                  type="button"
+                  onClick={() => toggleFaultScenario(flt.id)}
+                  className={`rounded-xl border p-2.5 text-left text-xs transition ${
+                    flt.active
+                      ? 'border-rose-500 bg-rose-950/50 text-rose-100'
+                      : 'border-cyan-900/70 bg-[#041222] text-slate-300 hover:border-cyan-500/60'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[10px] font-bold text-cyan-300">{flt.code}</span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 font-mono text-[9px] font-extrabold ${
+                        flt.active ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {flt.active ? 'ACTIVE' : 'OFF'}
+                    </span>
+                  </div>
+                  <div className="mt-1 font-bold text-white truncate">{flt.title}</div>
+                  <div className="text-[10px] text-slate-400 truncate">{flt.targetBayOrIed}</div>
+                </button>
+              ))}
+            </div>
+          </div>
         </section>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 text-xl font-bold text-white"><ClipboardCheck className="text-cyan-400"/> Starting to Ending — Point by Point</h2>
-          <div className="flex gap-2"><button type="button" className="rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-200 hover:bg-[#123a51]" onClick={() => setOpen(phases.map((_, i) => i))}>Expand All</button><button type="button" className="rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-200 hover:bg-[#123a51]" onClick={() => setOpen([])}>Collapse All</button></div>
-        </div>
-        <div className="space-y-4">
-          {phases.map((phase, i) => <section key={phase.title} className="overflow-hidden rounded-xl border border-cyan-800/60 bg-[#091d31]">
-            <button type="button" onClick={() => toggle(i)} aria-expanded={open.includes(i)} className="flex w-full items-center justify-between gap-4 p-5 text-left hover:bg-[#12344a]">
-              <span><span className="block text-lg font-bold text-cyan-300">{phase.title}</span><span className="mt-1 block text-sm leading-6 text-slate-300">{phase.description}</span></span><ChevronDown className={`shrink-0 text-cyan-300 transition-transform ${open.includes(i) ? 'rotate-180' : ''}`}/>
+      )}
+
+      {/* ==================== TAB 2: AUTO-VERIFIED LIVE TEST RUNNER + 1ms SOE ==================== */}
+      {activeTab === 'TESTS' && (
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-700/50 bg-[#071a2f] p-3.5">
+            <div>
+              <h2 className="text-sm sm:text-base font-extrabold text-white">
+                Auto-Verified Live Commissioning Test Suite ({mode} Mode · Bay: {activeBay?.bayCode})
+              </h2>
+              <p className="text-xs text-slate-300">
+                Every "Run Live Test" button executes real actions on the substation simulator and auto-checks state, alarms, and 1ms SOE.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setHowToTestModal('WORKBENCH')}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/70 bg-cyan-500/15 hover:bg-cyan-400 hover:text-[#031424] px-3 py-2 text-xs font-extrabold text-cyan-200 transition"
+              >
+                <HelpCircle className="w-3.5 h-3.5" /> How to Test
+              </button>
+              <button
+                type="button"
+                onClick={runAllAutoAndStoreTests}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-400 hover:bg-emerald-300 px-3.5 py-2 text-xs font-extrabold text-[#031c14]"
+              >
+                <Play className="w-3.5 h-3.5" /> Execute Full {mode} Test Suite
+              </button>
+              <button
+                type="button"
+                onClick={exportCompletedTestsCsv}
+                disabled={totalCompletedCount === 0}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-extrabold transition ${
+                  totalCompletedCount > 0
+                    ? 'border-emerald-300 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-400 hover:text-[#031c14] shadow-[0_0_12px_rgba(52,211,153,0.3)]'
+                    : 'border-slate-700 bg-slate-900/60 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                <Download className="w-3.5 h-3.5" /> Download Completed Tests ({totalCompletedCount})
+              </button>
+            </div>
+          </div>
+
+          {totalCompletedCount > 0 && (
+            <div
+              className={`rounded-xl border px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs ${
+                allSuiteTestsCompleted
+                  ? 'border-emerald-400/80 bg-emerald-950/45 text-emerald-100'
+                  : 'border-cyan-500/50 bg-[#072038] text-cyan-100'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className={`w-4 h-4 shrink-0 ${allSuiteTestsCompleted ? 'text-emerald-300' : 'text-cyan-300'}`} />
+                <div>
+                  <span className="font-extrabold text-white">
+                    {allSuiteTestsCompleted
+                      ? `All ${totalAutoAndStoreTests} ${mode} Suite Tests Completed!`
+                      : `${completedSuiteCount} of ${totalAutoAndStoreTests} Suite Tests Completed`}
+                  </span>
+                  <span className="ml-2 font-mono text-[11px] opacity-90">
+                    (Total Completed incl. P2P: {totalCompletedCount} · Passed: {passedTestsCount} · Failed: {failedTestsCount})
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={exportCompletedTestsCsv}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-400 hover:bg-emerald-300 px-3 py-1.5 text-xs font-extrabold text-[#031c14]"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download Completed ({totalCompletedCount}) CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={downloadOfficialPdfFile}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-400 hover:bg-cyan-300 px-3 py-1.5 text-xs font-extrabold text-[#031424]"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download PDF Report
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {autoTests.map((tc) => (
+              <div
+                key={tc.id}
+                className={`rounded-xl border p-4 space-y-2.5 ${
+                  tc.status === 'PASS'
+                    ? 'border-emerald-500/50 bg-[#061f22]'
+                    : tc.status === 'FAIL'
+                    ? 'border-rose-500 bg-[#230b14]'
+                    : 'border-cyan-800/60 bg-[#071a2f]'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10px]">
+                      <span className="rounded bg-cyan-950 px-1.5 py-0.5 text-cyan-300 font-bold">{tc.code}</span>
+                      <span className="rounded bg-slate-800 px-1.5 py-0.5 text-slate-300">{tc.category}</span>
+                      <span className="rounded bg-indigo-950 px-1.5 py-0.5 text-indigo-300">{tc.modeScope}</span>
+                    </div>
+                    <h3 className="mt-1 text-sm font-extrabold text-white">{tc.title}</h3>
+                    <div className="text-[10.5px] font-mono text-slate-400">{tc.standardRef}</div>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-md px-2 py-0.5 font-mono text-[10.5px] font-extrabold ${
+                      tc.status === 'PASS'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'
+                        : tc.status === 'FAIL'
+                        ? 'bg-rose-500/25 text-rose-200 border border-rose-500'
+                        : 'bg-slate-800 text-slate-300'
+                    }`}
+                  >
+                    {tc.status}
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-300 leading-relaxed">{tc.description}</p>
+
+                <div className="rounded-lg border border-cyan-900/70 bg-[#041222] p-2.5 font-mono text-[11px] text-cyan-100">
+                  <span className="text-slate-400">Evidence ({tc.timestamp}): </span>
+                  {tc.actualEvidence}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => executeAutoTest(tc.id)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-400 hover:bg-cyan-300 px-3 py-1.5 text-xs font-extrabold text-[#031424]"
+                    >
+                      <Play className="w-3.5 h-3.5" /> Run Live Test
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHowToTestModal(tc.id)}
+                      className="inline-flex items-center gap-1 rounded-full border border-cyan-400/60 bg-cyan-950/70 hover:bg-cyan-500/25 px-2.5 py-1 text-[11px] font-bold text-cyan-200 transition"
+                    >
+                      <HelpCircle className="w-3 h-3" /> How to Test
+                    </button>
+                  </div>
+                  {tc.status === 'FAIL' && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        addPunchItem(
+                          'CAT_A',
+                          activeBay?.bayCode || 'STATION',
+                          `${tc.code} Failed: ${tc.actualEvidence}`,
+                          tc.id
+                        )
+                      }
+                      className="inline-flex items-center gap-1 rounded-lg border border-rose-400 bg-rose-950/70 px-2.5 py-1.5 text-xs font-bold text-rose-200 hover:bg-rose-900"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Log Cat-A Punch Point
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* STORE PROTOCOL COMPLIANCE TEST CASES */}
+          <div className="rounded-2xl border border-cyan-800/60 bg-[#071a2f] p-4 space-y-3">
+            <h3 className="text-sm font-extrabold text-cyan-300 uppercase tracking-wider">
+              Substation Store Protocol & Compliance Checks ({fatSatTests.length})
+            </h3>
+            <div className="overflow-x-auto rounded-xl border border-cyan-900/70 bg-[#041222]">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="bg-[#09233d] text-cyan-200 text-[10.5px] uppercase">
+                  <tr>
+                    <th className="p-2.5">Code</th>
+                    <th className="p-2.5">Test Title</th>
+                    <th className="p-2.5">Standard</th>
+                    <th className="p-2.5">Status</th>
+                    <th className="p-2.5">Simulated Result</th>
+                    <th className="p-2.5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-cyan-950">
+                  {fatSatTests.map((t) => (
+                    <tr key={t.id} className="hover:bg-[#081f36]">
+                      <td className="p-2.5 font-mono font-bold text-cyan-300">{t.testCode}</td>
+                      <td className="p-2.5 font-semibold text-white">{t.title}</td>
+                      <td className="p-2.5 font-mono text-[10.5px] text-slate-400">{t.standardRef}</td>
+                      <td className="p-2.5">
+                        <span
+                          className={`rounded px-2 py-0.5 font-mono text-[10px] font-extrabold ${
+                            t.status === 'PASS'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : t.status === 'FAIL'
+                              ? 'bg-rose-500/25 text-rose-200'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          {t.status}
+                        </span>
+                      </td>
+                      <td className="p-2.5 font-mono text-[10.5px] text-slate-300">
+                        {t.actualSimulatedResult || t.evidenceLog || 'Not executed'}
+                      </td>
+                      <td className="p-2.5 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => runFatSatTest(t.id)}
+                          className="rounded-lg border border-cyan-500/60 bg-[#0a2742] px-2.5 py-1 text-[11px] font-bold text-cyan-200 hover:bg-cyan-400 hover:text-[#031424]"
+                        >
+                          Run
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* LIVE 1ms SOE VERIFICATION FEED */}
+          <div className="rounded-2xl border border-cyan-800/60 bg-[#071a2f] p-4 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-sm font-extrabold text-cyan-300">
+                <Activity className="w-4 h-4" /> Live Millisecond Sequence of Events (SOE — Latest 12)
+              </h3>
+              <span className="font-mono text-[11px] text-slate-400">Auto-updates on every test run</span>
+            </div>
+            <div className="max-h-60 overflow-y-auto rounded-xl border border-cyan-900/70 bg-[#041222]">
+              <table className="w-full text-left border-collapse font-mono text-[11px]">
+                <thead className="bg-[#09233d] text-slate-300 sticky top-0">
+                  <tr>
+                    <th className="p-2">Timestamp (ms)</th>
+                    <th className="p-2">Bay / IED</th>
+                    <th className="p-2">Event</th>
+                    <th className="p-2">Cause</th>
+                    <th className="p-2">Quality</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-cyan-950">
+                  {soeLog.slice(0, 12).map((s) => (
+                    <tr key={s.id}>
+                      <td className="p-2 text-cyan-300 whitespace-nowrap">{s.timestampMs.split('T')[1] || s.timestampMs}</td>
+                      <td className="p-2 text-white">{s.bayName} ({s.iedId})</td>
+                      <td className="p-2 text-slate-200 font-sans">{s.eventDescription}</td>
+                      <td className="p-2 text-amber-300">{s.cause}</td>
+                      <td className="p-2 text-emerald-300">{s.quality}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ==================== TAB 3: REAL-TIME PUNCH LIST (CAT A/B/C) & WITNESS SIGN-OFF ==================== */}
+      {activeTab === 'PUNCH' && (
+        <section className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="lg:col-span-8 space-y-4">
+            {/* Add Punch Point Form */}
+            <div className="rounded-2xl border border-cyan-800/60 bg-[#071a2f] p-4 space-y-3">
+              <h2 className="text-sm font-extrabold text-white flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-amber-300" /> Log New {mode} Punch Point (Defect Register)
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 text-xs">
+                <select
+                  value={newPunchCat}
+                  onChange={(e) => setNewPunchCat(e.target.value as PunchCategory)}
+                  className="sm:col-span-4 rounded-lg border border-cyan-700/60 bg-[#041222] px-2.5 py-2 font-bold text-white"
+                >
+                  <option value="CAT_A">CAT A — Blocker (Prevents Sign-Off)</option>
+                  <option value="CAT_B">CAT B — Minor (Clear Before Energization)</option>
+                  <option value="CAT_C">CAT C — Cosmetic / Labeling</option>
+                </select>
+                <input
+                  type="text"
+                  value={newPunchDesc}
+                  onChange={(e) => setNewPunchDesc(e.target.value)}
+                  placeholder={`Describe defect on ${activeBay?.bayCode || 'Bay'} (e.g., Wrong alarm priority / IOA mismatch)...`}
+                  className="sm:col-span-6 rounded-lg border border-cyan-700/60 bg-[#041222] px-3 py-2 text-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!newPunchDesc.trim()) return;
+                    addPunchItem(newPunchCat, activeBay?.bayCode || 'STATION', newPunchDesc.trim());
+                    setNewPunchDesc('');
+                  }}
+                  className="sm:col-span-2 rounded-lg bg-amber-400 hover:bg-amber-300 px-3 py-2 font-extrabold text-[#1f1302]"
+                >
+                  + Add
+                </button>
+              </div>
+            </div>
+
+            {/* Punch List Table */}
+            <div className="rounded-2xl border border-cyan-800/60 bg-[#071a2f] p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-extrabold text-cyan-300">
+                  Commissioning Punch List ({punchList.length} Total · {openPunchItems.length} Open)
+                </h3>
+              </div>
+              {punchList.length === 0 ? (
+                <div className="rounded-xl border border-emerald-700/50 bg-emerald-950/30 p-5 text-center text-xs text-emerald-200">
+                  Zero open punch points. All tested circuits healthy or no defects logged yet.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-cyan-900/70 bg-[#041222]">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead className="bg-[#09233d] text-cyan-200 text-[10.5px] uppercase">
+                      <tr>
+                        <th className="p-2.5">ID</th>
+                        <th className="p-2.5">Cat</th>
+                        <th className="p-2.5">Bay / IED</th>
+                        <th className="p-2.5">Description</th>
+                        <th className="p-2.5">Status</th>
+                        <th className="p-2.5 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-cyan-950">
+                      {punchList.map((p) => (
+                        <tr key={p.id}>
+                          <td className="p-2.5 font-mono font-bold text-cyan-300">{p.id}</td>
+                          <td className="p-2.5">
+                            <span
+                              className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-extrabold ${
+                                p.category === 'CAT_A'
+                                  ? 'bg-rose-500/25 text-rose-200 border border-rose-500'
+                                  : p.category === 'CAT_B'
+                                  ? 'bg-amber-500/25 text-amber-200 border border-amber-500'
+                                  : 'bg-sky-500/20 text-sky-200 border border-sky-500/50'
+                              }`}
+                            >
+                              {p.category.replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td className="p-2.5 font-mono text-white">{p.bayOrIed}</td>
+                          <td className="p-2.5 text-slate-200">{p.description}</td>
+                          <td className="p-2.5">
+                            <span
+                              className={`rounded px-2 py-0.5 font-mono text-[10px] font-extrabold ${
+                                p.status === 'CLOSED'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : 'bg-rose-500/25 text-rose-200'
+                              }`}
+                            >
+                              {p.status}
+                            </span>
+                          </td>
+                          <td className="p-2.5 text-right whitespace-nowrap space-x-1">
+                            {p.status === 'OPEN' ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (p.linkedTestId) {
+                                    executeAutoTest(p.linkedTestId);
+                                  } else {
+                                    setPunchList((prev) =>
+                                      prev.map((x) =>
+                                        x.id === p.id ? { ...x, status: 'CLOSED', closedAt: formatClock() } : x
+                                      )
+                                    );
+                                  }
+                                }}
+                                className="rounded bg-emerald-500/25 border border-emerald-400 px-2 py-1 text-[10.5px] font-bold text-emerald-200 hover:bg-emerald-500/40"
+                              >
+                                {p.linkedTestId ? 'Re-Test & Close' : 'Mark Closed'}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPunchList((prev) =>
+                                    prev.map((x) => (x.id === p.id ? { ...x, status: 'OPEN', closedAt: undefined } : x))
+                                  )
+                                }
+                                className="rounded bg-slate-800 px-2 py-1 text-[10.5px] text-slate-300 hover:bg-slate-700"
+                              >
+                                Re-Open
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setPunchList((prev) => prev.filter((x) => x.id !== p.id))}
+                              className="rounded p-1 text-slate-400 hover:text-rose-300"
+                              aria-label="Delete punch item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 inline" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Witness Sign-Off Card */}
+          <div className="lg:col-span-4 rounded-2xl border border-cyan-700/50 bg-[#071a2f] p-4 space-y-3 h-fit">
+            <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" /> Witness Sign-Off & Release Readiness
+            </h3>
+            <div className="space-y-2.5 text-xs">
+              <label className="block space-y-1">
+                <span className="text-slate-300 font-semibold">Project Reference</span>
+                <input
+                  type="text"
+                  value={projectRef}
+                  onChange={(e) => setProjectRef(e.target.value)}
+                  className="w-full rounded-lg border border-cyan-800 bg-[#041222] px-2.5 py-1.5 text-white"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-slate-300 font-semibold">Commissioning Engineer</span>
+                <input
+                  type="text"
+                  value={testerName}
+                  onChange={(e) => setTesterName(e.target.value)}
+                  className="w-full rounded-lg border border-cyan-800 bg-[#041222] px-2.5 py-1.5 text-white"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-slate-300 font-semibold">Customer / Utility Witness</span>
+                <input
+                  type="text"
+                  value={witnessName}
+                  onChange={(e) => setWitnessName(e.target.value)}
+                  className="w-full rounded-lg border border-cyan-800 bg-[#041222] px-2.5 py-1.5 text-white"
+                />
+              </label>
+            </div>
+
+            <div
+              className={`rounded-xl border p-3 text-xs ${
+                openCatACount > 0 || failedTestsCount > 0
+                  ? 'border-rose-500 bg-rose-950/50 text-rose-100'
+                  : 'border-emerald-500/60 bg-emerald-950/40 text-emerald-100'
+              }`}
+            >
+              <div className="font-extrabold uppercase tracking-wider">
+                {openCatACount > 0 || failedTestsCount > 0
+                  ? 'RELEASE BLOCKED (CAT-A / FAILURES OPEN)'
+                  : `READY FOR ${mode} WITNESS SIGN-OFF`}
+              </div>
+              <p className="mt-1 text-[11px] opacity-90">
+                {openCatACount > 0 || failedTestsCount > 0
+                  ? `Clear ${openCatACount} Cat-A punch point(s) and ${failedTestsCount} failed test(s) before releasing.`
+                  : 'Zero Category-A blockers. Export the evidence-backed PDF/CSV protocol report below.'}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={downloadOfficialPdfFile}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-cyan-400 hover:bg-cyan-300 px-3 py-2 text-xs font-extrabold text-[#031424]"
+            >
+              <Download className="w-4 h-4" /> Download Official {mode} PDF Report
             </button>
-            {open.includes(i) && <div className="space-y-4 border-t border-cyan-900 p-4 md:p-6">
-              {phase.steps.map((step) => <article key={step.title} className="rounded-xl border border-[#1b4863] bg-[#071726] p-4 md:p-5">
-                <h3 className="text-base font-bold text-white md:text-lg">{step.title}</h3>
-                <p className="mt-2 leading-7 text-slate-300"><span className="font-semibold text-cyan-300">Why:</span> {step.why}</p>
-                <h4 className="mt-4 font-semibold text-cyan-300">What we do — step by step</h4>
-                <ol className="mt-2 list-decimal space-y-2 pl-6 leading-7 text-slate-200">{step.actions.map((action, j) => <li key={j}>{action}</li>)}</ol>
-                {(() => {
-                  const stepNumber = Number(step.title.match(/^\d+/)?.[0] ?? '0');
-                  const p = practical[stepNumber - 1];
-                  return p ? <div className="mt-4 space-y-3 rounded-lg border border-cyan-800/70 bg-[#0b2539] p-4">
-                    <h4 className="font-bold text-cyan-300">Practical Substation Example & Engineering Test</h4>
-                    <p className="leading-7 text-slate-200"><strong className="text-white">Real-world example:</strong> {p.example}</p>
-                    <p className="leading-7 text-slate-200"><strong className="text-white">Tools / Documents:</strong> {p.tools}</p>
-                    <p className="leading-7 text-slate-200"><strong className="text-white">Test procedure:</strong> {p.procedure}</p>
-                    <p className="leading-7 text-slate-200"><strong className="text-white">Expected result:</strong> {p.expected}</p>
-                  </div> : null;
-                })()}
-                <p className="mt-4 flex items-start gap-2 rounded-lg border border-emerald-800/50 bg-[#092a2a] p-3 text-sm leading-6 text-emerald-200"><CheckCircle2 className="mt-1 shrink-0" size={16}/><span><strong>Evidence / Output:</strong> {step.evidence}</span></p>
-              </article>)}
-            </div>}
-          </section>)}
+          </div>
+        </section>
+      )}
+
+      {/* ==================== TAB 4: LIVE EVIDENCE REPORT PREVIEW & EXPORT ==================== */}
+      {activeTab === 'REPORT' && (
+        <section className="rounded-2xl border border-cyan-700/50 bg-[#071a2f] p-4 sm:p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-cyan-900 pb-3">
+            <div>
+              <h2 className="text-base sm:text-lg font-extrabold text-white">
+                {mode} Commissioning Evidence Protocol Report — {projectRef}
+              </h2>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Tester: {testerName} · Witness: {witnessName} · Live SOE & Test Store Snapshot
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={downloadOfficialPdfFile}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-400 hover:bg-cyan-300 px-3.5 py-2 text-xs font-extrabold text-[#031424] shadow-[0_0_12px_rgba(0,229,255,0.35)]"
+              >
+                <Download className="w-3.5 h-3.5" /> Download PDF Report
+              </button>
+              <button
+                type="button"
+                onClick={exportOfficialPdfReport}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/60 bg-[#0a2742] px-3 py-2 text-xs font-bold text-cyan-100 hover:bg-[#11395e]"
+              >
+                <Printer className="w-3.5 h-3.5" /> Print View
+              </button>
+              <button
+                type="button"
+                onClick={exportCompletedTestsCsv}
+                disabled={totalCompletedCount === 0}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-extrabold transition ${
+                  totalCompletedCount > 0
+                    ? 'border-emerald-300 bg-emerald-400 hover:bg-emerald-300 text-[#031c14]'
+                    : 'border-slate-700 bg-slate-900/60 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                <Download className="w-3.5 h-3.5" /> Download Completed Tests ({totalCompletedCount})
+              </button>
+              <button
+                type="button"
+                onClick={exportCsvPackage}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/60 bg-[#0a2742] px-3.5 py-2 text-xs font-bold text-cyan-100 hover:bg-[#11395e]"
+              >
+                <Download className="w-3.5 h-3.5" /> Export Full CSV
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div className="rounded-xl border border-cyan-900/70 bg-[#041222] p-3.5 space-y-2">
+              <h3 className="font-bold text-cyan-300 uppercase">P2P Signals Verified ({Object.keys(p2pResults).length})</h3>
+              {Object.values(p2pResults).length === 0 ? (
+                <p className="text-slate-400">Run checks in the P2P Console tab to populate signal evidence.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                  {Object.values(p2pResults).map((r, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 border-b border-cyan-950 pb-1">
+                      <span className="text-white truncate">{r.label}</span>
+                      <span className={`font-mono font-bold ${r.status === 'PASS' ? 'text-emerald-300' : 'text-rose-300'}`}>
+                        {r.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-cyan-900/70 bg-[#041222] p-3.5 space-y-2">
+              <h3 className="font-bold text-cyan-300 uppercase">Live Commissioning Tests ({passedTestsCount}/{totalAutoAndStoreTests} Passed)</h3>
+              <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                {autoTests.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between gap-2 border-b border-cyan-950 pb-1">
+                    <span className="text-white truncate">{t.code} — {t.title}</span>
+                    <span className={`font-mono font-bold ${t.status === 'PASS' ? 'text-emerald-300' : t.status === 'FAIL' ? 'text-rose-300' : 'text-slate-400'}`}>
+                      {t.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ==================== TAB 5: COMPLETE 18-STEP SOP GUIDE (EN/TE — PRESERVED) ==================== */}
+      {activeTab === 'SOP' && (
+        <section className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-xl border border-cyan-800/60 bg-[#0a2237] p-5">
+              <h2 className="text-lg font-bold text-cyan-300">FAT అంటే ఏమిటి?</h2>
+              <p className="mt-2 leading-7 text-slate-300 text-sm">
+                <strong>Factory Acceptance Test:</strong> Panels, IED configuration, communications, SCADA, GOOSE, alarms, controls వంటి engineered functions ని factory/lab setup లో approved test cases తో verify చేస్తాం. Shipping/site installation కు ముందు design defects గుర్తించడం ప్రధాన purpose.
+              </p>
+            </div>
+            <div className="rounded-xl border border-cyan-800/60 bg-[#0a2237] p-5">
+              <h2 className="text-lg font-bold text-cyan-300">SAT అంటే ఏమిటి?</h2>
+              <p className="mt-2 leading-7 text-slate-300 text-sm">
+                <strong>Site Acceptance Test:</strong> Equipment install చేసిన తరువాత actual field wiring, network, SCADA/RCC integration, control interlocks and end-to-end signals ని site లో safely verify చేస్తాం. FAT pass అయినా SAT తప్పనిసరిగా ఉండవచ్చు.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 text-lg font-bold text-white">
+              <ClipboardCheck className="text-cyan-400" /> Starting to Ending — 18-Step Commissioning SOP
+            </h2>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs font-bold text-cyan-200 hover:bg-[#123a51]"
+                onClick={() => setOpenPhases(phases.map((_, i) => i))}
+              >
+                Expand All
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs font-bold text-cyan-200 hover:bg-[#123a51]"
+                onClick={() => setOpenPhases([])}
+              >
+                Collapse All
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {phases.map((phase, i) => (
+              <section key={phase.title} className="overflow-hidden rounded-xl border border-cyan-800/60 bg-[#091d31]">
+                <button
+                  type="button"
+                  onClick={() => togglePhase(i)}
+                  aria-expanded={openPhases.includes(i)}
+                  className="flex w-full items-center justify-between gap-4 p-4 text-left hover:bg-[#12344a]"
+                >
+                  <span>
+                    <span className="block text-base font-bold text-cyan-300">{phase.title}</span>
+                    <span className="mt-0.5 block text-xs leading-5 text-slate-300">{phase.description}</span>
+                  </span>
+                  <ChevronDown className={`shrink-0 text-cyan-300 transition-transform ${openPhases.includes(i) ? 'rotate-180' : ''}`} />
+                </button>
+                {openPhases.includes(i) && (
+                  <div className="space-y-4 border-t border-cyan-900 p-4">
+                    {phase.steps.map((step) => (
+                      <article key={step.title} className="rounded-xl border border-[#1b4863] bg-[#071726] p-4">
+                        <h3 className="text-sm font-bold text-white md:text-base">{step.title}</h3>
+                        <p className="mt-1.5 text-xs sm:text-sm leading-6 text-slate-300">
+                          <span className="font-semibold text-cyan-300">Why:</span> {step.why}
+                        </p>
+                        <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-xs sm:text-sm leading-6 text-slate-200">
+                          {step.actions.map((action, j) => (
+                            <li key={j}>{action}</li>
+                          ))}
+                        </ol>
+                        {(() => {
+                          const stepNumber = Number(step.title.match(/^\d+/)?.[0] ?? '0');
+                          const p = practical[stepNumber - 1];
+                          return p ? (
+                            <div className="mt-3 space-y-1.5 rounded-lg border border-cyan-800/70 bg-[#0b2539] p-3 text-xs">
+                              <div className="font-bold text-cyan-300">Practical Substation Example</div>
+                              <p className="text-slate-200"><strong className="text-white">Example:</strong> {p.example}</p>
+                              <p className="text-slate-200"><strong className="text-white">Tools:</strong> {p.tools}</p>
+                              <p className="text-slate-200"><strong className="text-white">Procedure:</strong> {p.procedure}</p>
+                              <p className="text-slate-200"><strong className="text-white">Expected:</strong> {p.expected}</p>
+                            </div>
+                          ) : null;
+                        })()}
+                        <p className="mt-3 flex items-start gap-2 rounded-lg border border-emerald-800/50 bg-[#092a2a] p-2.5 text-xs text-emerald-200">
+                          <CheckCircle2 className="mt-0.5 shrink-0" size={15} />
+                          <span><strong>Evidence / Output:</strong> {step.evidence}</span>
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ==================== HOW TO TEST — STEP-BY-STEP POPUP MODAL ==================== */}
+      {howToTestModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="How to Test — Step-by-Step Guide"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setHowToTestModal(null);
+          }}
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 backdrop-blur-md p-3 sm:p-5"
+        >
+          <div className="w-full max-w-2xl max-h-[88vh] flex flex-col overflow-hidden rounded-2xl border border-cyan-400/70 bg-[#06182c]/95 shadow-[0_0_40px_rgba(0,212,255,0.28)] text-slate-100">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between gap-3 border-b border-cyan-800/70 bg-[#092440] px-4 sm:px-5 py-3.5 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <HelpCircle className="w-5 h-5 text-cyan-300 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-[10px] font-extrabold uppercase tracking-widest text-cyan-300">
+                    FAT / SAT Step-by-Step Testing Guide
+                  </div>
+                  <h2 className="text-sm sm:text-base font-extrabold text-white truncate">
+                    {howToTestModal === 'WORKBENCH'
+                      ? 'Complete Workbench — Step-by-Step How to Test'
+                      : `${TEST_PROCEDURES[howToTestModal]?.code || ''} — ${TEST_PROCEDURES[howToTestModal]?.title || 'Test Procedure'}`}
+                  </h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Close How to Test popup"
+                onClick={() => setHowToTestModal(null)}
+                className="rounded-lg border border-cyan-700/70 bg-[#041426] p-1.5 text-cyan-200 hover:bg-cyan-500/20 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Switcher Pills inside Modal */}
+            <div className="flex flex-wrap items-center gap-1.5 border-b border-cyan-900/70 bg-[#041324] px-4 py-2 text-[11px] shrink-0">
+              <button
+                type="button"
+                onClick={() => setHowToTestModal('WORKBENCH')}
+                className={`rounded-full border px-2.5 py-1 font-bold transition ${
+                  howToTestModal === 'WORKBENCH'
+                    ? 'border-cyan-300 bg-cyan-400 text-[#031424]'
+                    : 'border-cyan-800 bg-[#082038] text-cyan-200 hover:border-cyan-400'
+                }`}
+              >
+                Full Workbench (6 Steps)
+              </button>
+              {autoTests.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setHowToTestModal(t.id)}
+                  className={`rounded-full border px-2.5 py-1 font-mono font-bold transition ${
+                    howToTestModal === t.id
+                      ? 'border-emerald-300 bg-emerald-400 text-[#031c14]'
+                      : 'border-cyan-900 bg-[#082038] text-slate-300 hover:border-cyan-400 hover:text-white'
+                  }`}
+                >
+                  {t.code}
+                </button>
+              ))}
+            </div>
+
+            {/* Modal Scrollable Body */}
+            <div className="overflow-y-auto p-4 sm:p-5 space-y-3.5 text-xs sm:text-sm">
+              {howToTestModal === 'WORKBENCH' ? (
+                <>
+                  <p className="text-xs text-cyan-200/90 leading-relaxed">
+                    Real substation FAT/SAT commissioning sequence lo ee 6 steps follow ayyi live P2P verification, interlock testing, fault troubleshooting, mariyu official PDF report generate cheyandi:
+                  </p>
+                  <div className="space-y-2.5">
+                    {WORKBENCH_HOW_TO_STEPS.map((item) => (
+                      <div
+                        key={item.step}
+                        className="flex items-start gap-3 rounded-xl border border-cyan-800/60 bg-[#081f36] p-3"
+                      >
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cyan-400 font-mono text-xs font-black text-[#031424]">
+                          {item.step}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="font-extrabold text-white text-xs sm:text-sm">
+                            Step {item.step}: {item.title}
+                          </div>
+                          <p className="mt-1 text-xs text-slate-300 leading-relaxed">{item.detail}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                (() => {
+                  const guide = TEST_PROCEDURES[howToTestModal];
+                  if (!guide) return null;
+                  return (
+                    <div className="space-y-3.5">
+                      <div className="rounded-xl border border-cyan-800/60 bg-[#081f36] p-3">
+                        <div className="text-[11px] font-extrabold uppercase tracking-wider text-cyan-300">
+                          Preconditions (Test Mundu Check Cheyalsinavi)
+                        </div>
+                        <ul className="mt-1.5 list-disc space-y-1 pl-5 text-xs text-slate-200">
+                          {guide.preconditions.map((pre, idx) => (
+                            <li key={idx}>{pre}</li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="text-[11px] font-extrabold uppercase tracking-wider text-cyan-300">
+                          Step-by-Step Execution Procedure
+                        </div>
+                        {guide.steps.map((st, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-start gap-2.5 rounded-xl border border-cyan-900/70 bg-[#041426] p-2.5"
+                          >
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-400 font-mono text-[11px] font-black text-[#031c14] mt-0.5">
+                              {idx + 1}
+                            </span>
+                            <span className="text-xs text-slate-200 leading-relaxed">{st}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="rounded-xl border border-emerald-500/50 bg-emerald-950/35 p-3 text-xs">
+                        <div className="font-extrabold uppercase tracking-wider text-emerald-300">
+                          Expected PASS Criteria
+                        </div>
+                        <p className="mt-1 text-emerald-100 leading-relaxed">{guide.passCriteria}</p>
+                      </div>
+
+                      <div className="rounded-xl border border-amber-500/50 bg-amber-950/30 p-3 text-xs">
+                        <div className="font-extrabold uppercase tracking-wider text-amber-300">
+                          Commissioning / Fault Tip
+                        </div>
+                        <p className="mt-1 text-amber-100 leading-relaxed">{guide.faultCheckTip}</p>
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-cyan-900/70 bg-[#041324] px-4 py-3 shrink-0">
+              <span className="text-[11px] text-slate-400">
+                Press <kbd className="rounded border border-slate-600 bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-200">Esc</kbd> to close
+              </span>
+              <div className="flex items-center gap-2">
+                {howToTestModal !== 'WORKBENCH' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const targetId = howToTestModal;
+                      setHowToTestModal(null);
+                      setActiveTab('TESTS');
+                      executeAutoTest(targetId);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-400 hover:bg-emerald-300 px-3.5 py-1.5 text-xs font-extrabold text-[#031c14]"
+                  >
+                    <Play className="w-3.5 h-3.5" /> Run This Test Now
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setHowToTestModal(null)}
+                  className="rounded-lg border border-cyan-600/70 bg-[#0a2742] px-3.5 py-1.5 text-xs font-bold text-cyan-100 hover:bg-[#11395e]"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-        <FatSatInteractiveLab />
-        <SignalEndToEndLab />
-        <VirtualFatSatTestBench />
-        <AdvancedFaultInjectionLab />
-        <FatSatProfessionalReport />
-        <GuidedCommissioningTraining />
-        <CommissioningDiagnostics />
-        <aside className="mt-6 rounded-xl border border-amber-700/50 bg-[#251f13] p-5"><h2 className="flex items-center gap-2 font-bold text-amber-300"><ShieldCheck size={20}/> Important Safety & Interview Note</h2><p className="mt-2 leading-7 text-slate-200">FAT లో simulated inputs వాడవచ్చు; SAT లో actual field equipment interfaces verify చేస్తాం. Protection trip, breaker close/open, interlock and redundancy tests approved isolation, permits and authorized personnel తోనే perform చేయాలి. FAT/SAT scope project-to-project మారుతుంది. Interview లో మీరు personally చేసిన tests మరియు training-only tests వేరుగా చెప్పండి.</p></aside>
-      </main>
+      )}
     </div>
   );
 };

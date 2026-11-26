@@ -97,7 +97,6 @@ const PAGE_LOADERS: Record<string, () => Promise<any>> = {
   FAULTS: () => import('./pages/FaultTroubleshootingPage').then(m => ({ default: m.FaultTroubleshootingPage })),
   FATSAT: () => import('./pages/FatSatLabPage').then(m => ({ default: m.FatSatLabPage })),
   TESTING_GUIDANCE: () => import('./pages/TestingGuidancePage').then(m => ({ default: m.TestingGuidancePage })),
-  LEARNING: () => import('./pages/LearningAcademyPage').then(m => ({ default: m.LearningAcademyPage })),
   IEC61850_ACADEMY: () => import('./pages/Iec61850AcademyPage').then(m => ({ default: m.Iec61850AcademyPage })),
   INTERVIEW_PREP: () => import('./pages/InterviewPrepPage').then(m => ({ default: m.InterviewPrepPage })),
   CCNA_ACADEMY: () => import('./pages/CcnaAcademyPage').then(m => ({ default: m.CcnaAcademyPage })),
@@ -182,7 +181,6 @@ const SignalMappingSclPage = lazyWithRetry(PAGE_LOADERS.SIGNALS);
 const FaultTroubleshootingPage = lazyWithRetry(PAGE_LOADERS.FAULTS);
 const FatSatLabPage = lazyWithRetry(PAGE_LOADERS.FATSAT);
 const TestingGuidancePage = lazyWithRetry(PAGE_LOADERS.TESTING_GUIDANCE);
-const LearningAcademyPage = lazyWithRetry(PAGE_LOADERS.LEARNING);
 const Iec61850AcademyPage = lazyWithRetry(PAGE_LOADERS.IEC61850_ACADEMY);
 const InterviewPrepPage = lazyWithRetry(PAGE_LOADERS.INTERVIEW_PREP);
 const CcnaAcademyPage = lazyWithRetry(PAGE_LOADERS.CCNA_ACADEMY);
@@ -351,7 +349,7 @@ export default function App() {
       if (match) {
         const requested = match[1] as ActiveWorkspaceTab;
         if (requested !== 'SCADA') { try { sessionStorage.removeItem('sas-scada-navigation-v1'); } catch { /* optional */ } }
-        const valid = ['HERO','OSI_MODEL','IEC61850_ACADEMY','INTERVIEW_PREP','CCNA_ACADEMY','SLD','SCADA','IED','IED_SIGNAL_CHAIN','NETWORK','GOOSE','MMS','MODBUS_LAB','IEC104_LAB','OPCUA_LAB','SIGNALS','FAULTS','FATSAT','LEARNING','USER_PROFILE','ADMIN_DASHBOARD'];
+        const valid = ['HERO','OSI_MODEL','IEC61850_ACADEMY','INTERVIEW_PREP','CCNA_ACADEMY','SLD','SCADA','IED','IED_SIGNAL_CHAIN','NETWORK','GOOSE','MMS','MODBUS_LAB','IEC104_LAB','OPCUA_LAB','SIGNALS','FAULTS','FATSAT','USER_PROFILE','ADMIN_DASHBOARD'];
         if (valid.includes(requested)) {
           preloadRoute(requested);
           startPageTransition(() => {
@@ -576,14 +574,13 @@ export default function App() {
     { id: 'OSI_MODEL', label: t('OSI Model'), icon: <Network className="w-4 h-4" /> },
     { id: 'INTERVIEW_PREP', label: t('Interview Preparation'), icon: <Award className="w-4 h-4" /> },
     { id: 'CCNA_ACADEMY', label: t('CCNA Networking Academy'), icon: <Network className="w-4 h-4" /> },
-    { id: 'LEARNING', label: t('Training (EN/TE)'), icon: <BookOpen className="w-4 h-4" /> },
   ];
 
   const topNavGroups = [
     { key: 'sld', title: t('SLD & Operation'), icon: GitBranch, ids: ['SLD', 'SCADA'] },
     { key: 'ied', title: t('IED & Signals'), icon: Cpu, ids: ['IED', 'IED_SIGNAL_CHAIN'] },
     { key: 'comms', title: t('Communication'), icon: Radio, ids: ['NETWORK', 'GOOSE', 'MMS', 'MODBUS_LAB', 'IEC104_LAB', 'OPCUA_LAB'] },
-    { key: 'tools', title: t('Tools & Test'), icon: Settings, ids: ['SIGNALS', 'FAULTS', 'FATSAT', 'IEC61850_ACADEMY', 'TESTING_GUIDANCE', 'OSI_MODEL', 'INTERVIEW_PREP', 'CCNA_ACADEMY', 'LEARNING'] },
+    { key: 'tools', title: t('Tools & Test'), icon: Settings, ids: ['SIGNALS', 'FAULTS', 'FATSAT', 'IEC61850_ACADEMY', 'TESTING_GUIDANCE', 'OSI_MODEL', 'INTERVIEW_PREP', 'CCNA_ACADEMY'] },
   ];
   const isWorkspaceHome = activeTab === 'HERO' && !specialPage && !testingGuidanceOpen;
   const filteredNavItems = navItems.filter(item => item.label.toLowerCase().includes(navSearch.trim().toLowerCase()));
@@ -734,6 +731,35 @@ export default function App() {
                 <Home className="h-4 w-4" aria-hidden="true" />
                 <span>{t('Home')}</span>
               </button>
+              {topNavGroups.map(group => {
+                const Icon = group.icon;
+                const active = group.ids.includes(testingGuidanceOpen ? 'TESTING_GUIDANCE' : activeTab);
+                return (
+                  <div key={group.key} className="sas-top-group">
+                    <button type="button" className={`sas-top-group-trigger ${active ? 'is-active' : ''}`}
+                      aria-expanded={topMenuOpen === group.key} aria-haspopup="menu"
+                      onClick={() => setTopMenuOpen(prev => prev === group.key ? null : group.key)}>
+                      <Icon className="h-4 w-4" /><span>{group.title}</span><ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                    {topMenuOpen === group.key && <div className="sas-top-dropdown" role="menu">
+                      {navItems.filter(item => group.ids.includes(item.id)).map(item =>
+                        <button type="button" role="menuitem" key={item.id} onMouseEnter={() => preloadRoute(item.id)} onFocus={() => preloadRoute(item.id)} onClick={() => navigate(item.id)}
+                          className={`sas-top-dropdown-item ${(testingGuidanceOpen ? item.id === ('TESTING_GUIDANCE' as ActiveWorkspaceTab) : activeTab === item.id) ? 'is-active' : ''}`}>
+                          {item.icon}<span>{item.label}</span>
+                          {!!item.badge && <span className="sas-top-badge">{item.badge}</span>}
+                        </button>
+                      )}
+                      {group.key === 'tools' && <button type="button" role="menuitem" className="sas-top-dropdown-item" onClick={() => openSpecialPage('BAY_MANAGER')}><PlusCircle className="h-4 w-4" />Bay Configuration Manager</button>}
+                      {group.key === 'tools' && currentRole === 'ADMIN' &&
+                        <button type="button" role="menuitem" className="sas-top-dropdown-item" onClick={() => navigate('ADMIN_DASHBOARD')}>
+                          <Shield className="h-4 w-4" />Admin Dashboard
+                        </button>}
+                    </div>}
+                  </div>
+                );
+              })}
+              <button type="button" className={`sas-top-group-trigger ${specialPage === 'ALARMS_EVENTS' ? 'is-active' : ''}`} onMouseEnter={() => preloadRoute('ALARMS_EVENTS')} onFocus={() => preloadRoute('ALARMS_EVENTS')} onClick={() => openSpecialPage('ALARMS_EVENTS')}><Bell className="h-4 w-4" /><span>Alarms / Events</span></button>
+              <button type="button" className={`sas-top-group-trigger ${specialPage === 'WIRESHARK' ? 'is-active' : ''}`} onMouseEnter={() => preloadRoute('WIRESHARK')} onFocus={() => preloadRoute('WIRESHARK')} onClick={() => openSpecialPage('WIRESHARK')}><Network className="h-4 w-4" /><span>Wireshark</span></button>
               <div className="sas-top-group">
                 <button
                   type="button"
@@ -765,35 +791,6 @@ export default function App() {
                   </div>
                 )}
               </div>
-              {topNavGroups.map(group => {
-                const Icon = group.icon;
-                const active = group.ids.includes(testingGuidanceOpen ? 'TESTING_GUIDANCE' : activeTab);
-                return (
-                  <div key={group.key} className="sas-top-group">
-                    <button type="button" className={`sas-top-group-trigger ${active ? 'is-active' : ''}`}
-                      aria-expanded={topMenuOpen === group.key} aria-haspopup="menu"
-                      onClick={() => setTopMenuOpen(prev => prev === group.key ? null : group.key)}>
-                      <Icon className="h-4 w-4" /><span>{group.title}</span><ChevronDown className="h-3.5 w-3.5" />
-                    </button>
-                    {topMenuOpen === group.key && <div className="sas-top-dropdown" role="menu">
-                      {navItems.filter(item => group.ids.includes(item.id)).map(item =>
-                        <button type="button" role="menuitem" key={item.id} onMouseEnter={() => preloadRoute(item.id)} onFocus={() => preloadRoute(item.id)} onClick={() => navigate(item.id)}
-                          className={`sas-top-dropdown-item ${(testingGuidanceOpen ? item.id === ('TESTING_GUIDANCE' as ActiveWorkspaceTab) : activeTab === item.id) ? 'is-active' : ''}`}>
-                          {item.icon}<span>{item.label}</span>
-                          {!!item.badge && <span className="sas-top-badge">{item.badge}</span>}
-                        </button>
-                      )}
-                      {group.key === 'tools' && <button type="button" role="menuitem" className="sas-top-dropdown-item" onClick={() => openSpecialPage('BAY_MANAGER')}><PlusCircle className="h-4 w-4" />Bay Configuration Manager</button>}
-                      {group.key === 'tools' && currentRole === 'ADMIN' &&
-                        <button type="button" role="menuitem" className="sas-top-dropdown-item" onClick={() => navigate('ADMIN_DASHBOARD')}>
-                          <Shield className="h-4 w-4" />Admin Dashboard
-                        </button>}
-                    </div>}
-                  </div>
-                );
-              })}
-              <button type="button" className={`sas-top-group-trigger ${specialPage === 'ALARMS_EVENTS' ? 'is-active' : ''}`} onMouseEnter={() => preloadRoute('ALARMS_EVENTS')} onFocus={() => preloadRoute('ALARMS_EVENTS')} onClick={() => openSpecialPage('ALARMS_EVENTS')}><Bell className="h-4 w-4" /><span>Alarms / Events</span></button>
-              <button type="button" className={`sas-top-group-trigger ${specialPage === 'WIRESHARK' ? 'is-active' : ''}`} onMouseEnter={() => preloadRoute('WIRESHARK')} onFocus={() => preloadRoute('WIRESHARK')} onClick={() => openSpecialPage('WIRESHARK')}><Network className="h-4 w-4" /><span>Wireshark</span></button>
             </div>
             <div className="sas-top-search">
               <input ref={navSearchRef} aria-label="Search navigation" placeholder="Search menu..."
@@ -1098,7 +1095,6 @@ export default function App() {
           {(deferredActiveTab === 'SIGNALS' || deferredActiveTab === 'IED_SIGNAL_CHAIN') && <SignalMappingSclPage />}
           {deferredActiveTab === 'FAULTS' && <FaultTroubleshootingPage />}
           {deferredActiveTab === 'FATSAT' && <FatSatLabPage />}
-          {deferredActiveTab === 'LEARNING' && <LearningAcademyPage />}
           {deferredActiveTab === 'ADMIN_DASHBOARD' && <AdminDashboardPage />}
           {deferredActiveTab === 'USER_PROFILE' && <UserProfilePage />}
           {['SLD', 'SCADA', 'IED', 'FATSAT', 'FAULTS'].includes(deferredActiveTab) && <StationFaultWorkbench key={deferredActiveTab} context={deferredActiveTab} />}
