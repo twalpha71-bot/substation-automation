@@ -1014,7 +1014,7 @@ export const SwitchgearCrp132kV: React.FC = () => {
   const visibleBays = focusedBayId ? crpBays.filter((b) => b.id === focusedBayId) : crpBays;
 
   return (
-    <div className="flex flex-col gap-3 p-2.5 sm:p-4 bg-[#111827] text-[#e2e8f0] rounded-lg border border-[#334155]">
+    <div className="sas-switchgear-room flex flex-col gap-3 p-2.5 sm:p-4 bg-[#111827] text-[#e2e8f0] rounded-lg border border-[#334155]">
       <style>{`@keyframes crpFastBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0.14; } } .crp-blink { animation: crpFastBlink 0.7s infinite; } @keyframes crpFlow { to { stroke-dashoffset: -24; } } .crp-flow { animation: crpFlow 0.9s linear infinite; }`}</style>
       {/* TOP CONTROL ROOM HEADER BAR */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#334155]">

@@ -1,0 +1,42 @@
+{
+  "id": "/",
+  "name": "SAS Engineering Hub",
+  "short_name": "SAS Hub",
+  "description": "Interactive 132/33/11 kV Substation Automation System (SAS), Switchgear, IEC 61850, and SCADA Simulator.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "fullscreen",
+    "minimal-ui"
+  ],
+  "orientation": "landscape",
+  "background_color": "#06182c",
+  "theme_color": "#0284c7",
+  "categories": [
+    "education",
+    "utilities",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

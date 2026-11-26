@@ -1045,13 +1045,13 @@ html{scroll-behavior:auto}.sas-app-shell{background:var(--sas-bg);color:var(--sa
     min-width: 0 !important;
     max-width: 100% !important;
   }
-  main:not(:has(.iedscout-app)) :not(.sas-compact-arch-inner) > svg[viewBox]:not(.lucide):not(.recharts-surface) {
+  main:not(:has(.iedscout-app)) :not(.sas-compact-arch-inner):not(.sas-switchgear-room):not(.sas-switchgear-room *) > svg[viewBox]:not(.lucide):not(.recharts-surface) {
     width: 100% !important;
     height: auto !important;
   }
 
   /* Remove fixed min-w-[...] on wide diagram wrappers (GooseLabPage 590px, NetworkTopologyPage 780px-960px, etc.) except inside CompactArchitectureFrame */
-  main:not(:has(.iedscout-app)) div[class*="min-w-["]:not(.sas-compact-arch-inner):not(.sas-compact-arch-inner *) {
+  main:not(:has(.iedscout-app)) div[class*="min-w-["]:not(.sas-compact-arch-inner):not(.sas-compact-arch-inner *):not(.sas-switchgear-room *):not(.overflow-x-auto > *) {
     min-width: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
@@ -1068,5 +1068,69 @@ html{scroll-behavior:auto}.sas-app-shell{background:var(--sas-bg);color:var(--sa
   main:not(:has(.iedscout-app)) .p-5,
   main:not(:has(.iedscout-app)) .p-6 {
     padding: 0.75rem !important;
+  }
+}
+
+
+/* === TABLET VIEWING & PWA STANDALONE APK OPTIMIZATION === */
+html, body {
+  -webkit-tap-highlight-color: transparent;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Smooth momentum touch scrolling for wide switchgear lineups, SLD & test tools */
+.overflow-x-auto,
+.sas-switchgear-room .overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(56, 189, 248, 0.55) rgba(15, 23, 42, 0.45);
+}
+
+/* Android Tablet Standalone APK safe-area & no accidental pull-to-refresh */
+@media (display-mode: standalone) {
+  html, body {
+    overscroll-behavior-y: none;
+  }
+  .sas-app-header {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+  .sas-workspace-main {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+  }
+}
+
+/* Dedicated Tablet Viewport Polish (768px - 1279px: Landscape & Portrait Android Tablets) */
+@media (min-width: 768px) and (max-width: 1279px) {
+  .sas-app-header .sas-header-single-row {
+    min-height: 62px;
+    padding-inline: 14px;
+  }
+  .sas-app-header .sas-top-navigation {
+    width: min(360px, calc(100vw - 24px));
+    max-height: min(76vh, 620px);
+    padding: 10px;
+  }
+  .sas-app-header .sas-top-group-trigger {
+    min-height: 40px;
+    padding: 9px 12px;
+    font-size: 13px;
+  }
+  .sas-app-header .sas-top-dropdown-item {
+    min-height: 38px;
+    padding: 8px 12px;
+    font-size: 12.5px;
+  }
+  .sas-workspace-main {
+    padding: 12px 14px !important;
+  }
+  /* Keep 132 kV CRP / 33 kV VCB / 11 kV VCB switchgear cabinets crisp and scrollable */
+  .sas-switchgear-room {
+    padding: 12px !important;
   }
 }

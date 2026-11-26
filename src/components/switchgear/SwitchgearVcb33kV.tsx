@@ -810,7 +810,7 @@ export const SwitchgearVcb33kV: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col gap-3 p-2.5 sm:p-4 bg-[#111827] text-[#e2e8f0] rounded-lg border border-[#334155]">
+    <div className="sas-switchgear-room flex flex-col gap-3 p-2.5 sm:p-4 bg-[#111827] text-[#e2e8f0] rounded-lg border border-[#334155]">
       <style>{`@keyframes vcbBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0.14; } } .vcb-blink { animation: vcbBlink 0.7s infinite; } @keyframes vcbFlow { to { stroke-dashoffset: -24; } } .vcb-flow { animation: vcbFlow 0.9s linear infinite; }`}</style>
 
       {/* TOP SWITCHGEAR ROOM HEADER */}

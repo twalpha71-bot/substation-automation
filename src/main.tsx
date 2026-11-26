@@ -24,3 +24,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 );
 
 startOnlineTranslation();
+
+// Register PWA Service Worker for Android Tablet APK (PWABuilder)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      /* Service worker registration is optional in local dev */
+    });
+  });
+}
